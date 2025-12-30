@@ -46,3 +46,24 @@ LightRAG is an advanced Retrieval-Augmented Generation (RAG) framework designed 
 - Honor existing local modifications; never revert or discard user changes (especially via `git reset --hard`) unless explicitly asked.
 - Follow the planning tool guidance: skip it for trivial fixes, but provide multi-step plans for non-trivial work and keep the plan updated as steps progress.
 - Validate changes by running the relevant `ruff`/`pytest`/`bun test` commands whenever feasible, and describe any unrun checks with follow-up guidance.
+
+## Customization Project (lbucess-rage Fork)
+
+This fork is being customized for enterprise deployment. Key customization areas:
+
+### Git Repository Structure
+- **upstream**: `https://github.com/HKUDS/LightRAG.git` (original project)
+- **origin**: `https://github.com/lbucess-rage/LightRAG.git` (customization fork)
+- **Branches**: `main` (tracks upstream), `custom/main` (customization work)
+
+### Customization Phases
+1. **Phase 1: Prompt Configuration UI** - Make hardcoded prompts in `lightrag/prompt.py` configurable via Admin UI
+2. **Phase 2: S3 Integration** - Optional S3 document storage with presigned URL references
+3. **Phase 3: LLM Settings UI** - Per-tenant LLM/Embedding configuration (optional)
+
+### Claude Code Commands
+- `/git-sync` - Manage git synchronization between upstream and fork
+- `/custom-dev` - Guide customization development work
+
+### Customization Plan
+Detailed plan available at: `.claude/plans/zippy-baking-cray.md`

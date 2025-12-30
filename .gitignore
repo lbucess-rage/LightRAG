@@ -72,5 +72,7 @@ download_models_hf.py
 
 # Cline files
 memory-bank
-.claude/CLAUDE.md
-.claude/
+
+# Claude Code (keep commands for team sharing)
+.claude/*
+!.claude/commands/
