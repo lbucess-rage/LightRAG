@@ -76,3 +76,4 @@ memory-bank
 # Claude Code (keep commands for team sharing)
 .claude/*
 !.claude/commands/
+infra/docker/.env
