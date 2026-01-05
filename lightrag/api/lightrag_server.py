@@ -35,6 +35,7 @@ from .config import (
 )
 from lightrag.utils import get_env_value
 from lightrag import LightRAG, __version__ as core_version
+from lightrag.prompt import load_custom_prompts_from_db
 from lightrag.api import __api_version__
 from lightrag.types import GPTKeywordExtractionFormat
 from lightrag.utils import EmbeddingFunc
@@ -51,6 +52,7 @@ from lightrag.api.routers.document_routes import (
 )
 from lightrag.api.routers.query_routes import create_query_routes
 from lightrag.api.routers.graph_routes import create_graph_routes
+from lightrag.api.routers.prompt_routes import create_prompt_routes
 from lightrag.api.routers.ollama_api import OllamaAPI
 
 from lightrag.utils import logger, set_verbose_debug
@@ -356,6 +358,9 @@ def create_app(args):
             # Initialize database connections
             # Note: initialize_storages() now auto-initializes pipeline_status for rag.workspace
             await rag.initialize_storages()
+
+            # Load custom prompts from database (if any)
+            await load_custom_prompts_from_db(rag)
 
             # Data migration regardless of storage implementation
             await rag.check_and_migrate_data()
@@ -1091,6 +1096,7 @@ def create_app(args):
     )
     app.include_router(create_query_routes(rag, api_key, args.top_k))
     app.include_router(create_graph_routes(rag, api_key))
+    app.include_router(create_prompt_routes(rag, api_key))
 
     # Add Ollama API routes
     ollama_api = OllamaAPI(rag, top_k=args.top_k, api_key=api_key)

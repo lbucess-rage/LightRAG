@@ -815,3 +815,99 @@ export const getDocumentStatusCounts = async (): Promise<StatusCountsResponse> =
   const response = await axiosInstance.get('/documents/status_counts')
   return response.data
 }
+
+// Prompt Types
+export type PromptType = 'text' | 'json'
+
+export type PromptResponse = {
+  prompt_key: string
+  prompt_value: string | string[]
+  prompt_type: PromptType
+  description: string | null
+  is_active: boolean
+  is_default: boolean
+}
+
+export type PromptsListResponse = {
+  status: 'success'
+  data: {
+    prompts: PromptResponse[]
+    total: number
+  }
+}
+
+export type SinglePromptResponse = {
+  status: 'success'
+  data: PromptResponse
+}
+
+export type PromptUpdateRequest = {
+  prompt_value: string | string[]
+  prompt_type: PromptType
+  description?: string
+}
+
+export type PromptUpdateResponse = {
+  status: 'success'
+  message: string
+  data: PromptResponse
+}
+
+export type PromptResetResponse = {
+  status: 'success'
+  message: string
+  data?: PromptResponse
+}
+
+// Prompt API methods
+/**
+ * Get all prompts with their current values
+ * @returns Promise with all prompts list
+ */
+export const getAllPrompts = async (): Promise<PromptsListResponse> => {
+  const response = await axiosInstance.get('/prompts')
+  return response.data
+}
+
+/**
+ * Get a specific prompt by key
+ * @param promptKey The prompt key to fetch
+ * @returns Promise with the prompt data
+ */
+export const getPrompt = async (promptKey: string): Promise<SinglePromptResponse> => {
+  const response = await axiosInstance.get(`/prompts/${encodeURIComponent(promptKey)}`)
+  return response.data
+}
+
+/**
+ * Update a specific prompt
+ * @param promptKey The prompt key to update
+ * @param request The update request data
+ * @returns Promise with the updated prompt
+ */
+export const updatePrompt = async (
+  promptKey: string,
+  request: PromptUpdateRequest
+): Promise<PromptUpdateResponse> => {
+  const response = await axiosInstance.put(`/prompts/${encodeURIComponent(promptKey)}`, request)
+  return response.data
+}
+
+/**
+ * Reset a prompt to its default value
+ * @param promptKey The prompt key to reset
+ * @returns Promise with the reset result
+ */
+export const resetPrompt = async (promptKey: string): Promise<PromptResetResponse> => {
+  const response = await axiosInstance.delete(`/prompts/${encodeURIComponent(promptKey)}`)
+  return response.data
+}
+
+/**
+ * Reset all prompts to their default values
+ * @returns Promise with the reset result
+ */
+export const resetAllPrompts = async (): Promise<PromptResetResponse> => {
+  const response = await axiosInstance.post('/prompts/reset-all')
+  return response.data
+}

@@ -2,6 +2,7 @@ import i18n from 'i18next'
 import { initReactI18next } from 'react-i18next'
 import { useSettingsStore } from '@/stores/settings'
 
+import ko from './locales/ko.json'
 import en from './locales/en.json'
 import zh from './locales/zh.json'
 import fr from './locales/fr.json'
@@ -13,18 +14,19 @@ const getStoredLanguage = () => {
     const settingsString = localStorage.getItem('settings-storage')
     if (settingsString) {
       const settings = JSON.parse(settingsString)
-      return settings.state?.language || 'en'
+      return settings.state?.language || 'ko'
     }
   } catch (e) {
     console.error('Failed to get stored language:', e)
   }
-  return 'en'
+  return 'ko'
 }
 
 i18n
   .use(initReactI18next)
   .init({
     resources: {
+      ko: { translation: ko },
       en: { translation: en },
       zh: { translation: zh },
       fr: { translation: fr },
@@ -32,7 +34,7 @@ i18n
       zh_TW: { translation: zh_TW }
     },
     lng: getStoredLanguage(), // Use stored language settings
-    fallbackLng: 'en',
+    fallbackLng: 'ko',
     interpolation: {
       escapeValue: false
     },

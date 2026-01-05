@@ -4906,6 +4906,19 @@ TABLES = {
                     CONSTRAINT LIGHTRAG_RELATION_CHUNKS_PK PRIMARY KEY (workspace, id)
                     )"""
     },
+    "LIGHTRAG_PROMPTS": {
+        "ddl": """CREATE TABLE LIGHTRAG_PROMPTS (
+                    workspace VARCHAR(255) NOT NULL,
+                    prompt_key VARCHAR(100) NOT NULL,
+                    prompt_value TEXT NOT NULL,
+                    prompt_type VARCHAR(20) DEFAULT 'text',
+                    description TEXT,
+                    is_active BOOLEAN DEFAULT TRUE,
+                    create_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
+                    update_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT LIGHTRAG_PROMPTS_PK PRIMARY KEY (workspace, prompt_key)
+                    )"""
+    },
 }
 
 
@@ -5117,4 +5130,25 @@ SQL_TEMPLATES = {
     "drop_specifiy_table_workspace": """
         DELETE FROM {table_name} WHERE workspace=$1
        """,
+    # SQL for Prompts
+    "get_all_prompts": """SELECT prompt_key, prompt_value, prompt_type, description, is_active,
+                          EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
+                          EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
+                          FROM LIGHTRAG_PROMPTS WHERE workspace=$1 AND is_active=TRUE
+                         """,
+    "get_prompt_by_key": """SELECT prompt_key, prompt_value, prompt_type, description, is_active,
+                            EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
+                            EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
+                            FROM LIGHTRAG_PROMPTS WHERE workspace=$1 AND prompt_key=$2
+                           """,
+    "upsert_prompt": """INSERT INTO LIGHTRAG_PROMPTS (workspace, prompt_key, prompt_value, prompt_type, description, is_active)
+                        VALUES ($1, $2, $3, $4, $5, $6)
+                        ON CONFLICT (workspace, prompt_key) DO UPDATE
+                        SET prompt_value = EXCLUDED.prompt_value,
+                        prompt_type = EXCLUDED.prompt_type,
+                        description = EXCLUDED.description,
+                        is_active = EXCLUDED.is_active,
+                        update_time = CURRENT_TIMESTAMP
+                       """,
+    "delete_prompt": """DELETE FROM LIGHTRAG_PROMPTS WHERE workspace=$1 AND prompt_key=$2""",
 }

@@ -22,7 +22,7 @@ def configure_logging():
     log_dir = os.getenv("LOG_DIR", os.getcwd())
     log_file_path = os.path.abspath(os.path.join(log_dir, "lightrag_demo.log"))
 
-    print(f"\nLightRAG demo log file: {log_file_path}\n")
+    print(f"\nLightRAG LBUCESSlog file: {log_file_path}\n")
     os.makedirs(os.path.dirname(log_dir), exist_ok=True)
 
     # Get log file max size and backup count from environment variables

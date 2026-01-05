@@ -419,3 +419,92 @@ Output:
 
 """,
 ]
+
+
+# List of editable prompt keys (for validation)
+EDITABLE_PROMPT_KEYS = [
+    "entity_extraction_system_prompt",
+    "entity_extraction_user_prompt",
+    "entity_continue_extraction_user_prompt",
+    "entity_extraction_examples",
+    "summarize_entity_descriptions",
+    "fail_response",
+    "rag_response",
+    "naive_rag_response",
+    "kg_query_context",
+    "naive_query_context",
+    "keywords_extraction",
+    "keywords_extraction_examples",
+]
+
+
+async def load_custom_prompts_from_db(rag) -> int:
+    """
+    Load custom prompts from database and update the PROMPTS dictionary.
+
+    This function queries the LIGHTRAG_PROMPTS table for custom prompts
+    and updates the global PROMPTS dictionary with any custom values found.
+
+    Args:
+        rag: The LightRAG instance with initialized storage connections
+
+    Returns:
+        int: Number of custom prompts loaded
+    """
+    import json
+    from lightrag.utils import logger
+
+    loaded_count = 0
+
+    try:
+        # Get database connection from rag's storage
+        db = None
+        if hasattr(rag, 'llm_response_cache') and hasattr(rag.llm_response_cache, 'db'):
+            db = rag.llm_response_cache.db
+        elif hasattr(rag, 'text_chunks') and hasattr(rag.text_chunks, 'db'):
+            db = rag.text_chunks.db
+
+        if db is None or db.pool is None:
+            logger.debug("Database not available for loading custom prompts")
+            return 0
+
+        # Get workspace
+        workspace = "base"
+        if hasattr(rag, 'llm_response_cache') and hasattr(rag.llm_response_cache, 'workspace'):
+            workspace = rag.llm_response_cache.workspace or "base"
+
+        # Query custom prompts
+        sql = """SELECT prompt_key, prompt_value, prompt_type
+                 FROM LIGHTRAG_PROMPTS
+                 WHERE workspace=$1 AND is_active=TRUE"""
+
+        rows = await db.query(sql, [workspace], multirows=True)
+
+        if rows:
+            for row in rows:
+                prompt_key = row['prompt_key']
+                prompt_value = row['prompt_value']
+                prompt_type = row['prompt_type']
+
+                # Only update editable prompts
+                if prompt_key in EDITABLE_PROMPT_KEYS:
+                    # Parse JSON if needed
+                    if prompt_type == 'json':
+                        try:
+                            prompt_value = json.loads(prompt_value)
+                        except json.JSONDecodeError:
+                            logger.warning(f"Failed to parse JSON for prompt '{prompt_key}'")
+                            continue
+
+                    # Update PROMPTS dictionary
+                    PROMPTS[prompt_key] = prompt_value
+                    loaded_count += 1
+                    logger.debug(f"Loaded custom prompt: {prompt_key}")
+
+        if loaded_count > 0:
+            logger.info(f"Loaded {loaded_count} custom prompt(s) from database for workspace '{workspace}'")
+
+    except Exception as e:
+        logger.warning(f"Failed to load custom prompts from database: {e}")
+
+    return loaded_count
