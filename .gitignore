@@ -73,7 +73,10 @@ download_models_hf.py
 # Cline files
 memory-bank
 
-# Claude Code (keep commands for team sharing)
-.claude/*
-!.claude/commands/
+# Claude Code (keep for team sharing)
+# .claude 디렉토리 및 CLAUDE.md 파일 공유
+!CLAUDE.md
+!**/CLAUDE.md
+!.claude/
+
 infra/docker/.env

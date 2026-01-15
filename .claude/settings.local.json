@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:github.com)",
+      "Bash(uv --version:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(ollama --version:*)",
+      "Bash(bun:*)",
+      "Bash(npm --version:*)",
+      "Bash(curl:*)",
+      "Bash(sh)",
+      "Bash(git add:*)",
+      "Bash(examples/lightrag_openai_demo.py )",
+      "Bash(lightrag/api/lightrag_server.py )",
+      "Bash(lightrag/api/routers/__init__.py )",
+      "Bash(lightrag/api/routers/prompt_routes.py )",
+      "Bash(lightrag/kg/postgres_impl.py )",
+      "Bash(lightrag/prompt.py )",
+      "Bash(lightrag_webui/src/App.tsx )",
+      "Bash(lightrag_webui/src/api/lightrag.ts )",
+      "Bash(lightrag_webui/src/components/AppSettings.tsx )",
+      "Bash(lightrag_webui/src/features/SiteHeader.tsx )",
+      "Bash(lightrag_webui/src/features/PromptSettings.tsx )",
+      "Bash(lightrag_webui/src/i18n.ts )",
+      "Bash(lightrag_webui/src/locales/en.json )",
+      "Bash(lightrag_webui/src/locales/ko.json )",
+      "Bash(lightrag_webui/src/stores/settings.ts)",
+      "Bash(git commit:*)",
+      "Bash(PGPASSWORD=lightrag_secure_2024 psql:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

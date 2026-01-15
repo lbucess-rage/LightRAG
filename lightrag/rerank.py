@@ -472,6 +472,180 @@ async def jina_rerank(
     )
 
 
+async def _tei_rerank_batch(
+    query: str,
+    documents: List[str],
+    base_url: str,
+    headers: Dict[str, str],
+    batch_offset: int = 0,
+) -> List[Dict[str, Any]]:
+    """
+    Internal function to rerank a single batch of documents.
+
+    Args:
+        query: The search query
+        documents: List of document strings (should be <= max_batch_size)
+        base_url: API endpoint URL
+        headers: Request headers
+        batch_offset: Index offset for this batch in the original document list
+
+    Returns:
+        List of results with adjusted indices
+    """
+    payload = {
+        "query": query,
+        "texts": documents,
+    }
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(base_url, headers=headers, json=payload) as response:
+            if response.status != 200:
+                error_text = await response.text()
+                logger.error(f"TEI Rerank API error {response.status}: {error_text}")
+                raise aiohttp.ClientResponseError(
+                    request_info=response.request_info,
+                    history=response.history,
+                    status=response.status,
+                    message=f"TEI Rerank API error: {error_text}",
+                )
+
+            response_json = await response.json()
+
+            # TEI format returns array directly: [{"index": int, "score": float}]
+            if isinstance(response_json, list):
+                results = response_json
+            else:
+                results = response_json.get("results", response_json)
+
+            # Adjust indices to account for batch offset
+            adjusted_results = [
+                {
+                    "index": result["index"] + batch_offset,
+                    "relevance_score": result.get("score", result.get("relevance_score", 0.0))
+                }
+                for result in results
+            ]
+
+            return adjusted_results
+
+
+async def tei_rerank(
+    query: str,
+    documents: List[str],
+    top_n: Optional[int] = None,
+    api_key: Optional[str] = None,
+    model: str = "bge-reranker-v2-m3",
+    base_url: str = "http://localhost:8080/rerank",
+    extra_body: Optional[Dict[str, Any]] = None,
+    enable_chunking: bool = False,
+    max_tokens_per_doc: int = 480,
+    max_batch_size: int = 64,
+) -> List[Dict[str, Any]]:
+    """
+    Rerank documents using TEI (Text Embeddings Inference) compatible API.
+
+    This supports Hugging Face TEI server and similar servers that use
+    the format: {"query": str, "texts": [str]} -> [{"index": int, "score": float}]
+
+    Automatically handles batching for large document lists that exceed
+    the server's maximum batch size.
+
+    Args:
+        query: The search query
+        documents: List of strings to rerank
+        top_n: Number of top results to return
+        api_key: API key for authentication (optional)
+        model: Model name (for logging purposes)
+        base_url: API endpoint URL
+        extra_body: Additional body parameters
+        enable_chunking: Whether to chunk documents exceeding token limit
+        max_tokens_per_doc: Maximum tokens per document for chunking
+        max_batch_size: Maximum documents per API call (default: 64 for TEI)
+
+    Returns:
+        List of dictionary of ["index": int, "relevance_score": float]
+    """
+    if not base_url:
+        raise ValueError("Base URL is required")
+
+    headers = {"Content-Type": "application/json"}
+    if api_key is not None and api_key != "EMPTY":
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    # Handle document chunking if enabled
+    original_documents = documents
+    doc_indices = None
+
+    if enable_chunking:
+        documents, doc_indices = chunk_documents_for_rerank(
+            documents, max_tokens=max_tokens_per_doc
+        )
+        logger.debug(
+            f"Chunked {len(original_documents)} documents into {len(documents)} chunks"
+        )
+
+    logger.debug(
+        f"TEI Rerank request: {len(documents)} documents, model: {model}, batch_size: {max_batch_size}"
+    )
+
+    # Split documents into batches if needed
+    all_results = []
+    num_batches = (len(documents) + max_batch_size - 1) // max_batch_size
+
+    for batch_idx in range(num_batches):
+        start_idx = batch_idx * max_batch_size
+        end_idx = min(start_idx + max_batch_size, len(documents))
+        batch_docs = documents[start_idx:end_idx]
+
+        logger.debug(
+            f"Processing batch {batch_idx + 1}/{num_batches}: documents {start_idx}-{end_idx - 1}"
+        )
+
+        # Retry logic for each batch
+        max_retries = 3
+        for retry in range(max_retries):
+            try:
+                batch_results = await _tei_rerank_batch(
+                    query=query,
+                    documents=batch_docs,
+                    base_url=base_url,
+                    headers=headers,
+                    batch_offset=start_idx,
+                )
+                all_results.extend(batch_results)
+                break
+            except aiohttp.ClientResponseError as e:
+                if retry < max_retries - 1:
+                    import asyncio
+                    wait_time = 4 * (2 ** retry)  # Exponential backoff
+                    logger.warning(f"Batch {batch_idx + 1} failed, retrying in {wait_time}s: {e}")
+                    await asyncio.sleep(wait_time)
+                else:
+                    raise
+
+    if not all_results:
+        logger.warning("TEI Rerank API returned empty results")
+        return []
+
+    # Sort by score descending
+    all_results.sort(key=lambda x: x["relevance_score"], reverse=True)
+
+    # Aggregate chunk scores back to original documents if chunking was enabled
+    if enable_chunking and doc_indices:
+        all_results = aggregate_chunk_scores(
+            all_results,
+            doc_indices,
+            len(original_documents),
+            aggregation="max",
+        )
+
+    # Apply top_n limit
+    if top_n is not None and len(all_results) > top_n:
+        all_results = all_results[:top_n]
+
+    return all_results
+
+
 async def ali_rerank(
     query: str,
     documents: List[str],
