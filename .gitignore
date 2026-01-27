@@ -80,3 +80,4 @@ memory-bank
 !.claude/
 
 infra/docker/.env
+infra/docker/docker-compose.dev.yml
