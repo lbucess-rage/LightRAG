@@ -73,6 +73,7 @@
       "deleteFileOption": "Also delete uploaded files",
       "deleteFileTooltip": "Check this option to also delete the corresponding uploaded files on the server",
       "deleteLLMCacheOption": "Also delete extracted LLM cache",
+      "deleteS3FileOption": "Also delete files from S3 storage",
       "success": "Document deletion pipeline started successfully",
       "failed": "Delete Documents Failed:\n{{message}}",
       "error": "Delete Documents Failed:\n{{error}}",

@@ -45,6 +45,7 @@ export default function DeleteDocumentsDialog({ selectedDocIds, onDocumentsDelet
   const [deleteFile, setDeleteFile] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteLLMCache, setDeleteLLMCache] = useState(false)
+  const [deleteS3File, setDeleteS3File] = useState(false)
   const isConfirmEnabled = confirmText.toLowerCase() === 'yes' && !isDeleting
 
   // Reset state when dialog closes
@@ -53,6 +54,7 @@ export default function DeleteDocumentsDialog({ selectedDocIds, onDocumentsDelet
       setConfirmText('')
       setDeleteFile(false)
       setDeleteLLMCache(false)
+      setDeleteS3File(false)
       setIsDeleting(false)
     }
   }, [open])
@@ -62,7 +64,7 @@ export default function DeleteDocumentsDialog({ selectedDocIds, onDocumentsDelet
 
     setIsDeleting(true)
     try {
-      const result = await deleteDocuments(selectedDocIds, deleteFile, deleteLLMCache)
+      const result = await deleteDocuments(selectedDocIds, deleteFile, deleteLLMCache, deleteS3File)
 
       if (result.status === 'deletion_started') {
         toast.success(t('documentPanel.deleteDocuments.success', { count: selectedDocIds.length }))
@@ -96,7 +98,7 @@ export default function DeleteDocumentsDialog({ selectedDocIds, onDocumentsDelet
     } finally {
       setIsDeleting(false)
     }
-  }, [isConfirmEnabled, selectedDocIds, deleteFile, deleteLLMCache, setOpen, t, onDocumentsDeleted])
+  }, [isConfirmEnabled, selectedDocIds, deleteFile, deleteLLMCache, deleteS3File, setOpen, t, onDocumentsDeleted])
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -169,6 +171,20 @@ export default function DeleteDocumentsDialog({ selectedDocIds, onDocumentsDelet
             />
             <Label htmlFor="delete-llm-cache" className="text-sm font-medium cursor-pointer">
               {t('documentPanel.deleteDocuments.deleteLLMCacheOption')}
+            </Label>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <input
+              type="checkbox"
+              id="delete-s3-file"
+              checked={deleteS3File}
+              onChange={(e) => setDeleteS3File(e.target.checked)}
+              disabled={isDeleting}
+              className="h-4 w-4 text-red-600 focus:ring-red-500 border-gray-300 rounded"
+            />
+            <Label htmlFor="delete-s3-file" className="text-sm font-medium cursor-pointer">
+              {t('documentPanel.deleteDocuments.deleteS3FileOption')}
             </Label>
           </div>
         </div>

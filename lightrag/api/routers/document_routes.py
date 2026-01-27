@@ -2129,7 +2129,7 @@ async def background_delete_documents(
                             s3_client = get_s3_client()
                             if s3_client.is_enabled():
                                 s3_deleted = await s3_client.delete_file(
-                                    result.file_path, rag.workspace
+                                    result.file_path, rag.workspace, doc_id
                                 )
                                 if s3_deleted:
                                     s3_delete_msg = f"Successfully deleted S3 file: {result.file_path}"
