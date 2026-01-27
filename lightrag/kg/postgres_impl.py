@@ -966,6 +966,37 @@ class PostgreSQLDB:
                 f"Failed to add metadata/error_msg columns to LIGHTRAG_DOC_STATUS: {e}"
             )
 
+    async def _migrate_doc_status_add_s3_url(self):
+        """Add s3_url column to LIGHTRAG_DOC_STATUS table if it doesn't exist"""
+        try:
+            check_s3_url_sql = """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'lightrag_doc_status'
+            AND column_name = 's3_url'
+            """
+
+            s3_url_info = await self.query(check_s3_url_sql)
+            if not s3_url_info:
+                logger.info("Adding s3_url column to LIGHTRAG_DOC_STATUS table")
+                add_s3_url_sql = """
+                ALTER TABLE LIGHTRAG_DOC_STATUS
+                ADD COLUMN s3_url TEXT NULL
+                """
+                await self.execute(add_s3_url_sql)
+                logger.info(
+                    "Successfully added s3_url column to LIGHTRAG_DOC_STATUS table"
+                )
+            else:
+                logger.info(
+                    "s3_url column already exists in LIGHTRAG_DOC_STATUS table"
+                )
+
+        except Exception as e:
+            logger.warning(
+                f"Failed to add s3_url column to LIGHTRAG_DOC_STATUS: {e}"
+            )
+
     async def _migrate_field_lengths(self):
         """Migrate database field lengths: entity_name, source_id, target_id, and file_path"""
         # Define the field changes needed
@@ -1243,6 +1274,14 @@ class PostgreSQLDB:
         except Exception as e:
             logger.error(
                 f"PostgreSQL, Failed to migrate doc status metadata/error_msg fields: {e}"
+            )
+
+        # Migrate doc status to add s3_url field if needed
+        try:
+            await self._migrate_doc_status_add_s3_url()
+        except Exception as e:
+            logger.error(
+                f"PostgreSQL, Failed to migrate doc status s3_url field: {e}"
             )
 
         # Create pagination optimization indexes for LIGHTRAG_DOC_STATUS
@@ -2661,6 +2700,7 @@ class PGDocStatusStorage(DocStatusStorage):
                 metadata=metadata,
                 error_msg=result[0].get("error_msg"),
                 track_id=result[0].get("track_id"),
+                s3_url=result[0].get("s3_url"),
             )
 
     async def get_by_ids(self, ids: list[str]) -> list[dict[str, Any]]:
@@ -2767,6 +2807,7 @@ class PGDocStatusStorage(DocStatusStorage):
                 metadata=metadata,
                 error_msg=result[0].get("error_msg"),
                 track_id=result[0].get("track_id"),
+                s3_url=result[0].get("s3_url"),
             )
 
     async def get_status_counts(self) -> dict[str, int]:
@@ -2832,6 +2873,7 @@ class PGDocStatusStorage(DocStatusStorage):
                 metadata=metadata,
                 error_msg=element.get("error_msg"),
                 track_id=element.get("track_id"),
+                s3_url=element.get("s3_url"),
             )
 
         return docs_by_status
@@ -2886,6 +2928,7 @@ class PGDocStatusStorage(DocStatusStorage):
                 track_id=element.get("track_id"),
                 metadata=metadata,
                 error_msg=element.get("error_msg"),
+                s3_url=element.get("s3_url"),
             )
 
         return docs_by_track_id
@@ -3001,6 +3044,7 @@ class PGDocStatusStorage(DocStatusStorage):
                 track_id=element.get("track_id"),
                 metadata=metadata,
                 error_msg=element.get("error_msg"),
+                s3_url=element.get("s3_url"),
             )
             documents.append((doc_id, doc_status))
 
@@ -3126,10 +3170,11 @@ class PGDocStatusStorage(DocStatusStorage):
                 )
                 return None
 
-        # Modified SQL to include created_at, updated_at, chunks_list, track_id, metadata, and error_msg in both INSERT and UPDATE operations
+        # Modified SQL to include created_at, updated_at, chunks_list, track_id, metadata, error_msg, and s3_url in both INSERT and UPDATE operations
         # All fields are updated from the input data in both INSERT and UPDATE cases
-        sql = """insert into LIGHTRAG_DOC_STATUS(workspace,id,content_summary,content_length,chunks_count,status,file_path,chunks_list,track_id,metadata,error_msg,created_at,updated_at)
-                 values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+        # Note: s3_url uses COALESCE to preserve existing value if new value is NULL (prevents race condition)
+        sql = """insert into LIGHTRAG_DOC_STATUS(workspace,id,content_summary,content_length,chunks_count,status,file_path,chunks_list,track_id,metadata,error_msg,s3_url,created_at,updated_at)
+                 values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
                   on conflict(id,workspace) do update set
                   content_summary = EXCLUDED.content_summary,
                   content_length = EXCLUDED.content_length,
@@ -3140,6 +3185,7 @@ class PGDocStatusStorage(DocStatusStorage):
                   track_id = EXCLUDED.track_id,
                   metadata = EXCLUDED.metadata,
                   error_msg = EXCLUDED.error_msg,
+                  s3_url = COALESCE(LIGHTRAG_DOC_STATUS.s3_url, EXCLUDED.s3_url),
                   created_at = EXCLUDED.created_at,
                   updated_at = EXCLUDED.updated_at"""
         for k, v in data.items():
@@ -3147,7 +3193,7 @@ class PGDocStatusStorage(DocStatusStorage):
             created_at = parse_datetime(v.get("created_at"))
             updated_at = parse_datetime(v.get("updated_at"))
 
-            # chunks_count, chunks_list, track_id, metadata, and error_msg are optional
+            # chunks_count, chunks_list, track_id, metadata, error_msg, and s3_url are optional
             await self.db.execute(
                 sql,
                 {
@@ -3164,10 +3210,44 @@ class PGDocStatusStorage(DocStatusStorage):
                         v.get("metadata", {})
                     ),  # Add metadata support
                     "error_msg": v.get("error_msg"),  # Add error_msg support
+                    "s3_url": v.get("s3_url"),  # Add s3_url support
                     "created_at": created_at,  # Use the converted datetime object
                     "updated_at": updated_at,  # Use the converted datetime object
                 },
             )
+
+    async def update_s3_url(self, doc_id: str, s3_url: str) -> bool:
+        """Update only the s3_url field for a document (atomic operation to avoid race conditions)
+
+        Args:
+            doc_id: The document ID
+            s3_url: The S3 URL to set
+
+        Returns:
+            True if updated successfully, False otherwise
+        """
+        try:
+            sql = """UPDATE LIGHTRAG_DOC_STATUS
+                     SET s3_url = $1, updated_at = $2
+                     WHERE id = $3 AND workspace = $4"""
+            await self.db.execute(
+                sql,
+                {
+                    "s3_url": s3_url,
+                    "updated_at": datetime.datetime.now(timezone.utc).replace(
+                        tzinfo=None
+                    ),
+                    "id": doc_id,
+                    "workspace": self.workspace,
+                },
+            )
+            logger.debug(f"[{self.workspace}] Updated s3_url for document {doc_id}")
+            return True
+        except Exception as e:
+            logger.error(
+                f"[{self.workspace}] Error updating s3_url for document {doc_id}: {e}"
+            )
+            return False
 
     async def drop(self) -> dict[str, str]:
         """Drop the storage"""
@@ -4857,6 +4937,7 @@ TABLES = {
 	               track_id varchar(255) NULL,
 	               metadata JSONB NULL DEFAULT '{}'::jsonb,
 	               error_msg TEXT NULL,
+	               s3_url TEXT NULL,
 	               created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 	               updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 	               CONSTRAINT LIGHTRAG_DOC_STATUS_PK PRIMARY KEY (workspace, id)
@@ -5119,6 +5200,7 @@ SQL_TEMPLATES = {
               SELECT c.id,
                      c.content,
                      c.file_path,
+                     c.full_doc_id,
                      EXTRACT(EPOCH FROM c.create_time)::BIGINT AS created_at
               FROM LIGHTRAG_VDB_CHUNKS c
               WHERE c.workspace = $1

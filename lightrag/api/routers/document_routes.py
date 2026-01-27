@@ -30,6 +30,7 @@ from lightrag.utils import (
     sanitize_text_for_encoding,
 )
 from lightrag.api.utils_api import get_combined_auth_dependency
+from lightrag.api.utils_s3 import get_s3_client
 from ..config import global_args
 
 
@@ -386,6 +387,10 @@ class DeleteDocRequest(BaseModel):
         default=False,
         description="Whether to delete cached LLM extraction results for the documents.",
     )
+    delete_s3_file: bool = Field(
+        default=False,
+        description="Whether to delete the corresponding file from S3 storage.",
+    )
 
     @field_validator("doc_ids", mode="after")
     @classmethod
@@ -449,6 +454,9 @@ class DocStatusResponse(BaseModel):
         default=None, description="Additional metadata about the document"
     )
     file_path: str = Field(description="Path to the document file")
+    s3_url: Optional[str] = Field(
+        default=None, description="S3 download URL for the document file"
+    )
 
     class Config:
         json_schema_extra = {
@@ -1191,7 +1199,7 @@ def _extract_xlsx(file_bytes: bytes) -> str:
 
 async def pipeline_enqueue_file(
     rag: LightRAG, file_path: Path, track_id: str = None
-) -> tuple[bool, str]:
+) -> tuple[bool, str, str]:
     """Add a file to the queue for processing
 
     Args:
@@ -1199,7 +1207,7 @@ async def pipeline_enqueue_file(
         file_path: Path to the saved file
         track_id: Optional tracking ID, if not provided will be generated
     Returns:
-        tuple: (success: bool, track_id: str)
+        tuple: (success: bool, track_id: str, doc_id: str)
     """
 
     # Generate track_id if not provided
@@ -1234,7 +1242,7 @@ async def pipeline_enqueue_file(
             logger.error(
                 f"[File Extraction]Permission denied reading file: {file_path.name}"
             )
-            return False, track_id
+            return False, track_id, ""
         except FileNotFoundError as e:
             error_files = [
                 {
@@ -1246,7 +1254,7 @@ async def pipeline_enqueue_file(
             ]
             await rag.apipeline_enqueue_error_documents(error_files, track_id)
             logger.error(f"[File Extraction]File not found: {file_path.name}")
-            return False, track_id
+            return False, track_id, ""
         except Exception as e:
             error_files = [
                 {
@@ -1260,7 +1268,7 @@ async def pipeline_enqueue_file(
             logger.error(
                 f"[File Extraction]Error reading file {file_path.name}: {str(e)}"
             )
-            return False, track_id
+            return False, track_id, ""
 
         # Process based on file type
         try:
@@ -1320,7 +1328,7 @@ async def pipeline_enqueue_file(
                             logger.error(
                                 f"[File Extraction]Empty content in file: {file_path.name}"
                             )
-                            return False, track_id
+                            return False, track_id, ""
 
                         # Check if content looks like binary data string representation
                         if content.startswith("b'") or content.startswith('b"'):
@@ -1338,7 +1346,7 @@ async def pipeline_enqueue_file(
                             logger.error(
                                 f"[File Extraction]File {file_path.name} appears to contain binary data representation instead of text"
                             )
-                            return False, track_id
+                            return False, track_id, ""
 
                     except UnicodeDecodeError as e:
                         error_files = [
@@ -1355,7 +1363,7 @@ async def pipeline_enqueue_file(
                         logger.error(
                             f"[File Extraction]File {file_path.name} is not valid UTF-8 encoded text. Please convert it to UTF-8 before processing."
                         )
-                        return False, track_id
+                        return False, track_id, ""
 
                 case ".pdf":
                     try:
@@ -1396,7 +1404,7 @@ async def pipeline_enqueue_file(
                         logger.error(
                             f"[File Extraction]Error processing PDF {file_path.name}: {str(e)}"
                         )
-                        return False, track_id
+                        return False, track_id, ""
 
                 case ".docx":
                     try:
@@ -1433,7 +1441,7 @@ async def pipeline_enqueue_file(
                         logger.error(
                             f"[File Extraction]Error processing DOCX {file_path.name}: {str(e)}"
                         )
-                        return False, track_id
+                        return False, track_id, ""
 
                 case ".pptx":
                     try:
@@ -1470,7 +1478,7 @@ async def pipeline_enqueue_file(
                         logger.error(
                             f"[File Extraction]Error processing PPTX {file_path.name}: {str(e)}"
                         )
-                        return False, track_id
+                        return False, track_id, ""
 
                 case ".xlsx":
                     try:
@@ -1507,7 +1515,7 @@ async def pipeline_enqueue_file(
                         logger.error(
                             f"[File Extraction]Error processing XLSX {file_path.name}: {str(e)}"
                         )
-                        return False, track_id
+                        return False, track_id, ""
 
                 case _:
                     error_files = [
@@ -1522,7 +1530,7 @@ async def pipeline_enqueue_file(
                     logger.error(
                         f"[File Extraction]Unsupported file type: {file_path.name} (extension {ext})"
                     )
-                    return False, track_id
+                    return False, track_id, ""
 
         except Exception as e:
             error_files = [
@@ -1537,7 +1545,7 @@ async def pipeline_enqueue_file(
             logger.error(
                 f"[File Extraction]Unexpected error during {file_path.name} extracting: {str(e)}"
             )
-            return False, track_id
+            return False, track_id, ""
 
         # Insert into the RAG queue
         if content:
@@ -1555,15 +1563,19 @@ async def pipeline_enqueue_file(
                 logger.warning(
                     f"[File Extraction]File contains only whitespace characters: {file_path.name}"
                 )
-                return False, track_id
+                return False, track_id, ""
 
             try:
+                # Calculate doc_id from sanitized content (same logic as apipeline_enqueue_documents)
+                sanitized_content = sanitize_text_for_encoding(content)
+                doc_id = compute_mdhash_id(sanitized_content, prefix="doc-")
+
                 await rag.apipeline_enqueue_documents(
                     content, file_paths=file_path.name, track_id=track_id
                 )
 
                 logger.info(
-                    f"Successfully extracted and enqueued file: {file_path.name}"
+                    f"Successfully extracted and enqueued file: {file_path.name} (doc_id: {doc_id})"
                 )
 
                 # Move file to __enqueued__ directory after enqueuing
@@ -1589,7 +1601,7 @@ async def pipeline_enqueue_file(
                     )
                     # Don't affect the main function's success status
 
-                return True, track_id
+                return True, track_id, doc_id
 
             except Exception as e:
                 error_files = [
@@ -1602,7 +1614,7 @@ async def pipeline_enqueue_file(
                 ]
                 await rag.apipeline_enqueue_error_documents(error_files, track_id)
                 logger.error(f"Error enqueueing document {file_path.name}: {str(e)}")
-                return False, track_id
+                return False, track_id, ""
         else:
             error_files = [
                 {
@@ -1614,7 +1626,7 @@ async def pipeline_enqueue_file(
             ]
             await rag.apipeline_enqueue_error_documents(error_files, track_id)
             logger.error(f"No content extracted from file: {file_path.name}")
-            return False, track_id
+            return False, track_id, ""
 
     except Exception as e:
         # Catch-all for any unexpected errors
@@ -1634,7 +1646,7 @@ async def pipeline_enqueue_file(
         await rag.apipeline_enqueue_error_documents(error_files, track_id)
         logger.error(f"Enqueuing file {file_path.name} error: {str(e)}")
         logger.error(traceback.format_exc())
-        return False, track_id
+        return False, track_id, ""
     finally:
         if file_path.name.startswith(temp_prefix):
             try:
@@ -1643,24 +1655,148 @@ async def pipeline_enqueue_file(
                 logger.error(f"Error deleting file {file_path}: {str(e)}")
 
 
-async def pipeline_index_file(rag: LightRAG, file_path: Path, track_id: str = None):
-    """Index a file with track_id
+async def pipeline_index_file(
+    rag: LightRAG,
+    file_path: Path,
+    track_id: str = None,
+    upload_to_s3: bool = False,
+    original_file_path: Path = None,
+):
+    """Index a file with track_id and optional S3 upload
 
     Args:
         rag: LightRAG instance
         file_path: Path to the saved file
         track_id: Optional tracking ID
+        upload_to_s3: Whether to upload the file to S3 after getting doc_id
+        original_file_path: Original file path for S3 upload (before move to __enqueued__)
     """
     try:
-        success, returned_track_id = await pipeline_enqueue_file(
+        success, returned_track_id, doc_id = await pipeline_enqueue_file(
             rag, file_path, track_id
         )
         if success:
             await rag.apipeline_process_enqueue_documents()
 
+            # Upload to S3 after doc_id is confirmed and update DB
+            if upload_to_s3 and doc_id:
+                s3_client = get_s3_client()
+                if s3_client.is_enabled():
+                    # Use original file path if available (file may have been moved to __enqueued__)
+                    upload_path = original_file_path or file_path
+                    # Try to find file in __enqueued__ directory if original doesn't exist
+                    if not upload_path.exists():
+                        enqueued_path = file_path.parent / "__enqueued__" / file_path.name
+                        if enqueued_path.exists():
+                            upload_path = enqueued_path
+
+                    if upload_path.exists():
+                        s3_url = await s3_client.upload_file(
+                            upload_path,
+                            file_path.name,
+                            rag.workspace,
+                            doc_id,  # Include doc_id in S3 path
+                        )
+                        if s3_url:
+                            logger.info(f"File uploaded to S3: {s3_url}")
+                            # Update s3_url in doc_status using doc_id directly
+                            await _update_doc_s3_url_by_id(rag, doc_id, s3_url)
+                    else:
+                        logger.warning(
+                            f"Cannot upload to S3: file not found at {upload_path}"
+                        )
+
     except Exception as e:
         logger.error(f"Error indexing file {file_path.name}: {str(e)}")
         logger.error(traceback.format_exc())
+
+
+async def _update_doc_s3_url_by_id(
+    rag: LightRAG, doc_id: str, s3_url: str, max_retries: int = 10, delay: float = 2.0
+):
+    """Update s3_url in doc_status using doc_id directly (atomic update to avoid race conditions)
+
+    Args:
+        rag: LightRAG instance
+        doc_id: The document ID
+        s3_url: The S3 URL to store
+        max_retries: Maximum number of retry attempts
+        delay: Delay in seconds between retries
+    """
+    for attempt in range(max_retries):
+        try:
+            # Use atomic update method if available (PostgreSQL)
+            if hasattr(rag.doc_status, "update_s3_url"):
+                success = await rag.doc_status.update_s3_url(doc_id, s3_url)
+                if success:
+                    logger.info(f"Updated s3_url for document: {doc_id}")
+                    return
+                # If update returned False, document might not exist yet
+                if attempt < max_retries - 1:
+                    logger.debug(
+                        f"Document {doc_id} not updated, retrying ({attempt + 1}/{max_retries})..."
+                    )
+                    await asyncio.sleep(delay)
+            else:
+                # Fallback for other storage backends
+                doc_data = await rag.doc_status.get_by_id(doc_id)
+                if doc_data:
+                    doc_data["s3_url"] = s3_url
+                    await rag.doc_status.upsert({doc_id: doc_data})
+                    logger.info(f"Updated s3_url for document: {doc_id}")
+                    return
+                # Document not found yet, wait and retry
+                if attempt < max_retries - 1:
+                    logger.debug(
+                        f"Document {doc_id} not found in DB, retrying ({attempt + 1}/{max_retries})..."
+                    )
+                    await asyncio.sleep(delay)
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logger.debug(f"Retry {attempt + 1}/{max_retries} for {doc_id}: {e}")
+                await asyncio.sleep(delay)
+            else:
+                logger.warning(
+                    f"Failed to update s3_url for {doc_id} after {max_retries} attempts: {e}"
+                )
+
+
+async def _update_doc_s3_url(
+    rag: LightRAG, filename: str, s3_url: str, max_retries: int = 10, delay: float = 2.0
+):
+    """Update s3_url in doc_status after file is indexed (legacy, uses filename lookup)
+
+    Args:
+        rag: LightRAG instance
+        filename: The filename to look up
+        s3_url: The S3 URL to store
+        max_retries: Maximum number of retry attempts
+        delay: Delay in seconds between retries
+    """
+    for attempt in range(max_retries):
+        try:
+            doc_data = await rag.doc_status.get_doc_by_file_path(filename)
+            if doc_data:
+                doc_data["s3_url"] = s3_url
+                doc_id = doc_data.get("id")
+                if doc_id:
+                    await rag.doc_status.upsert({doc_id: doc_data})
+                    logger.info(f"Updated s3_url for document: {filename}")
+                    return
+            # Document not found yet, wait and retry
+            if attempt < max_retries - 1:
+                logger.debug(
+                    f"Document {filename} not found in DB, retrying ({attempt + 1}/{max_retries})..."
+                )
+                await asyncio.sleep(delay)
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logger.debug(f"Retry {attempt + 1}/{max_retries} for {filename}: {e}")
+                await asyncio.sleep(delay)
+            else:
+                logger.warning(
+                    f"Failed to update s3_url for {filename} after {max_retries} attempts: {e}"
+                )
 
 
 async def pipeline_index_files(
@@ -1790,6 +1926,7 @@ async def background_delete_documents(
     doc_ids: List[str],
     delete_file: bool = False,
     delete_llm_cache: bool = False,
+    delete_s3_file: bool = False,
 ):
     """Background task to delete multiple documents"""
     from lightrag.kg.shared_storage import (
@@ -1985,6 +2122,34 @@ async def background_delete_documents(
                         async with pipeline_status_lock:
                             pipeline_status["latest_message"] = no_file_msg
                             pipeline_status["history_messages"].append(no_file_msg)
+
+                    # Handle S3 file deletion if requested
+                    if delete_s3_file and result.file_path:
+                        try:
+                            s3_client = get_s3_client()
+                            if s3_client.is_enabled():
+                                s3_deleted = await s3_client.delete_file(
+                                    result.file_path, rag.workspace
+                                )
+                                if s3_deleted:
+                                    s3_delete_msg = f"Successfully deleted S3 file: {result.file_path}"
+                                    logger.info(s3_delete_msg)
+                                    async with pipeline_status_lock:
+                                        pipeline_status["history_messages"].append(
+                                            s3_delete_msg
+                                        )
+                                else:
+                                    s3_error_msg = f"Failed to delete S3 file: {result.file_path}"
+                                    logger.warning(s3_error_msg)
+                                    async with pipeline_status_lock:
+                                        pipeline_status["history_messages"].append(
+                                            s3_error_msg
+                                        )
+                        except Exception as s3_error:
+                            s3_error_msg = f"Error deleting S3 file {result.file_path}: {str(s3_error)}"
+                            logger.error(s3_error_msg)
+                            async with pipeline_status_lock:
+                                pipeline_status["history_messages"].append(s3_error_msg)
                 else:
                     failed_deletions.append(doc_id)
                     error_msg = f"Failed to delete {i}/{total_docs}: {doc_id}[{file_path}] - {result.message}"
@@ -2126,8 +2291,20 @@ def create_document_routes(
 
             track_id = generate_track_id("upload")
 
-            # Add to background tasks and get track_id
-            background_tasks.add_task(pipeline_index_file, rag, file_path, track_id)
+            # Check if S3 upload is enabled
+            s3_client = get_s3_client()
+            upload_to_s3 = s3_client.is_enabled()
+
+            # Add to background tasks
+            # S3 upload will be performed after doc_id is confirmed (in pipeline_index_file)
+            background_tasks.add_task(
+                pipeline_index_file,
+                rag,
+                file_path,
+                track_id,
+                upload_to_s3,
+                file_path,  # original_file_path for S3 upload
+            )
 
             return InsertResponse(
                 status="success",
@@ -2682,6 +2859,7 @@ def create_document_routes(
                             error_msg=doc_status.error_msg,
                             metadata=doc_status.metadata,
                             file_path=doc_status.file_path,
+                            s3_url=getattr(doc_status, "s3_url", None),
                         )
                     )
 
@@ -2771,6 +2949,7 @@ def create_document_routes(
                 doc_ids,
                 delete_request.delete_file,
                 delete_request.delete_llm_cache,
+                delete_request.delete_s3_file,
             )
 
             return DeleteDocByIdResponse(
@@ -2944,6 +3123,7 @@ def create_document_routes(
                         error_msg=doc_status.error_msg,
                         metadata=doc_status.metadata,
                         file_path=doc_status.file_path,
+                        s3_url=getattr(doc_status, "s3_url", None),
                     )
                 )
 
@@ -3025,6 +3205,7 @@ def create_document_routes(
                         error_msg=doc.error_msg,
                         metadata=doc.metadata,
                         file_path=doc.file_path,
+                        s3_url=getattr(doc, "s3_url", None),
                     )
                 )
 
