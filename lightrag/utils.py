@@ -3274,12 +3274,19 @@ def generate_reference_list_from_chunks(
     if not chunks:
         return [], []
 
-    # 1. Extract all valid file_paths and count their occurrences
+    # 1. Extract all valid file_paths, count occurrences, and track full_doc_id
     file_path_counts = {}
+    file_path_to_doc_id = {}  # Map file_path to full_doc_id
     for chunk in chunks:
         file_path = chunk.get("file_path", "")
         if file_path and file_path != "unknown_source":
             file_path_counts[file_path] = file_path_counts.get(file_path, 0) + 1
+            # Store first seen full_doc_id for each file_path
+            if file_path not in file_path_to_doc_id:
+                # Try both 'full_doc_id' and 'doc_id' keys
+                full_doc_id = chunk.get("full_doc_id") or chunk.get("doc_id", "")
+                if full_doc_id:
+                    file_path_to_doc_id[file_path] = full_doc_id
 
     # 2. Sort file paths by frequency (descending), then by first appearance order
     # Create a list of (file_path, count, first_index) tuples
@@ -3311,9 +3318,13 @@ def generate_reference_list_from_chunks(
             chunk_copy["reference_id"] = ""
         updated_chunks.append(chunk_copy)
 
-    # 5. Build reference_list
+    # 5. Build reference_list with doc_id
     reference_list = []
     for i, file_path in enumerate(unique_file_paths):
-        reference_list.append({"reference_id": str(i + 1), "file_path": file_path})
+        ref_item = {"reference_id": str(i + 1), "file_path": file_path}
+        # Add doc_id if available
+        if file_path in file_path_to_doc_id:
+            ref_item["doc_id"] = file_path_to_doc_id[file_path]
+        reference_list.append(ref_item)
 
     return reference_list, updated_chunks

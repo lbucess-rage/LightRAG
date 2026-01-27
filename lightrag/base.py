@@ -698,6 +698,8 @@ class DocProcessingStatus:
     """List of chunk IDs associated with this document, used for deletion"""
     error_msg: str | None = None
     """Error message if failed"""
+    s3_url: str | None = None
+    """S3 download URL for the document file"""
     metadata: dict[str, Any] = field(default_factory=dict)
     """Additional metadata"""
     multimodal_processed: bool | None = field(default=None, repr=False)

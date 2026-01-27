@@ -147,7 +147,14 @@ class ReferenceItem(BaseModel):
     """A single reference item in query responses."""
 
     reference_id: str = Field(description="Unique reference identifier")
+    doc_id: Optional[str] = Field(
+        default=None, description="Document ID in the system"
+    )
     file_path: str = Field(description="Path to the source file")
+    download_url: Optional[str] = Field(
+        default=None,
+        description="S3 download URL for the source file (only present when S3 upload is enabled)",
+    )
     content: Optional[List[str]] = Field(
         default=None,
         description="List of chunk contents from this file (only present when include_chunk_content=True)",
@@ -192,6 +199,26 @@ class StreamChunkResponse(BaseModel):
 
 def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
     combined_auth = get_combined_auth_dependency(api_key)
+
+    async def _enrich_references_with_s3_url(references: List[Dict]) -> List[Dict]:
+        """Add download_url to references from doc_status s3_url field"""
+        if not references:
+            return references
+
+        enriched = []
+        for ref in references:
+            ref_copy = ref.copy()
+            doc_id = ref.get("doc_id", "")
+            if doc_id:
+                try:
+                    # Use doc_id to get document data (more reliable than file_path)
+                    doc_data = await rag.doc_status.get_by_id(doc_id)
+                    if doc_data and doc_data.get("s3_url"):
+                        ref_copy["download_url"] = doc_data["s3_url"]
+                except Exception as e:
+                    logger.debug(f"Failed to get s3_url for doc_id {doc_id}: {e}")
+            enriched.append(ref_copy)
+        return enriched
 
     @router.post(
         "/query",
@@ -444,8 +471,9 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                     enriched_references.append(ref_copy)
                 references = enriched_references
 
-            # Return response with or without references based on request
+            # Enrich references with S3 download URLs
             if request.include_references:
+                references = await _enrich_references_with_s3_url(references)
                 return QueryResponse(response=response_content, references=references)
             else:
                 return QueryResponse(response=response_content, references=None)
@@ -697,6 +725,10 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                             ref_copy["content"] = ref_id_to_content[ref_id]
                         enriched_references.append(ref_copy)
                     references = enriched_references
+
+                # Enrich references with S3 download URLs
+                if request.include_references:
+                    references = await _enrich_references_with_s3_url(references)
 
                 if llm_response.get("is_streaming"):
                     # Streaming mode: send references first, then stream response chunks
