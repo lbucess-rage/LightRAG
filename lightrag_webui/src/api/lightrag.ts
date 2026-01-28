@@ -912,3 +912,103 @@ export const resetAllPrompts = async (): Promise<PromptResetResponse> => {
   const response = await axiosInstance.post('/prompts/reset-all')
   return response.data
 }
+
+// User Prompt Template Types
+export type UserPromptTemplate = {
+  template_id: string
+  template_name: string
+  content: string
+  description?: string
+  is_favorite: boolean
+  create_time?: string
+  update_time?: string
+}
+
+export type UserPromptTemplateCreateRequest = {
+  template_name: string
+  content: string
+  description?: string
+  is_favorite?: boolean
+}
+
+export type UserPromptTemplateUpdateRequest = {
+  template_name?: string
+  content?: string
+  description?: string
+  is_favorite?: boolean
+}
+
+export type UserPromptTemplatesListResponse = {
+  status: 'success'
+  data: {
+    templates: UserPromptTemplate[]
+    total: number
+  }
+}
+
+export type UserPromptTemplateResponse = {
+  status: 'success'
+  data: UserPromptTemplate
+}
+
+export type UserPromptTemplateActionResponse = {
+  status: 'success'
+  message: string
+  data?: UserPromptTemplate
+}
+
+// User Prompt Template API methods
+/**
+ * Get all user prompt templates for the current workspace
+ * @returns Promise with all templates list
+ */
+export const getUserPromptTemplates = async (): Promise<UserPromptTemplatesListResponse> => {
+  const response = await axiosInstance.get('/user-prompt-templates')
+  return response.data
+}
+
+/**
+ * Get a specific template by ID
+ * @param templateId The template ID to fetch
+ * @returns Promise with the template data
+ */
+export const getUserPromptTemplate = async (templateId: string): Promise<UserPromptTemplateResponse> => {
+  const response = await axiosInstance.get(`/user-prompt-templates/${encodeURIComponent(templateId)}`)
+  return response.data
+}
+
+/**
+ * Create a new user prompt template
+ * @param request The create request data
+ * @returns Promise with the created template
+ */
+export const createUserPromptTemplate = async (
+  request: UserPromptTemplateCreateRequest
+): Promise<UserPromptTemplateActionResponse> => {
+  const response = await axiosInstance.post('/user-prompt-templates', request)
+  return response.data
+}
+
+/**
+ * Update an existing template
+ * @param templateId The template ID to update
+ * @param request The update request data
+ * @returns Promise with the update result
+ */
+export const updateUserPromptTemplate = async (
+  templateId: string,
+  request: UserPromptTemplateUpdateRequest
+): Promise<UserPromptTemplateActionResponse> => {
+  const response = await axiosInstance.put(`/user-prompt-templates/${encodeURIComponent(templateId)}`, request)
+  return response.data
+}
+
+/**
+ * Delete a template
+ * @param templateId The template ID to delete
+ * @returns Promise with the delete result
+ */
+export const deleteUserPromptTemplate = async (templateId: string): Promise<UserPromptTemplateActionResponse> => {
+  const response = await axiosInstance.delete(`/user-prompt-templates/${encodeURIComponent(templateId)}`)
+  return response.data
+}

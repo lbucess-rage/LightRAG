@@ -3,7 +3,7 @@ import { QueryMode, QueryRequest } from '@/api/lightrag'
 // Removed unused import for Text component
 import Checkbox from '@/components/ui/Checkbox'
 import Input from '@/components/ui/Input'
-import UserPromptInputWithHistory from '@/components/ui/UserPromptInputWithHistory'
+import UserPromptTemplateInput from '@/components/retrieval/UserPromptTemplateInput'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
 import {
   Select,
@@ -21,21 +21,10 @@ import { RotateCcw } from 'lucide-react'
 export default function QuerySettings() {
   const { t } = useTranslation()
   const querySettings = useSettingsStore((state) => state.querySettings)
-  const userPromptHistory = useSettingsStore((state) => state.userPromptHistory)
 
   const handleChange = useCallback((key: keyof QueryRequest, value: any) => {
     useSettingsStore.getState().updateQuerySettings({ [key]: value })
   }, [])
-
-  const handleSelectFromHistory = useCallback((prompt: string) => {
-    handleChange('user_prompt', prompt)
-  }, [handleChange])
-
-  const handleDeleteFromHistory = useCallback((index: number) => {
-    const newHistory = [...userPromptHistory]
-    newHistory.splice(index, 1)
-    useSettingsStore.getState().setUserPromptHistory(newHistory)
-  }, [userPromptHistory])
 
   // Default values for reset functionality
   const defaultValues = useMemo(() => ({
@@ -73,7 +62,7 @@ export default function QuerySettings() {
   )
 
   return (
-    <Card className="flex shrink-0 flex-col w-[280px]">
+    <Card className="flex shrink-0 flex-col w-[500px]">
       <CardHeader className="px-4 pt-4 pb-2">
         <CardTitle>{t('retrievePanel.querySettings.parametersTitle')}</CardTitle>
         <CardDescription className="sr-only">{t('retrievePanel.querySettings.parametersDescription')}</CardDescription>
@@ -96,15 +85,11 @@ export default function QuerySettings() {
                 </Tooltip>
               </TooltipProvider>
               <div>
-                <UserPromptInputWithHistory
+                <UserPromptTemplateInput
                   id="user_prompt"
                   value={querySettings.user_prompt || ''}
                   onChange={(value) => handleChange('user_prompt', value)}
-                  onSelectFromHistory={handleSelectFromHistory}
-                  onDeleteFromHistory={handleDeleteFromHistory}
-                  history={userPromptHistory}
                   placeholder={t('retrievePanel.querySettings.userPromptPlaceholder')}
-                  className="h-9"
                 />
               </div>
             </>
@@ -149,6 +134,42 @@ export default function QuerySettings() {
                   onClick={() => handleReset('mode')}
                   title="Reset to default (Mix)"
                 />
+              </div>
+            </>
+
+            {/* Response Format */}
+            <>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <label htmlFor="response_type_select" className="ml-1 cursor-help">
+                      {t('retrievePanel.querySettings.responseFormat')}
+                    </label>
+                  </TooltipTrigger>
+                  <TooltipContent side="left">
+                    <p>{t('retrievePanel.querySettings.responseFormatTooltip')}</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              <div className="flex items-center gap-1">
+                <Select
+                  value={querySettings.response_type || 'Multiple Paragraphs'}
+                  onValueChange={(v) => handleChange('response_type', v)}
+                >
+                  <SelectTrigger
+                    id="response_type_select"
+                    className="hover:bg-primary/5 h-9 cursor-pointer focus:ring-0 focus:ring-offset-0 focus:outline-0 active:right-0 flex-1 text-left [&>span]:break-all [&>span]:line-clamp-1"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="Multiple Paragraphs">{t('retrievePanel.querySettings.responseFormatOptions.multipleParagraphs')}</SelectItem>
+                      <SelectItem value="Single Paragraph">{t('retrievePanel.querySettings.responseFormatOptions.singleParagraph')}</SelectItem>
+                      <SelectItem value="Bullet Points">{t('retrievePanel.querySettings.responseFormatOptions.bulletPoints')}</SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
               </div>
             </>
 

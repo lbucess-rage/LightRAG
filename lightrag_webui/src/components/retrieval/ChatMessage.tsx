@@ -42,6 +42,22 @@ export type MessageWithError = Message & {
    * Used to prevent red error text during streaming of incomplete LaTeX formulas.
    */
   latexRendered?: boolean
+  /**
+   * The user prompt (additional output prompt) used for this query.
+   * Stored with assistant messages to show what prompt was applied.
+   */
+  userPrompt?: string
+  /**
+   * Query parameters used for this query.
+   * Stored with assistant messages to show what settings were applied.
+   */
+  queryParams?: {
+    mode?: string
+    response_type?: string
+    top_k?: number
+    chunk_top_k?: number
+    history_turns?: number
+  }
 }
 
 // Restore original component definition and export
@@ -56,6 +72,8 @@ export const ChatMessage = ({
   const { theme } = useTheme()
   const [katexPlugin, setKatexPlugin] = useState<((options?: KaTeXOptions) => any) | null>(null)
   const [isThinkingExpanded, setIsThinkingExpanded] = useState<boolean>(false)
+  const [isUserPromptExpanded, setIsUserPromptExpanded] = useState<boolean>(false)
+  const [isQueryParamsExpanded, setIsQueryParamsExpanded] = useState<boolean>(false)
 
   // Directly use props passed from the parent.
   const { thinkingContent, displayContent, thinkingTime, isThinking } = message
@@ -215,6 +233,48 @@ export const ChatMessage = ({
               >
                 {finalThinkingContent}
               </ReactMarkdown>
+            </div>
+          )}
+        </div>
+      )}
+      {/* User Prompt display - only for assistant messages with userPrompt */}
+      {message.role === 'assistant' && message.userPrompt && (
+        <div className="mb-2">
+          <div
+            className="flex items-center text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors duration-200 text-xs cursor-pointer select-none"
+            onClick={() => setIsUserPromptExpanded(!isUserPromptExpanded)}
+          >
+            <ChevronDownIcon className={`mr-1 size-3 shrink-0 transition-transform ${isUserPromptExpanded ? 'rotate-180' : ''}`} />
+            <span>{t('retrievePanel.chatMessage.usedPrompt')}</span>
+          </div>
+          {isUserPromptExpanded && (
+            <div className="mt-1 ml-4 p-2 bg-gray-100 dark:bg-gray-800 rounded text-xs text-gray-600 dark:text-gray-300 whitespace-pre-wrap break-words max-h-[150px] overflow-y-auto">
+              {message.userPrompt}
+            </div>
+          )}
+        </div>
+      )}
+      {/* Query Params display - only for assistant messages with queryParams */}
+      {message.role === 'assistant' && message.queryParams && (
+        <div className="mb-2">
+          <div
+            className="flex items-center text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors duration-200 text-xs cursor-pointer select-none"
+            onClick={() => setIsQueryParamsExpanded(!isQueryParamsExpanded)}
+          >
+            <ChevronDownIcon className={`mr-1 size-3 shrink-0 transition-transform ${isQueryParamsExpanded ? 'rotate-180' : ''}`} />
+            <span>{t('retrievePanel.chatMessage.usedParams')}</span>
+          </div>
+          {isQueryParamsExpanded && (
+            <div className="mt-1 ml-4 p-2 bg-gray-100 dark:bg-gray-800 rounded text-xs text-gray-600 dark:text-gray-300">
+              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                <span><strong>{t('retrievePanel.chatMessage.paramMode')}:</strong> {message.queryParams.mode}</span>
+                <span><strong>{t('retrievePanel.chatMessage.paramResponseType')}:</strong> {message.queryParams.response_type}</span>
+                <span><strong>top_k:</strong> {message.queryParams.top_k}</span>
+                <span><strong>chunk_top_k:</strong> {message.queryParams.chunk_top_k}</span>
+                {message.queryParams.history_turns !== undefined && message.queryParams.history_turns > 0 && (
+                  <span><strong>{t('retrievePanel.chatMessage.paramHistoryTurns')}:</strong> {message.queryParams.history_turns}</span>
+                )}
+              </div>
             </div>
           )}
         </div>

@@ -5000,6 +5000,19 @@ TABLES = {
                     CONSTRAINT LIGHTRAG_PROMPTS_PK PRIMARY KEY (workspace, prompt_key)
                     )"""
     },
+    "LIGHTRAG_USER_PROMPT_TEMPLATES": {
+        "ddl": """CREATE TABLE LIGHTRAG_USER_PROMPT_TEMPLATES (
+                    workspace VARCHAR(255) NOT NULL,
+                    template_id VARCHAR(100) NOT NULL,
+                    template_name VARCHAR(255) NOT NULL,
+                    content TEXT NOT NULL,
+                    description TEXT,
+                    is_favorite BOOLEAN DEFAULT FALSE,
+                    create_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
+                    update_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT LIGHTRAG_USER_PROMPT_TEMPLATES_PK PRIMARY KEY (workspace, template_id)
+                    )"""
+    },
 }
 
 

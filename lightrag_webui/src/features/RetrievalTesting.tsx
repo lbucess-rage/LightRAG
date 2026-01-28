@@ -219,6 +219,9 @@ export default function RetrievalTesting() {
         role: 'user'
       }
 
+      // Get user prompt before creating message
+      const currentUserPrompt = useSettingsStore.getState().querySettings.user_prompt?.trim() || ''
+
       const assistantMessage: MessageWithError = {
         id: generateUniqueId(), // Use browser-compatible ID generation
         content: '',
@@ -228,7 +231,8 @@ export default function RetrievalTesting() {
         thinkingTime: null,        // Explicitly initialize to null
         thinkingContent: undefined, // Explicitly initialize to undefined
         displayContent: undefined,  // Explicitly initialize to undefined
-        isThinking: false          // Explicitly initialize to false
+        isThinking: false,         // Explicitly initialize to false
+        userPrompt: currentUserPrompt || undefined  // Store user prompt if exists
       }
 
       const prevMessages = [...messages]
@@ -354,10 +358,12 @@ export default function RetrievalTesting() {
         ? 3
         : configuredHistoryTurns
 
+      const effectiveResponseType = state.querySettings.response_type || 'Multiple Paragraphs'
+
       const queryParams = {
         ...state.querySettings,
         query: actualQuery,
-        response_type: 'Multiple Paragraphs',
+        response_type: effectiveResponseType,
         conversation_history: effectiveHistoryTurns > 0
           ? prevMessages
             .filter((m) => m.isError !== true)
@@ -365,6 +371,15 @@ export default function RetrievalTesting() {
             .map((m) => ({ role: m.role, content: m.content }))
           : [],
         ...(modeOverride ? { mode: modeOverride } : {})
+      }
+
+      // Store query params in assistant message for display
+      assistantMessage.queryParams = {
+        mode: effectiveMode,
+        response_type: effectiveResponseType,
+        top_k: state.querySettings.top_k,
+        chunk_top_k: state.querySettings.chunk_top_k,
+        history_turns: effectiveHistoryTurns
       }
 
       try {
