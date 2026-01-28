@@ -123,6 +123,7 @@ const useSettingsStoreBase = create<SettingsState>()(
 
       querySettings: {
         mode: 'global',
+        response_type: 'Multiple Paragraphs',
         top_k: 40,
         chunk_top_k: 20,
         max_entity_tokens: 6000,
@@ -238,7 +239,7 @@ const useSettingsStoreBase = create<SettingsState>()(
     {
       name: 'settings-storage',
       storage: createJSONStorage(() => localStorage),
-      version: 19,
+      version: 20,
       migrate: (state: any, version: number) => {
         if (version < 2) {
           state.showEdgeLabel = false
@@ -336,9 +337,12 @@ const useSettingsStoreBase = create<SettingsState>()(
           state.userPromptHistory = []
         }
         if (version < 19) {
-          // Remove deprecated response_type parameter
+          // Previously removed response_type, now restored in version 20
+        }
+        if (version < 20) {
+          // Restore response_type parameter
           if (state.querySettings) {
-            delete state.querySettings.response_type
+            state.querySettings.response_type = 'Multiple Paragraphs'
           }
         }
         return state

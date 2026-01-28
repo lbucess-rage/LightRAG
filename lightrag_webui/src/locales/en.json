@@ -387,7 +387,12 @@
       "copyManualInstruction": "Please select and copy the text manually",
       "thinking": "Thinking...",
       "thinkingTime": "Thinking time {{time}}s",
-      "thinkingInProgress": "Thinking in progress..."
+      "thinkingInProgress": "Thinking in progress...",
+      "usedPrompt": "Used Prompt",
+      "usedParams": "Used Parameters",
+      "paramMode": "Mode",
+      "paramResponseType": "Response Type",
+      "paramHistoryTurns": "History Turns"
     },
     "retrieval": {
       "startPrompt": "Start a retrieval by typing your query below",
@@ -443,7 +448,26 @@
       "userPromptTooltip": "Provide additional response requirements to the LLM (unrelated to query content, only for output processing).",
       "userPromptPlaceholder": "Enter custom prompt (optional)",
       "enableRerank": "Enable Rerank",
-      "enableRerankTooltip": "Enable reranking for retrieved text chunks. If True but no rerank model is configured, a warning will be issued. Default is True."
+      "enableRerankTooltip": "Enable reranking for retrieved text chunks. If True but no rerank model is configured, a warning will be issued. Default is True.",
+      "selectTemplate": "Select Template",
+      "noTemplate": "-- No Template --",
+      "loadingTemplates": "Loading templates...",
+      "saveAsTemplate": "Save as Template",
+      "updateTemplate": "Update Template",
+      "deleteTemplate": "Delete Template",
+      "toggleFavorite": "Toggle Favorite",
+      "saveTemplateDescription": "Save the current prompt as a new template.",
+      "templateNamePlaceholder": "Enter template name",
+      "templateNameRequired": "Template name and content are required",
+      "templateSaved": "Template saved successfully",
+      "templateSaveFailed": "Failed to save template",
+      "templateUpdated": "Template updated successfully",
+      "templateUpdateFailed": "Failed to update template",
+      "templateDeleted": "Template deleted successfully",
+      "templateDeleteFailed": "Failed to delete template",
+      "confirmDeleteTemplate": "Delete Template",
+      "confirmDeleteTemplateDescription": "Are you sure you want to delete this template? This action cannot be undone.",
+      "deleting": "Deleting..."
     }
   },
   "apiSite": {
