@@ -13,6 +13,7 @@ LightRAG Schema Module
 
 from .models import EntityType, RelationType, DomainSchema, SchemaDiscoveryResult
 from .templates import SchemaTemplateManager
+from .discovery import SchemaDiscoveryEngine
 from .prompts import (
     SCHEMA_DISCOVERY_SYSTEM_PROMPT,
     SCHEMA_DISCOVERY_USER_PROMPT,
@@ -28,6 +29,8 @@ __all__ = [
     "SchemaDiscoveryResult",
     # Templates
     "SchemaTemplateManager",
+    # Discovery
+    "SchemaDiscoveryEngine",
     # Prompts
     "SCHEMA_DISCOVERY_SYSTEM_PROMPT",
     "SCHEMA_DISCOVERY_USER_PROMPT",

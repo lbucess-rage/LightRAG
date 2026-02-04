@@ -54,7 +54,9 @@ from lightrag.api.routers.query_routes import create_query_routes
 from lightrag.api.routers.graph_routes import create_graph_routes
 from lightrag.api.routers.prompt_routes import create_prompt_routes
 from lightrag.api.routers.user_prompt_template_routes import create_user_prompt_template_routes
+from lightrag.api.routers.entity_management_routes import create_entity_management_routes
 from lightrag.api.routers.ollama_api import OllamaAPI
+from lightrag.api.routers.schema_routes import router as schema_router, set_discovery_engine
 
 from lightrag.utils import logger, set_verbose_debug
 from lightrag.kg.shared_storage import (
@@ -1100,6 +1102,27 @@ def create_app(args):
     app.include_router(create_graph_routes(rag, api_key))
     app.include_router(create_prompt_routes(rag, api_key))
     app.include_router(create_user_prompt_template_routes(rag, api_key))
+    app.include_router(create_entity_management_routes(rag, api_key))
+
+    # Add Schema API routes
+    app.include_router(schema_router, prefix="/api/schema")
+
+    # Initialize Schema Discovery Engine with LLM
+    try:
+        from lightrag.schema.discovery import SchemaDiscoveryEngine
+
+        async def schema_llm_func(prompt: str, system_prompt: str = None) -> str:
+            """LLM wrapper for schema discovery"""
+            return await rag.llm_model_func(
+                prompt,
+                system_prompt=system_prompt,
+            )
+
+        discovery_engine = SchemaDiscoveryEngine(llm_func=schema_llm_func)
+        set_discovery_engine(discovery_engine)
+        logger.info("Schema Discovery Engine initialized")
+    except Exception as e:
+        logger.warning(f"Failed to initialize Schema Discovery Engine: {e}")
 
     # Add Ollama API routes
     ollama_api = OllamaAPI(rag, top_k=args.top_k, api_key=api_key)
