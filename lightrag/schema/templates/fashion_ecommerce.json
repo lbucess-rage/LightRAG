@@ -1,0 +1,194 @@
+{
+  "domain": "fashion_ecommerce",
+  "display_name": "의류 이커머스",
+  "description": "패션/의류 온라인 쇼핑몰을 위한 스키마",
+  "version": "1.0.0",
+  "tags": ["fashion", "ecommerce", "clothing", "retail", "shopping"],
+  "entity_types": [
+    {
+      "name": "Customer",
+      "display_name": "고객",
+      "description": "쇼핑몰 이용 고객",
+      "examples": ["회원", "비회원", "VIP 고객"],
+      "color": "#4CAF50",
+      "icon": "person"
+    },
+    {
+      "name": "Product",
+      "display_name": "상품",
+      "description": "판매 상품",
+      "examples": ["티셔츠", "청바지", "원피스", "자켓"],
+      "color": "#2196F3",
+      "icon": "checkroom"
+    },
+    {
+      "name": "Brand",
+      "display_name": "브랜드",
+      "description": "의류 브랜드",
+      "examples": ["나이키", "자라", "유니클로", "H&M"],
+      "color": "#FF9800",
+      "icon": "storefront"
+    },
+    {
+      "name": "Category",
+      "display_name": "카테고리",
+      "description": "상품 분류",
+      "examples": ["상의", "하의", "아우터", "원피스", "액세서리"],
+      "color": "#9C27B0",
+      "icon": "category"
+    },
+    {
+      "name": "Size",
+      "display_name": "사이즈",
+      "description": "의류 사이즈",
+      "examples": ["S", "M", "L", "XL", "Free"],
+      "color": "#3F51B5",
+      "icon": "straighten"
+    },
+    {
+      "name": "Color",
+      "display_name": "색상",
+      "description": "상품 색상",
+      "examples": ["블랙", "화이트", "네이비", "베이지"],
+      "color": "#009688",
+      "icon": "palette"
+    },
+    {
+      "name": "Order",
+      "display_name": "주문",
+      "description": "주문 정보",
+      "examples": ["주문번호", "주문 내역"],
+      "color": "#795548",
+      "icon": "receipt"
+    },
+    {
+      "name": "Review",
+      "display_name": "리뷰",
+      "description": "상품 리뷰",
+      "examples": ["별점", "후기", "사용 리뷰"],
+      "color": "#607D8B",
+      "icon": "rate_review"
+    },
+    {
+      "name": "Coupon",
+      "display_name": "쿠폰",
+      "description": "할인 쿠폰",
+      "examples": ["10% 할인", "무료배송", "신규가입 쿠폰"],
+      "color": "#E91E63",
+      "icon": "local_offer"
+    },
+    {
+      "name": "WishList",
+      "display_name": "위시리스트",
+      "description": "찜 목록",
+      "examples": ["관심상품", "찜한 상품"],
+      "color": "#F44336",
+      "icon": "favorite"
+    },
+    {
+      "name": "Cart",
+      "display_name": "장바구니",
+      "description": "장바구니",
+      "examples": ["담긴 상품", "장바구니 목록"],
+      "color": "#FF5722",
+      "icon": "shopping_cart"
+    },
+    {
+      "name": "Promotion",
+      "display_name": "프로모션",
+      "description": "이벤트 또는 할인 행사",
+      "examples": ["시즌오프", "타임세일", "블랙프라이데이"],
+      "color": "#FFC107",
+      "icon": "campaign"
+    },
+    {
+      "name": "Seller",
+      "display_name": "판매자",
+      "description": "상품 판매자",
+      "examples": ["공식스토어", "입점업체", "개인판매자"],
+      "color": "#455A64",
+      "icon": "store"
+    }
+  ],
+  "relation_types": [
+    {
+      "name": "PURCHASED",
+      "display_name": "구매함",
+      "description": "고객이 상품을 구매하는 관계",
+      "source_types": ["Customer"],
+      "target_types": ["Product"]
+    },
+    {
+      "name": "REVIEWED",
+      "display_name": "리뷰함",
+      "description": "고객이 상품에 리뷰를 작성하는 관계",
+      "source_types": ["Customer"],
+      "target_types": ["Product"]
+    },
+    {
+      "name": "WISHLISTED",
+      "display_name": "찜함",
+      "description": "고객이 상품을 위시리스트에 추가하는 관계",
+      "source_types": ["Customer"],
+      "target_types": ["Product"]
+    },
+    {
+      "name": "BELONGS_TO",
+      "display_name": "소속됨",
+      "description": "상품이 카테고리에 속하는 관계",
+      "source_types": ["Product"],
+      "target_types": ["Category"]
+    },
+    {
+      "name": "MADE_BY",
+      "display_name": "제조됨",
+      "description": "상품이 브랜드에 의해 제조되는 관계",
+      "source_types": ["Product"],
+      "target_types": ["Brand"]
+    },
+    {
+      "name": "AVAILABLE_IN",
+      "display_name": "사이즈",
+      "description": "상품이 특정 사이즈로 제공되는 관계",
+      "source_types": ["Product"],
+      "target_types": ["Size"]
+    },
+    {
+      "name": "HAS_COLOR",
+      "display_name": "색상",
+      "description": "상품이 특정 색상을 가지는 관계",
+      "source_types": ["Product"],
+      "target_types": ["Color"]
+    },
+    {
+      "name": "APPLIED",
+      "display_name": "적용됨",
+      "description": "쿠폰이 주문에 적용되는 관계",
+      "source_types": ["Coupon"],
+      "target_types": ["Order"]
+    },
+    {
+      "name": "SOLD_BY",
+      "display_name": "판매됨",
+      "description": "상품이 판매자에 의해 판매되는 관계",
+      "source_types": ["Product"],
+      "target_types": ["Seller"]
+    },
+    {
+      "name": "INCLUDED_IN",
+      "display_name": "포함됨",
+      "description": "상품이 프로모션에 포함되는 관계",
+      "source_types": ["Product"],
+      "target_types": ["Promotion"]
+    },
+    {
+      "name": "ADDED_TO_CART",
+      "display_name": "담김",
+      "description": "상품이 장바구니에 담기는 관계",
+      "source_types": ["Product"],
+      "target_types": ["Cart"]
+    }
+  ],
+  "created_at": "2025-02-04T00:00:00Z",
+  "author": "system"
+}

@@ -1,0 +1,156 @@
+{
+  "domain": "delivery_service",
+  "display_name": "택배/배송 서비스",
+  "description": "배송 및 물류 관리를 위한 스키마",
+  "version": "1.0.0",
+  "tags": ["delivery", "logistics", "shipping", "parcel"],
+  "entity_types": [
+    {
+      "name": "Sender",
+      "display_name": "발송인",
+      "description": "택배를 보내는 사람 또는 업체",
+      "examples": ["판매자", "발송 업체", "보내는 분"],
+      "color": "#4CAF50",
+      "icon": "person_outline"
+    },
+    {
+      "name": "Recipient",
+      "display_name": "수령인",
+      "description": "택배를 받는 사람",
+      "examples": ["구매자", "수취인", "받는 분"],
+      "color": "#2196F3",
+      "icon": "person"
+    },
+    {
+      "name": "Courier",
+      "display_name": "배송기사",
+      "description": "배송을 담당하는 기사",
+      "examples": ["택배기사", "배달원", "기사님"],
+      "color": "#FF9800",
+      "icon": "delivery_dining"
+    },
+    {
+      "name": "Parcel",
+      "display_name": "택배",
+      "description": "배송 대상 물품",
+      "examples": ["소포", "화물", "택배 상품"],
+      "color": "#9C27B0",
+      "icon": "inventory_2"
+    },
+    {
+      "name": "TrackingNumber",
+      "display_name": "운송장번호",
+      "description": "배송 추적을 위한 고유 번호",
+      "examples": ["123456789", "송장번호", "추적번호"],
+      "color": "#3F51B5",
+      "icon": "qr_code"
+    },
+    {
+      "name": "DeliveryStatus",
+      "display_name": "배송상태",
+      "description": "배송 진행 상태",
+      "examples": ["집하", "배송중", "배송완료", "배송출발"],
+      "color": "#009688",
+      "icon": "local_shipping"
+    },
+    {
+      "name": "Hub",
+      "display_name": "물류센터",
+      "description": "물류 허브 또는 터미널",
+      "examples": ["대전 허브", "용인 물류센터", "곤지암 터미널"],
+      "color": "#795548",
+      "icon": "warehouse"
+    },
+    {
+      "name": "PickupPoint",
+      "display_name": "픽업포인트",
+      "description": "수령 장소",
+      "examples": ["편의점", "무인택배함", "경비실"],
+      "color": "#607D8B",
+      "icon": "location_on"
+    },
+    {
+      "name": "Vehicle",
+      "display_name": "배송차량",
+      "description": "배송 수단",
+      "examples": ["화물차", "오토바이", "1톤 트럭"],
+      "color": "#455A64",
+      "icon": "local_shipping"
+    },
+    {
+      "name": "DeliveryTime",
+      "display_name": "배송시간",
+      "description": "배송 시간대",
+      "examples": ["오전배송", "새벽배송", "당일배송"],
+      "color": "#5D4037",
+      "icon": "schedule"
+    }
+  ],
+  "relation_types": [
+    {
+      "name": "SENT_BY",
+      "display_name": "발송됨",
+      "description": "발송인이 택배를 보내는 관계",
+      "source_types": ["Parcel"],
+      "target_types": ["Sender"]
+    },
+    {
+      "name": "RECEIVED_BY",
+      "display_name": "수령됨",
+      "description": "수령인이 택배를 받는 관계",
+      "source_types": ["Parcel"],
+      "target_types": ["Recipient"]
+    },
+    {
+      "name": "DELIVERED_BY",
+      "display_name": "배송됨",
+      "description": "배송기사가 택배를 배송하는 관계",
+      "source_types": ["Parcel"],
+      "target_types": ["Courier"]
+    },
+    {
+      "name": "HAS_STATUS",
+      "display_name": "상태",
+      "description": "택배의 현재 배송 상태",
+      "source_types": ["Parcel"],
+      "target_types": ["DeliveryStatus"]
+    },
+    {
+      "name": "TRACKED_BY",
+      "display_name": "추적됨",
+      "description": "운송장번호로 추적되는 관계",
+      "source_types": ["Parcel"],
+      "target_types": ["TrackingNumber"]
+    },
+    {
+      "name": "PASSED_THROUGH",
+      "display_name": "경유함",
+      "description": "물류센터를 경유하는 관계",
+      "source_types": ["Parcel"],
+      "target_types": ["Hub"]
+    },
+    {
+      "name": "PICKED_UP_AT",
+      "display_name": "수령처",
+      "description": "픽업 장소에서 수령하는 관계",
+      "source_types": ["Parcel"],
+      "target_types": ["PickupPoint"]
+    },
+    {
+      "name": "TRANSPORTED_BY",
+      "display_name": "운송됨",
+      "description": "차량으로 운송되는 관계",
+      "source_types": ["Parcel"],
+      "target_types": ["Vehicle"]
+    },
+    {
+      "name": "SCHEDULED_FOR",
+      "display_name": "예정됨",
+      "description": "배송 시간대가 예정된 관계",
+      "source_types": ["Parcel"],
+      "target_types": ["DeliveryTime"]
+    }
+  ],
+  "created_at": "2025-02-04T00:00:00Z",
+  "author": "system"
+}
