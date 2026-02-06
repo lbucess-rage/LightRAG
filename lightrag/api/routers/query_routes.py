@@ -4,13 +4,46 @@ This module contains all query-related routes for the LightRAG API.
 
 import json
 from typing import Any, Dict, List, Literal, Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from lightrag.base import QueryParam
 from lightrag.api.utils_api import get_combined_auth_dependency
 from lightrag.utils import logger
 from pydantic import BaseModel, Field, field_validator
 
 router = APIRouter(tags=["query"])
+
+# Workspace-aware RAG instance management
+_get_rag_for_workspace = None
+_get_default_workspace = None
+
+
+def set_rag_workspace_getter(getter_func, default_workspace_func=None):
+    """Set the function to get workspace-specific RAG instances."""
+    global _get_rag_for_workspace, _get_default_workspace
+    _get_rag_for_workspace = getter_func
+    _get_default_workspace = default_workspace_func
+
+
+async def get_workspace_rag(workspace: str):
+    """Get RAG instance for a specific workspace."""
+    if _get_rag_for_workspace is not None:
+        return await _get_rag_for_workspace(workspace)
+    return None
+
+
+def _get_workspace_from_request(http_request: Request, body_workspace: str | None = None) -> str:
+    """Extract workspace from request body, header, or use default."""
+    # Priority 1: workspace field in request body
+    if body_workspace and body_workspace.strip():
+        return body_workspace.strip()
+    # Priority 2: LIGHTRAG-WORKSPACE header
+    workspace = http_request.headers.get("LIGHTRAG-WORKSPACE", "").strip()
+    if workspace:
+        return workspace
+    # Priority 3: default workspace
+    if _get_default_workspace:
+        return _get_default_workspace() or "base"
+    return "base"
 
 
 class QueryRequest(BaseModel):
@@ -110,6 +143,11 @@ class QueryRequest(BaseModel):
         description="If True, enables streaming output for real-time responses. Only affects /query/stream endpoint.",
     )
 
+    workspace: Optional[str] = Field(
+        default=None,
+        description="Target workspace for this query. Overrides header/query parameter. If not specified, uses header 'LIGHTRAG-WORKSPACE' or server default.",
+    )
+
     @field_validator("query", mode="after")
     @classmethod
     def query_strip_after(cls, query: str) -> str:
@@ -159,6 +197,10 @@ class ReferenceItem(BaseModel):
         default=None,
         description="List of chunk contents from this file (only present when include_chunk_content=True)",
     )
+    structured_content: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="List of structured chunk contents for programmatic parsing (only present when include_chunk_content=True and structured_content is available)",
+    )
 
 
 class QueryResponse(BaseModel):
@@ -200,11 +242,12 @@ class StreamChunkResponse(BaseModel):
 def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
     combined_auth = get_combined_auth_dependency(api_key)
 
-    async def _enrich_references_with_s3_url(references: List[Dict]) -> List[Dict]:
+    async def _enrich_references_with_s3_url(references: List[Dict], target_rag=None) -> List[Dict]:
         """Add download_url to references from doc_status s3_url field"""
         if not references:
             return references
 
+        use_rag = target_rag or rag
         enriched = []
         for ref in references:
             ref_copy = ref.copy()
@@ -212,7 +255,7 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             if doc_id:
                 try:
                     # Use doc_id to get document data (more reliable than file_path)
-                    doc_data = await rag.doc_status.get_by_id(doc_id)
+                    doc_data = await use_rag.doc_status.get_by_id(doc_id)
                     if doc_data and doc_data.get("s3_url"):
                         ref_copy["download_url"] = doc_data["s3_url"]
                 except Exception as e:
@@ -349,7 +392,7 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             },
         },
     )
-    async def query_text(request: QueryRequest):
+    async def query_text(request: QueryRequest, http_request: Request):
         """
         Comprehensive RAG query endpoint with non-streaming response. Parameter "stream" is ignored.
 
@@ -429,6 +472,12 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                 - 500: Internal processing error (e.g., LLM service unavailable)
         """
         try:
+            # Resolve workspace-specific RAG instance
+            workspace = _get_workspace_from_request(http_request, request.workspace)
+            workspace_rag = await get_workspace_rag(workspace)
+            if workspace_rag is None:
+                workspace_rag = rag
+
             param = request.to_query_params(
                 False
             )  # Ensure stream=False for non-streaming endpoint
@@ -436,7 +485,7 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             param.stream = False
 
             # Unified approach: always use aquery_llm for both cases
-            result = await rag.aquery_llm(request.query, param=param)
+            result = await workspace_rag.aquery_llm(request.query, param=param)
 
             # Extract LLM response and references from unified result
             llm_response = result.get("llm_response", {})
@@ -451,14 +500,19 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             # Enrich references with chunk content if requested
             if request.include_references and request.include_chunk_content:
                 chunks = data.get("chunks", [])
-                # Create a mapping from reference_id to chunk content
+                # Create a mapping from reference_id to chunk content and structured_content
                 ref_id_to_content = {}
+                ref_id_to_structured = {}
                 for chunk in chunks:
                     ref_id = chunk.get("reference_id", "")
                     content = chunk.get("content", "")
+                    structured_content = chunk.get("structured_content")
                     if ref_id and content:
                         # Collect chunk content; join later to avoid quadratic string concatenation
                         ref_id_to_content.setdefault(ref_id, []).append(content)
+                        # Collect structured_content if available
+                        if structured_content:
+                            ref_id_to_structured.setdefault(ref_id, []).append(structured_content)
 
                 # Add content to references
                 enriched_references = []
@@ -468,12 +522,15 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                     if ref_id in ref_id_to_content:
                         # Keep content as a list of chunks (one file may have multiple chunks)
                         ref_copy["content"] = ref_id_to_content[ref_id]
+                        # Add structured_content if available (for programmatic parsing)
+                        if ref_id in ref_id_to_structured:
+                            ref_copy["structured_content"] = ref_id_to_structured[ref_id]
                     enriched_references.append(ref_copy)
                 references = enriched_references
 
             # Enrich references with S3 download URLs
             if request.include_references:
-                references = await _enrich_references_with_s3_url(references)
+                references = await _enrich_references_with_s3_url(references, workspace_rag)
                 return QueryResponse(response=response_content, references=references)
             else:
                 return QueryResponse(response=response_content, references=None)
@@ -560,7 +617,7 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             },
         },
     )
-    async def query_text_stream(request: QueryRequest):
+    async def query_text_stream(request: QueryRequest, http_request: Request):
         """
         Advanced RAG query endpoint with flexible streaming response.
 
@@ -688,6 +745,12 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             Use streaming mode for real-time interfaces and non-streaming for batch processing.
         """
         try:
+            # Resolve workspace-specific RAG instance
+            workspace = _get_workspace_from_request(http_request, request.workspace)
+            workspace_rag = await get_workspace_rag(workspace)
+            if workspace_rag is None:
+                workspace_rag = rag
+
             # Use the stream parameter from the request, defaulting to True if not specified
             stream_mode = request.stream if request.stream is not None else True
             param = request.to_query_params(stream_mode)
@@ -695,7 +758,7 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             from fastapi.responses import StreamingResponse
 
             # Unified approach: always use aquery_llm for all cases
-            result = await rag.aquery_llm(request.query, param=param)
+            result = await workspace_rag.aquery_llm(request.query, param=param)
 
             async def stream_generator():
                 # Extract references and LLM response from unified result
@@ -706,14 +769,19 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                 if request.include_references and request.include_chunk_content:
                     data = result.get("data", {})
                     chunks = data.get("chunks", [])
-                    # Create a mapping from reference_id to chunk content
+                    # Create a mapping from reference_id to chunk content and structured_content
                     ref_id_to_content = {}
+                    ref_id_to_structured = {}
                     for chunk in chunks:
                         ref_id = chunk.get("reference_id", "")
                         content = chunk.get("content", "")
+                        structured_content = chunk.get("structured_content")
                         if ref_id and content:
                             # Collect chunk content
                             ref_id_to_content.setdefault(ref_id, []).append(content)
+                            # Collect structured_content if available
+                            if structured_content:
+                                ref_id_to_structured.setdefault(ref_id, []).append(structured_content)
 
                     # Add content to references
                     enriched_references = []
@@ -723,12 +791,15 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                         if ref_id in ref_id_to_content:
                             # Keep content as a list of chunks (one file may have multiple chunks)
                             ref_copy["content"] = ref_id_to_content[ref_id]
+                            # Add structured_content if available (for programmatic parsing)
+                            if ref_id in ref_id_to_structured:
+                                ref_copy["structured_content"] = ref_id_to_structured[ref_id]
                         enriched_references.append(ref_copy)
                     references = enriched_references
 
                 # Enrich references with S3 download URLs
                 if request.include_references:
-                    references = await _enrich_references_with_s3_url(references)
+                    references = await _enrich_references_with_s3_url(references, workspace_rag)
 
                 if llm_response.get("is_streaming"):
                     # Streaming mode: send references first, then stream response chunks
@@ -1067,7 +1138,7 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             },
         },
     )
-    async def query_data(request: QueryRequest):
+    async def query_data(request: QueryRequest, http_request: Request):
         """
         Advanced data retrieval endpoint for structured RAG analysis.
 
@@ -1171,8 +1242,14 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             as structured data analysis typically requires source attribution.
         """
         try:
+            # Resolve workspace-specific RAG instance
+            workspace = _get_workspace_from_request(http_request, request.workspace)
+            workspace_rag = await get_workspace_rag(workspace)
+            if workspace_rag is None:
+                workspace_rag = rag
+
             param = request.to_query_params(False)  # No streaming for data endpoint
-            response = await rag.aquery_data(request.query, param=param)
+            response = await workspace_rag.aquery_data(request.query, param=param)
 
             # aquery_data returns the new format with status, message, data, and metadata
             if isinstance(response, dict):

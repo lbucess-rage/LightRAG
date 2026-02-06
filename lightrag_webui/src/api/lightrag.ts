@@ -2,6 +2,7 @@ import axios, { AxiosError } from 'axios'
 import { backendBaseUrl, popularLabelsDefaultLimit, searchLabelsDefaultLimit } from '@/lib/constants'
 import { errorMessage } from '@/lib/utils'
 import { useSettingsStore } from '@/stores/settings'
+import { useWorkspaceStore } from '@/stores/workspace'
 import { navigationService } from '@/services/navigation'
 
 // Types
@@ -285,10 +286,11 @@ const axiosInstance = axios.create({
   }
 })
 
-// Interceptor: add api key and check authentication
+// Interceptor: add api key, workspace header, and check authentication
 axiosInstance.interceptors.request.use((config) => {
   const apiKey = useSettingsStore.getState().apiKey
   const token = localStorage.getItem('LIGHTRAG-API-TOKEN');
+  const workspaceId = useWorkspaceStore.getState().currentWorkspaceId
 
   // Always include token if it exists, regardless of path
   if (token) {
@@ -296,6 +298,10 @@ axiosInstance.interceptors.request.use((config) => {
   }
   if (apiKey) {
     config.headers['X-API-Key'] = apiKey
+  }
+  // Include workspace header for multi-tenant support
+  if (workspaceId) {
+    config.headers['LIGHTRAG-WORKSPACE'] = workspaceId
   }
   return config
 })
@@ -397,6 +403,7 @@ export const queryTextStream = async (
 ) => {
   const apiKey = useSettingsStore.getState().apiKey;
   const token = localStorage.getItem('LIGHTRAG-API-TOKEN');
+  const workspaceId = useWorkspaceStore.getState().currentWorkspaceId;
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
     'Accept': 'application/x-ndjson',
@@ -406,6 +413,9 @@ export const queryTextStream = async (
   }
   if (apiKey) {
     headers['X-API-Key'] = apiKey;
+  }
+  if (workspaceId) {
+    headers['LIGHTRAG-WORKSPACE'] = workspaceId;
   }
 
   try {
@@ -1010,5 +1020,336 @@ export const updateUserPromptTemplate = async (
  */
 export const deleteUserPromptTemplate = async (templateId: string): Promise<UserPromptTemplateActionResponse> => {
   const response = await axiosInstance.delete(`/user-prompt-templates/${encodeURIComponent(templateId)}`)
+  return response.data
+}
+
+// Entity Management Types
+export type EntityResponse = {
+  entity_id: string
+  entity_type?: string
+  description?: string
+  source_id?: string
+  file_path?: string
+  created_at?: string
+  degree: number
+}
+
+export type EntitiesRequest = {
+  page: number
+  page_size: number
+  search?: string
+  entity_type?: string
+  sort_field: string
+  sort_direction: 'asc' | 'desc'
+}
+
+export type EntitiesPaginatedResponse = {
+  entities: EntityResponse[]
+  pagination: PaginationInfo
+}
+
+export type EntityTypeCount = {
+  entity_type: string
+  count: number
+}
+
+export type EntityTypesResponse = {
+  types: EntityTypeCount[]
+  total_entities: number
+}
+
+export type RelationResponse = {
+  source_id: string
+  target_id: string
+  weight?: number
+  keywords?: string
+  description?: string
+  source_chunk_id?: string
+  created_at?: string
+}
+
+export type RelationsRequest = {
+  page: number
+  page_size: number
+  search?: string
+  sort_field: string
+  sort_direction: 'asc' | 'desc'
+}
+
+export type RelationsPaginatedResponse = {
+  relations: RelationResponse[]
+  pagination: PaginationInfo
+}
+
+export type DeleteEntityResponse = {
+  status: string
+  message: string
+}
+
+export type DeleteRelationRequest = {
+  source_id: string
+  target_id: string
+}
+
+export type DeleteRelationResponse = {
+  status: string
+  message: string
+}
+
+// Entity Management API methods
+/**
+ * Get paginated list of entities
+ * @param request The pagination and filter request
+ * @returns Promise with paginated entities response
+ */
+export const getEntitiesPaginated = async (request: EntitiesRequest): Promise<EntitiesPaginatedResponse> => {
+  const response = await axiosInstance.post('/entities', request)
+  return response.data
+}
+
+/**
+ * Get all entity types with counts
+ * @returns Promise with entity types response
+ */
+export const getEntityTypes = async (): Promise<EntityTypesResponse> => {
+  const response = await axiosInstance.get('/entity-types')
+  return response.data
+}
+
+/**
+ * Get paginated list of relations
+ * @param request The pagination and search request
+ * @returns Promise with paginated relations response
+ */
+export const getRelationsPaginated = async (request: RelationsRequest): Promise<RelationsPaginatedResponse> => {
+  const response = await axiosInstance.post('/relations', request)
+  return response.data
+}
+
+/**
+ * Delete an entity
+ * @param entityId The entity ID to delete
+ * @returns Promise with delete response
+ */
+export const deleteEntity = async (entityId: string): Promise<DeleteEntityResponse> => {
+  const response = await axiosInstance.delete(`/entities/${encodeURIComponent(entityId)}`)
+  return response.data
+}
+
+/**
+ * Delete a relation between two entities
+ * @param request The delete relation request with source and target IDs
+ * @returns Promise with delete response
+ */
+export const deleteRelation = async (request: DeleteRelationRequest): Promise<DeleteRelationResponse> => {
+  const response = await axiosInstance.delete('/relations', { data: request })
+  return response.data
+}
+
+// =====================================================
+// Workspace Management Types and API
+// =====================================================
+
+export type WorkspaceInfo = {
+  workspace_id: string
+  name: string
+  description?: string
+  is_default: boolean
+  document_count: number
+  entity_count: number
+  relation_count: number
+  metadata?: Record<string, any>
+  create_time?: number
+  update_time?: number
+  is_busy: boolean
+}
+
+export type WorkspaceListResponse = {
+  workspaces: WorkspaceInfo[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export type WorkspaceCreateRequest = {
+  workspace_id: string
+  name: string
+  description?: string
+  metadata?: Record<string, any>
+}
+
+export type WorkspaceUpdateRequest = {
+  name?: string
+  description?: string
+  metadata?: Record<string, any>
+}
+
+export type WorkspaceStatsResponse = {
+  workspace_id: string
+  document_count: number
+  entity_count: number
+  relation_count: number
+  is_busy: boolean
+  busy_start_time?: number
+}
+
+export type CopySettingsRequest = {
+  target_workspace_id: string
+  include_prompts?: boolean
+  include_templates?: boolean
+}
+
+export type CopyDataRequest = {
+  target_workspace_id: string
+  include_documents?: boolean
+  include_entities?: boolean
+  include_relations?: boolean
+  include_vectors?: boolean
+}
+
+/**
+ * Get paginated list of workspaces
+ * @param page Page number (1-based)
+ * @param pageSize Number of items per page
+ * @returns Promise with paginated workspaces response
+ */
+export const getWorkspaces = async (page: number = 1, pageSize: number = 50): Promise<WorkspaceListResponse> => {
+  const response = await axiosInstance.get('/workspaces', {
+    params: { page, page_size: pageSize }
+  })
+  return response.data
+}
+
+/**
+ * Get workspace by ID
+ * @param workspaceId The workspace ID
+ * @returns Promise with workspace info
+ */
+export const getWorkspace = async (workspaceId: string): Promise<WorkspaceInfo> => {
+  const response = await axiosInstance.get(`/workspaces/${encodeURIComponent(workspaceId)}`)
+  return response.data
+}
+
+/**
+ * Create a new workspace
+ * @param request The workspace creation request
+ * @returns Promise with created workspace info
+ */
+export const createWorkspace = async (request: WorkspaceCreateRequest): Promise<WorkspaceInfo> => {
+  const response = await axiosInstance.post('/workspaces', request)
+  return response.data
+}
+
+/**
+ * Update a workspace
+ * @param workspaceId The workspace ID to update
+ * @param request The workspace update request
+ * @returns Promise with updated workspace info
+ */
+export const updateWorkspace = async (workspaceId: string, request: WorkspaceUpdateRequest): Promise<WorkspaceInfo> => {
+  const response = await axiosInstance.patch(`/workspaces/${encodeURIComponent(workspaceId)}`, request)
+  return response.data
+}
+
+/**
+ * Delete a workspace
+ * @param workspaceId The workspace ID to delete
+ * @param deleteData Whether to delete all data in the workspace
+ * @returns Promise with delete response
+ */
+export const deleteWorkspace = async (workspaceId: string, deleteData: boolean = true): Promise<{ message: string }> => {
+  const response = await axiosInstance.delete(`/workspaces/${encodeURIComponent(workspaceId)}`, {
+    params: { delete_data: deleteData }
+  })
+  return response.data
+}
+
+/**
+ * Get workspace statistics
+ * @param workspaceId The workspace ID
+ * @returns Promise with workspace stats
+ */
+export const getWorkspaceStats = async (workspaceId: string): Promise<WorkspaceStatsResponse> => {
+  const response = await axiosInstance.get(`/workspaces/${encodeURIComponent(workspaceId)}/stats`)
+  return response.data
+}
+
+/**
+ * Sync workspace statistics with actual data
+ * @param workspaceId The workspace ID
+ * @returns Promise with sync response
+ */
+export const syncWorkspaceStats = async (workspaceId: string): Promise<{ message: string }> => {
+  const response = await axiosInstance.post(`/workspaces/${encodeURIComponent(workspaceId)}/sync-stats`)
+  return response.data
+}
+
+/**
+ * Set a workspace as default
+ * @param workspaceId The workspace ID to set as default
+ * @returns Promise with response
+ */
+export const setDefaultWorkspace = async (workspaceId: string): Promise<{ message: string }> => {
+  const response = await axiosInstance.post(`/workspaces/${encodeURIComponent(workspaceId)}/set-default`)
+  return response.data
+}
+
+/**
+ * Get the default workspace
+ * @returns Promise with default workspace info
+ */
+export const getDefaultWorkspace = async (): Promise<WorkspaceInfo> => {
+  const response = await axiosInstance.get('/workspaces/default')
+  return response.data
+}
+
+/**
+ * Copy settings from one workspace to another
+ * @param sourceWorkspaceId The source workspace ID
+ * @param request The copy settings request
+ * @returns Promise with copy response
+ */
+export const copyWorkspaceSettings = async (
+  sourceWorkspaceId: string,
+  request: CopySettingsRequest
+): Promise<{ message: string; copied_items: string[] }> => {
+  const response = await axiosInstance.post(
+    `/workspaces/${encodeURIComponent(sourceWorkspaceId)}/copy-settings`,
+    request
+  )
+  return response.data
+}
+
+/**
+ * Copy data from one workspace to another
+ * @param sourceWorkspaceId The source workspace ID
+ * @param request The copy data request
+ * @returns Promise with copy response
+ */
+export const copyWorkspaceData = async (
+  sourceWorkspaceId: string,
+  request: CopyDataRequest
+): Promise<{ message: string; copied_tables: string[] }> => {
+  const response = await axiosInstance.post(
+    `/workspaces/${encodeURIComponent(sourceWorkspaceId)}/copy-data`,
+    request
+  )
+  return response.data
+}
+
+/**
+ * Move data from one workspace to another (copy then delete source)
+ * @param sourceWorkspaceId The source workspace ID
+ * @param request The move data request (same as copy)
+ * @returns Promise with move response
+ */
+export const moveWorkspaceData = async (
+  sourceWorkspaceId: string,
+  request: CopyDataRequest
+): Promise<{ message: string; moved_tables: string[]; deleted_from_source: string[] }> => {
+  const response = await axiosInstance.post(
+    `/workspaces/${encodeURIComponent(sourceWorkspaceId)}/move-data`,
+    request
+  )
   return response.data
 }

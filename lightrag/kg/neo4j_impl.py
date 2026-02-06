@@ -1820,3 +1820,540 @@ class Neo4JStorage(BaseGraphStorage):
                 f"[{self.workspace}] Error dropping Neo4j workspace '{workspace_label}' in database {self._DATABASE}: {e}"
             )
             return {"status": "error", "message": str(e)}
+
+    @READ_RETRY
+    async def get_entities_paginated(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        search: str = None,
+        entity_type: str = None,
+        sort_field: str = "entity_id",
+        sort_direction: str = "asc",
+    ) -> dict:
+        """
+        Get paginated list of entities with optional search and filtering.
+
+        Args:
+            page: Page number (1-indexed)
+            page_size: Number of items per page
+            search: Optional search query for entity_id
+            entity_type: Optional filter by entity type
+            sort_field: Field to sort by (entity_id, entity_type, created_at)
+            sort_direction: Sort direction (asc or desc)
+
+        Returns:
+            Dictionary with entities list and pagination info
+        """
+        workspace_label = self._get_workspace_label()
+        offset = (page - 1) * page_size
+
+        # Build WHERE clause
+        where_conditions = []
+        params = {"offset": offset, "limit": page_size}
+
+        if search:
+            where_conditions.append("toLower(n.entity_id) CONTAINS toLower($search)")
+            params["search"] = search
+
+        if entity_type:
+            where_conditions.append("n.entity_type = $entity_type")
+            params["entity_type"] = entity_type
+
+        where_clause = ""
+        if where_conditions:
+            where_clause = "WHERE " + " AND ".join(where_conditions)
+
+        # Validate sort field and direction
+        allowed_sort_fields = ["entity_id", "entity_type", "created_at"]
+        if sort_field not in allowed_sort_fields:
+            sort_field = "entity_id"
+        if sort_direction.lower() not in ["asc", "desc"]:
+            sort_direction = "asc"
+
+        async with self._driver.session(
+            database=self._DATABASE, default_access_mode="READ"
+        ) as session:
+            # Get total count
+            count_query = f"""
+            MATCH (n:`{workspace_label}`)
+            {where_clause}
+            RETURN count(n) as total
+            """
+            count_result = await session.run(count_query, params)
+            count_record = await count_result.single()
+            await count_result.consume()
+            total_count = count_record["total"] if count_record else 0
+
+            # Get entities with degree
+            main_query = f"""
+            MATCH (n:`{workspace_label}`)
+            {where_clause}
+            OPTIONAL MATCH (n)-[r]-()
+            WITH n, count(r) as degree
+            ORDER BY n.{sort_field} {sort_direction.upper()}
+            SKIP $offset
+            LIMIT $limit
+            RETURN n.entity_id as entity_id,
+                   n.entity_type as entity_type,
+                   n.description as description,
+                   n.source_id as source_id,
+                   n.file_path as file_path,
+                   n.created_at as created_at,
+                   degree
+            """
+            result = await session.run(main_query, params)
+            entities = []
+            async for record in result:
+                entities.append({
+                    "entity_id": record["entity_id"],
+                    "entity_type": record["entity_type"],
+                    "description": record["description"],
+                    "source_id": record["source_id"],
+                    "file_path": record["file_path"],
+                    "created_at": record["created_at"],
+                    "degree": record["degree"],
+                })
+            await result.consume()
+
+            total_pages = (total_count + page_size - 1) // page_size if total_count > 0 else 0
+
+            return {
+                "entities": entities,
+                "pagination": {
+                    "page": page,
+                    "page_size": page_size,
+                    "total_count": total_count,
+                    "total_pages": total_pages,
+                    "has_next": page < total_pages,
+                    "has_prev": page > 1,
+                },
+            }
+
+    @READ_RETRY
+    async def get_entity_type_counts(self) -> dict:
+        """
+        Get list of all entity types with their counts.
+
+        Returns:
+            Dictionary with types list and total entity count
+        """
+        workspace_label = self._get_workspace_label()
+
+        async with self._driver.session(
+            database=self._DATABASE, default_access_mode="READ"
+        ) as session:
+            query = f"""
+            MATCH (n:`{workspace_label}`)
+            WITH n.entity_type as entity_type, count(n) as count
+            ORDER BY count DESC, entity_type ASC
+            RETURN entity_type, count
+            """
+            result = await session.run(query)
+            types = []
+            total = 0
+            async for record in result:
+                entity_type = record["entity_type"]
+                count = record["count"]
+                if entity_type:
+                    types.append({
+                        "entity_type": entity_type,
+                        "count": count,
+                    })
+                total += count
+            await result.consume()
+
+            return {
+                "types": types,
+                "total_entities": total,
+            }
+
+    @READ_RETRY
+    async def get_relations_paginated(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        search: str = None,
+        sort_field: str = "source_id",
+        sort_direction: str = "asc",
+    ) -> dict:
+        """
+        Get paginated list of relations with optional search.
+
+        Args:
+            page: Page number (1-indexed)
+            page_size: Number of items per page
+            search: Optional search query for source/target/keywords
+            sort_field: Field to sort by
+            sort_direction: Sort direction (asc or desc)
+
+        Returns:
+            Dictionary with relations list and pagination info
+        """
+        workspace_label = self._get_workspace_label()
+        offset = (page - 1) * page_size
+
+        # Build WHERE clause
+        where_conditions = []
+        params = {"offset": offset, "limit": page_size}
+
+        if search:
+            where_conditions.append(
+                "(toLower(a.entity_id) CONTAINS toLower($search) OR "
+                "toLower(b.entity_id) CONTAINS toLower($search) OR "
+                "toLower(r.keywords) CONTAINS toLower($search))"
+            )
+            params["search"] = search
+
+        where_clause = ""
+        if where_conditions:
+            where_clause = "WHERE " + " AND ".join(where_conditions)
+
+        # Validate sort field and direction
+        sort_mapping = {
+            "source_id": "source_id",
+            "target_id": "target_id",
+            "weight": "weight",
+            "keywords": "keywords",
+            "created_at": "created_at",
+        }
+        sort_by = sort_mapping.get(sort_field, "source_id")
+        if sort_direction.lower() not in ["asc", "desc"]:
+            sort_direction = "asc"
+
+        async with self._driver.session(
+            database=self._DATABASE, default_access_mode="READ"
+        ) as session:
+            # Get total count
+            count_query = f"""
+            MATCH (a:`{workspace_label}`)-[r]-(b:`{workspace_label}`)
+            WHERE id(a) < id(b)
+            {"AND " + where_conditions[0] if where_conditions else ""}
+            RETURN count(r) as total
+            """
+            count_result = await session.run(count_query, params)
+            count_record = await count_result.single()
+            await count_result.consume()
+            total_count = count_record["total"] if count_record else 0
+
+            # Get relations
+            main_query = f"""
+            MATCH (a:`{workspace_label}`)-[r]-(b:`{workspace_label}`)
+            WHERE id(a) < id(b)
+            {"AND " + where_conditions[0] if where_conditions else ""}
+            WITH a.entity_id as source_id,
+                 b.entity_id as target_id,
+                 r.weight as weight,
+                 r.keywords as keywords,
+                 r.description as description,
+                 r.source_id as source_chunk_id,
+                 r.created_at as created_at
+            ORDER BY {sort_by} {sort_direction.upper()}
+            SKIP $offset
+            LIMIT $limit
+            RETURN source_id, target_id, weight, keywords, description, source_chunk_id, created_at
+            """
+            result = await session.run(main_query, params)
+            relations = []
+            async for record in result:
+                relations.append({
+                    "source_id": record["source_id"],
+                    "target_id": record["target_id"],
+                    "weight": record["weight"],
+                    "keywords": record["keywords"],
+                    "description": record["description"],
+                    "source_chunk_id": record["source_chunk_id"],
+                    "created_at": record["created_at"],
+                })
+            await result.consume()
+
+            total_pages = (total_count + page_size - 1) // page_size if total_count > 0 else 0
+
+            return {
+                "relations": relations,
+                "pagination": {
+                    "page": page,
+                    "page_size": page_size,
+                    "total_count": total_count,
+                    "total_pages": total_pages,
+                    "has_next": page < total_pages,
+                    "has_prev": page > 1,
+                },
+            }
+
+    # =====================================================
+    # Workspace Management Methods
+    # =====================================================
+
+    async def copy_workspace_graph(
+        self,
+        source_workspace: str,
+        target_workspace: str,
+        batch_size: int = 500,
+    ) -> dict:
+        """
+        Copy all nodes and relationships from source workspace to target workspace.
+
+        Args:
+            source_workspace: Source workspace label
+            target_workspace: Target workspace label
+            batch_size: Number of nodes to process in each batch
+
+        Returns:
+            Dictionary with copy statistics
+        """
+        if not self._driver:
+            await self._ensure_connected()
+
+        stats = {
+            "nodes_copied": 0,
+            "relationships_copied": 0,
+            "errors": [],
+        }
+
+        async with self._driver.session(
+            database=self._DATABASE, default_access_mode="WRITE"
+        ) as session:
+            try:
+                # Step 1: Copy all nodes from source to target workspace
+                # First, get count of nodes to copy
+                count_query = f"""
+                MATCH (n:`{source_workspace}`)
+                RETURN count(n) as total
+                """
+                count_result = await session.run(count_query)
+                count_record = await count_result.single()
+                total_nodes = count_record["total"] if count_record else 0
+                await count_result.consume()
+
+                logger.info(
+                    f"[{self.workspace}] Starting to copy {total_nodes} nodes from '{source_workspace}' to '{target_workspace}'"
+                )
+
+                # Copy nodes in batches
+                offset = 0
+                while offset < total_nodes:
+                    copy_nodes_query = f"""
+                    MATCH (n:`{source_workspace}`)
+                    WITH n
+                    ORDER BY n.entity_id
+                    SKIP $offset
+                    LIMIT $batch_size
+                    WITH n, properties(n) as props, labels(n) as node_labels
+                    CALL {{
+                        WITH n, props, node_labels
+                        MERGE (new:`{target_workspace}` {{entity_id: n.entity_id}})
+                        SET new += props
+                        WITH new, node_labels
+                        UNWIND node_labels as label
+                        CALL apoc.create.addLabels(new, [label]) YIELD node
+                        RETURN count(*) as created
+                    }}
+                    RETURN count(*) as copied
+                    """
+
+                    try:
+                        result = await session.run(
+                            copy_nodes_query,
+                            {"offset": offset, "batch_size": batch_size}
+                        )
+                        record = await result.single()
+                        copied = record["copied"] if record else 0
+                        stats["nodes_copied"] += copied
+                        await result.consume()
+                    except Exception as e:
+                        # If APOC is not available, use simpler approach
+                        if "apoc" in str(e).lower():
+                            simple_copy_query = f"""
+                            MATCH (n:`{source_workspace}`)
+                            WITH n
+                            ORDER BY n.entity_id
+                            SKIP $offset
+                            LIMIT $batch_size
+                            WITH n, properties(n) as props
+                            MERGE (new:`{target_workspace}` {{entity_id: n.entity_id}})
+                            SET new += props
+                            RETURN count(*) as copied
+                            """
+                            result = await session.run(
+                                simple_copy_query,
+                                {"offset": offset, "batch_size": batch_size}
+                            )
+                            record = await result.single()
+                            copied = record["copied"] if record else 0
+                            stats["nodes_copied"] += copied
+                            await result.consume()
+                        else:
+                            stats["errors"].append(f"Error copying nodes at offset {offset}: {str(e)}")
+
+                    offset += batch_size
+                    logger.debug(
+                        f"[{self.workspace}] Copied {stats['nodes_copied']}/{total_nodes} nodes"
+                    )
+
+                # Step 2: Copy all relationships
+                copy_rels_query = f"""
+                MATCH (a:`{source_workspace}`)-[r]->(b:`{source_workspace}`)
+                WITH a.entity_id as src_id, b.entity_id as tgt_id, type(r) as rel_type, properties(r) as rel_props
+                MATCH (new_a:`{target_workspace}` {{entity_id: src_id}})
+                MATCH (new_b:`{target_workspace}` {{entity_id: tgt_id}})
+                MERGE (new_a)-[new_r:DIRECTED]->(new_b)
+                SET new_r += rel_props
+                RETURN count(*) as copied
+                """
+
+                try:
+                    result = await session.run(copy_rels_query)
+                    record = await result.single()
+                    stats["relationships_copied"] = record["copied"] if record else 0
+                    await result.consume()
+                except Exception as e:
+                    stats["errors"].append(f"Error copying relationships: {str(e)}")
+
+                logger.info(
+                    f"[{self.workspace}] Graph copy completed: "
+                    f"{stats['nodes_copied']} nodes, {stats['relationships_copied']} relationships"
+                )
+
+            except Exception as e:
+                stats["errors"].append(f"Graph copy failed: {str(e)}")
+                logger.error(f"[{self.workspace}] Failed to copy graph: {str(e)}")
+
+        return stats
+
+    async def delete_workspace_graph(self, workspace_label: str, batch_size: int = 1000) -> dict:
+        """
+        Delete all nodes and relationships for a workspace.
+
+        Args:
+            workspace_label: Workspace label to delete
+            batch_size: Number of nodes to delete in each batch
+
+        Returns:
+            Dictionary with deletion statistics
+        """
+        if not self._driver:
+            await self._ensure_connected()
+
+        stats = {
+            "nodes_deleted": 0,
+            "relationships_deleted": 0,
+        }
+
+        async with self._driver.session(
+            database=self._DATABASE, default_access_mode="WRITE"
+        ) as session:
+            try:
+                # Delete in batches to avoid memory issues
+                while True:
+                    delete_query = f"""
+                    MATCH (n:`{workspace_label}`)
+                    WITH n LIMIT $batch_size
+                    DETACH DELETE n
+                    RETURN count(*) as deleted
+                    """
+                    result = await session.run(delete_query, {"batch_size": batch_size})
+                    record = await result.single()
+                    deleted = record["deleted"] if record else 0
+                    await result.consume()
+
+                    if deleted == 0:
+                        break
+
+                    stats["nodes_deleted"] += deleted
+                    logger.debug(
+                        f"[{self.workspace}] Deleted {stats['nodes_deleted']} nodes from '{workspace_label}'"
+                    )
+
+                logger.info(
+                    f"[{self.workspace}] Deleted workspace graph '{workspace_label}': "
+                    f"{stats['nodes_deleted']} nodes"
+                )
+
+            except Exception as e:
+                logger.error(f"[{self.workspace}] Failed to delete workspace graph: {str(e)}")
+                raise
+
+        return stats
+
+    async def move_workspace_graph(
+        self,
+        source_workspace: str,
+        target_workspace: str,
+        batch_size: int = 500,
+    ) -> dict:
+        """
+        Move all nodes and relationships from source workspace to target workspace.
+        This is a copy followed by delete.
+
+        Args:
+            source_workspace: Source workspace label
+            target_workspace: Target workspace label
+            batch_size: Number of nodes to process in each batch
+
+        Returns:
+            Dictionary with move statistics
+        """
+        # First copy
+        copy_stats = await self.copy_workspace_graph(
+            source_workspace, target_workspace, batch_size
+        )
+
+        # If copy was successful, delete source
+        if not copy_stats.get("errors"):
+            delete_stats = await self.delete_workspace_graph(source_workspace, batch_size)
+            return {
+                "nodes_moved": copy_stats["nodes_copied"],
+                "relationships_moved": copy_stats["relationships_copied"],
+                "source_deleted": True,
+            }
+        else:
+            return {
+                "nodes_moved": copy_stats["nodes_copied"],
+                "relationships_moved": copy_stats["relationships_copied"],
+                "source_deleted": False,
+                "errors": copy_stats["errors"],
+            }
+
+    async def get_workspace_graph_stats(self, workspace_label: str) -> dict:
+        """
+        Get statistics for a workspace graph.
+
+        Args:
+            workspace_label: Workspace label
+
+        Returns:
+            Dictionary with node and relationship counts
+        """
+        if not self._driver:
+            await self._ensure_connected()
+
+        async with self._driver.session(
+            database=self._DATABASE, default_access_mode="READ"
+        ) as session:
+            # Count nodes
+            node_query = f"""
+            MATCH (n:`{workspace_label}`)
+            RETURN count(n) as node_count
+            """
+            node_result = await session.run(node_query)
+            node_record = await node_result.single()
+            node_count = node_record["node_count"] if node_record else 0
+            await node_result.consume()
+
+            # Count relationships
+            rel_query = f"""
+            MATCH (a:`{workspace_label}`)-[r]-(b:`{workspace_label}`)
+            WHERE id(a) < id(b)
+            RETURN count(r) as rel_count
+            """
+            rel_result = await session.run(rel_query)
+            rel_record = await rel_result.single()
+            rel_count = rel_record["rel_count"] if rel_record else 0
+            await rel_result.consume()
+
+            return {
+                "workspace": workspace_label,
+                "node_count": node_count,
+                "relationship_count": rel_count,
+            }

@@ -6,7 +6,7 @@ import { Message, QueryRequest } from '@/api/lightrag'
 
 type Theme = 'dark' | 'light' | 'system'
 type Language = 'en' | 'zh' | 'fr' | 'ar' | 'zh_TW'
-type Tab = 'documents' | 'knowledge-graph' | 'retrieval' | 'api' | 'prompts'
+type Tab = 'documents' | 'knowledge-graph' | 'entity-management' | 'schema' | 'retrieval' | 'api' | 'prompts' | 'workspaces'
 
 interface SettingsState {
   // Document manager settings
@@ -115,7 +115,7 @@ const useSettingsStoreBase = create<SettingsState>()(
       apiKey: null,
 
       currentTab: 'documents',
-      showFileName: false,
+      showFileName: true,
       documentsPageSize: 10,
 
       retrievalHistory: [],
@@ -239,7 +239,7 @@ const useSettingsStoreBase = create<SettingsState>()(
     {
       name: 'settings-storage',
       storage: createJSONStorage(() => localStorage),
-      version: 20,
+      version: 21,
       migrate: (state: any, version: number) => {
         if (version < 2) {
           state.showEdgeLabel = false
@@ -344,6 +344,10 @@ const useSettingsStoreBase = create<SettingsState>()(
           if (state.querySettings) {
             state.querySettings.response_type = 'Multiple Paragraphs'
           }
+        }
+        if (version < 21) {
+          // Show filename by default in document list
+          state.showFileName = true
         }
         return state
       }

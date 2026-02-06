@@ -4,13 +4,56 @@ This module contains all graph-related routes for the LightRAG API.
 
 from typing import Optional, Dict, Any
 import traceback
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from lightrag.utils import logger
+from lightrag.kg.shared_storage import get_default_workspace
 from ..utils_api import get_combined_auth_dependency
 
 router = APIRouter(tags=["graph"])
+
+# Import RAG workspace management functions (will be available after server startup)
+_get_rag_for_workspace = None
+
+
+def set_rag_workspace_getter(getter_func):
+    """Set the function to get RAG instance by workspace.
+
+    This is called from lightrag_server.py after the RAG factory is configured.
+    """
+    global _get_rag_for_workspace
+    _get_rag_for_workspace = getter_func
+
+
+async def get_workspace_rag(workspace: str):
+    """Get RAG instance for the specified workspace.
+
+    Args:
+        workspace: Workspace identifier
+
+    Returns:
+        RAG instance for the workspace, or None if not available
+    """
+    if _get_rag_for_workspace is not None:
+        return await _get_rag_for_workspace(workspace)
+    return None
+
+
+def _get_workspace_from_request(request: Request) -> str:
+    """Extract workspace from request header.
+
+    Args:
+        request: FastAPI Request object
+
+    Returns:
+        Workspace ID from header or default workspace
+    """
+    workspace = request.headers.get("LIGHTRAG-WORKSPACE", "").strip()
+    if workspace:
+        return workspace
+    # Fall back to server default workspace
+    return get_default_workspace() or "base"
 
 
 class EntityUpdateRequest(BaseModel):
@@ -90,7 +133,7 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
     combined_auth = get_combined_auth_dependency(api_key)
 
     @router.get("/graph/label/list", dependencies=[Depends(combined_auth)])
-    async def get_graph_labels():
+    async def get_graph_labels(http_request: Request):
         """
         Get all graph labels
 
@@ -98,7 +141,16 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
             List[str]: List of graph labels
         """
         try:
-            return await rag.get_graph_labels()
+            # Get workspace-specific RAG instance
+            workspace = _get_workspace_from_request(http_request)
+            workspace_rag = await get_workspace_rag(workspace)
+            if workspace_rag is None:
+                workspace_rag = rag  # Fall back to default RAG instance
+                logger.warning(f"[Graph] Using default RAG instance for workspace: {workspace}")
+            else:
+                logger.debug(f"[Graph] Using workspace-specific RAG instance for: {workspace}")
+
+            return await workspace_rag.get_graph_labels()
         except Exception as e:
             logger.error(f"Error getting graph labels: {str(e)}")
             logger.error(traceback.format_exc())
@@ -108,6 +160,7 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
 
     @router.get("/graph/label/popular", dependencies=[Depends(combined_auth)])
     async def get_popular_labels(
+        http_request: Request,
         limit: int = Query(
             300, description="Maximum number of popular labels to return", ge=1, le=1000
         ),
@@ -122,7 +175,16 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
             List[str]: List of popular labels sorted by degree (highest first)
         """
         try:
-            return await rag.chunk_entity_relation_graph.get_popular_labels(limit)
+            # Get workspace-specific RAG instance
+            workspace = _get_workspace_from_request(http_request)
+            workspace_rag = await get_workspace_rag(workspace)
+            if workspace_rag is None:
+                workspace_rag = rag
+                logger.warning(f"[Graph] Using default RAG instance for workspace: {workspace}")
+            else:
+                logger.debug(f"[Graph] Using workspace-specific RAG instance for: {workspace}")
+
+            return await workspace_rag.chunk_entity_relation_graph.get_popular_labels(limit)
         except Exception as e:
             logger.error(f"Error getting popular labels: {str(e)}")
             logger.error(traceback.format_exc())
@@ -132,6 +194,7 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
 
     @router.get("/graph/label/search", dependencies=[Depends(combined_auth)])
     async def search_labels(
+        http_request: Request,
         q: str = Query(..., description="Search query string"),
         limit: int = Query(
             50, description="Maximum number of search results to return", ge=1, le=100
@@ -148,7 +211,16 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
             List[str]: List of matching labels sorted by relevance
         """
         try:
-            return await rag.chunk_entity_relation_graph.search_labels(q, limit)
+            # Get workspace-specific RAG instance
+            workspace = _get_workspace_from_request(http_request)
+            workspace_rag = await get_workspace_rag(workspace)
+            if workspace_rag is None:
+                workspace_rag = rag
+                logger.warning(f"[Graph] Using default RAG instance for workspace: {workspace}")
+            else:
+                logger.debug(f"[Graph] Using workspace-specific RAG instance for: {workspace}")
+
+            return await workspace_rag.chunk_entity_relation_graph.search_labels(q, limit)
         except Exception as e:
             logger.error(f"Error searching labels with query '{q}': {str(e)}")
             logger.error(traceback.format_exc())
@@ -158,6 +230,7 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
 
     @router.get("/graphs", dependencies=[Depends(combined_auth)])
     async def get_knowledge_graph(
+        http_request: Request,
         label: str = Query(..., description="Label to get knowledge graph for"),
         max_depth: int = Query(3, description="Maximum depth of graph", ge=1),
         max_nodes: int = Query(1000, description="Maximum nodes to return", ge=1),
@@ -177,12 +250,21 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
             Dict[str, List[str]]: Knowledge graph for label
         """
         try:
+            # Get workspace-specific RAG instance
+            workspace = _get_workspace_from_request(http_request)
+            workspace_rag = await get_workspace_rag(workspace)
+            if workspace_rag is None:
+                workspace_rag = rag
+                logger.warning(f"[Graph] Using default RAG instance for workspace: {workspace}")
+            else:
+                logger.debug(f"[Graph] Using workspace-specific RAG instance for: {workspace}")
+
             # Log the label parameter to check for leading spaces
             logger.debug(
                 f"get_knowledge_graph called with label: '{label}' (length: {len(label)}, repr: {repr(label)})"
             )
 
-            return await rag.get_knowledge_graph(
+            return await workspace_rag.get_knowledge_graph(
                 node_label=label,
                 max_depth=max_depth,
                 max_nodes=max_nodes,
@@ -196,6 +278,7 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
 
     @router.get("/graph/entity/exists", dependencies=[Depends(combined_auth)])
     async def check_entity_exists(
+        http_request: Request,
         name: str = Query(..., description="Entity name to check"),
     ):
         """
@@ -208,7 +291,16 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
             Dict[str, bool]: Dictionary with 'exists' key indicating if entity exists
         """
         try:
-            exists = await rag.chunk_entity_relation_graph.has_node(name)
+            # Get workspace-specific RAG instance
+            workspace = _get_workspace_from_request(http_request)
+            workspace_rag = await get_workspace_rag(workspace)
+            if workspace_rag is None:
+                workspace_rag = rag
+                logger.warning(f"[Graph] Using default RAG instance for workspace: {workspace}")
+            else:
+                logger.debug(f"[Graph] Using workspace-specific RAG instance for: {workspace}")
+
+            exists = await workspace_rag.chunk_entity_relation_graph.has_node(name)
             return {"exists": exists}
         except Exception as e:
             logger.error(f"Error checking entity existence for '{name}': {str(e)}")
@@ -218,7 +310,7 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
             )
 
     @router.post("/graph/entity/edit", dependencies=[Depends(combined_auth)])
-    async def update_entity(request: EntityUpdateRequest):
+    async def update_entity(http_request: Request, request: EntityUpdateRequest):
         """
         Update an entity's properties in the knowledge graph
 
@@ -353,7 +445,16 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
             }
         """
         try:
-            result = await rag.aedit_entity(
+            # Get workspace-specific RAG instance
+            workspace = _get_workspace_from_request(http_request)
+            workspace_rag = await get_workspace_rag(workspace)
+            if workspace_rag is None:
+                workspace_rag = rag
+                logger.warning(f"[Graph] Using default RAG instance for workspace: {workspace}")
+            else:
+                logger.debug(f"[Graph] Using workspace-specific RAG instance for: {workspace}")
+
+            result = await workspace_rag.aedit_entity(
                 entity_name=request.entity_name,
                 updated_data=request.updated_data,
                 allow_rename=request.allow_rename,
@@ -408,7 +509,7 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
             )
 
     @router.post("/graph/relation/edit", dependencies=[Depends(combined_auth)])
-    async def update_relation(request: RelationUpdateRequest):
+    async def update_relation(http_request: Request, request: RelationUpdateRequest):
         """Update a relation's properties in the knowledge graph
 
         Args:
@@ -418,7 +519,16 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
             Dict: Updated relation information
         """
         try:
-            result = await rag.aedit_relation(
+            # Get workspace-specific RAG instance
+            workspace = _get_workspace_from_request(http_request)
+            workspace_rag = await get_workspace_rag(workspace)
+            if workspace_rag is None:
+                workspace_rag = rag
+                logger.warning(f"[Graph] Using default RAG instance for workspace: {workspace}")
+            else:
+                logger.debug(f"[Graph] Using workspace-specific RAG instance for: {workspace}")
+
+            result = await workspace_rag.aedit_relation(
                 source_entity=request.source_id,
                 target_entity=request.target_id,
                 updated_data=request.updated_data,
@@ -443,7 +553,7 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
             )
 
     @router.post("/graph/entity/create", dependencies=[Depends(combined_auth)])
-    async def create_entity(request: EntityCreateRequest):
+    async def create_entity(http_request: Request, request: EntityCreateRequest):
         """
         Create a new entity in the knowledge graph
 
@@ -488,12 +598,21 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
             }
         """
         try:
+            # Get workspace-specific RAG instance
+            workspace = _get_workspace_from_request(http_request)
+            workspace_rag = await get_workspace_rag(workspace)
+            if workspace_rag is None:
+                workspace_rag = rag
+                logger.warning(f"[Graph] Using default RAG instance for workspace: {workspace}")
+            else:
+                logger.debug(f"[Graph] Using workspace-specific RAG instance for: {workspace}")
+
             # Use the proper acreate_entity method which handles:
             # - Graph lock for concurrency
             # - Vector embedding creation in entities_vdb
             # - Metadata population and defaults
             # - Index consistency via _edit_entity_done
-            result = await rag.acreate_entity(
+            result = await workspace_rag.acreate_entity(
                 entity_name=request.entity_name,
                 entity_data=request.entity_data,
             )
@@ -516,7 +635,7 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
             )
 
     @router.post("/graph/relation/create", dependencies=[Depends(combined_auth)])
-    async def create_relation(request: RelationCreateRequest):
+    async def create_relation(http_request: Request, request: RelationCreateRequest):
         """
         Create a new relationship between two entities in the knowledge graph
 
@@ -573,13 +692,22 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
             }
         """
         try:
+            # Get workspace-specific RAG instance
+            workspace = _get_workspace_from_request(http_request)
+            workspace_rag = await get_workspace_rag(workspace)
+            if workspace_rag is None:
+                workspace_rag = rag
+                logger.warning(f"[Graph] Using default RAG instance for workspace: {workspace}")
+            else:
+                logger.debug(f"[Graph] Using workspace-specific RAG instance for: {workspace}")
+
             # Use the proper acreate_relation method which handles:
             # - Graph lock for concurrency
             # - Entity existence validation
             # - Duplicate relation checks
             # - Vector embedding creation in relationships_vdb
             # - Index consistency via _edit_relation_done
-            result = await rag.acreate_relation(
+            result = await workspace_rag.acreate_relation(
                 source_entity=request.source_entity,
                 target_entity=request.target_entity,
                 relation_data=request.relation_data,
@@ -605,7 +733,7 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
             )
 
     @router.post("/graph/entities/merge", dependencies=[Depends(combined_auth)])
-    async def merge_entities(request: EntityMergeRequest):
+    async def merge_entities(http_request: Request, request: EntityMergeRequest):
         """
         Merge multiple entities into a single entity, preserving all relationships
 
@@ -662,7 +790,16 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
             - This operation cannot be undone, so verify entity names before merging
         """
         try:
-            result = await rag.amerge_entities(
+            # Get workspace-specific RAG instance
+            workspace = _get_workspace_from_request(http_request)
+            workspace_rag = await get_workspace_rag(workspace)
+            if workspace_rag is None:
+                workspace_rag = rag
+                logger.warning(f"[Graph] Using default RAG instance for workspace: {workspace}")
+            else:
+                logger.debug(f"[Graph] Using workspace-specific RAG instance for: {workspace}")
+
+            result = await workspace_rag.amerge_entities(
                 source_entities=request.entities_to_change,
                 target_entity=request.entity_to_change_into,
             )

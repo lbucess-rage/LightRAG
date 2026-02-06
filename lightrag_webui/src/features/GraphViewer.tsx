@@ -23,7 +23,9 @@ import LegendButton from '@/components/graph/LegendButton'
 
 import { useSettingsStore } from '@/stores/settings'
 import { useGraphStore } from '@/stores/graph'
+import { useWorkspaceStore } from '@/stores/workspace'
 import { labelColorDarkTheme, labelColorLightTheme } from '@/lib/constants'
+import { SearchHistoryManager } from '@/utils/SearchHistoryManager'
 
 import '@react-sigma/core/lib/style.css'
 import '@react-sigma/graph-search/lib/style.css'
@@ -111,6 +113,7 @@ const GraphViewer = () => {
   const [isThemeSwitching, setIsThemeSwitching] = useState(false)
   const sigmaRef = useRef<any>(null)
   const prevTheme = useRef<string>('')
+  const prevWorkspaceRef = useRef<string | null>(null)
 
   const selectedNode = useGraphStore.use.selectedNode()
   const focusedNode = useGraphStore.use.focusedNode()
@@ -122,12 +125,41 @@ const GraphViewer = () => {
   const enableNodeDrag = useSettingsStore.use.enableNodeDrag()
   const showLegend = useSettingsStore.use.showLegend()
   const theme = useSettingsStore.use.theme()
+  const currentWorkspaceId = useWorkspaceStore.use.currentWorkspaceId()
 
   // Memoize sigma settings to prevent unnecessary re-creation
   const memoizedSigmaSettings = useMemo(() => {
     const isDarkTheme = theme === 'dark'
     return createSigmaSettings(isDarkTheme)
   }, [theme])
+
+  // Reset graph state when workspace changes
+  useEffect(() => {
+    if (prevWorkspaceRef.current !== null && prevWorkspaceRef.current !== currentWorkspaceId) {
+      console.log('Workspace changed, resetting graph state:', prevWorkspaceRef.current, '->', currentWorkspaceId)
+
+      // Reset graph store state
+      useGraphStore.getState().reset()
+
+      // Reset graph fetch flags
+      useGraphStore.getState().setGraphDataFetchAttempted(false)
+      useGraphStore.getState().setLabelsFetchAttempted(false)
+      useGraphStore.getState().setLastSuccessfulQueryLabel('')
+
+      // Clear legend cache
+      useGraphStore.getState().setTypeColorMap(new Map<string, string>())
+
+      // Clear search history for fresh workspace data
+      SearchHistoryManager.clearHistory()
+
+      // Reset query label to trigger fresh fetch
+      useSettingsStore.getState().setQueryLabel('*')
+
+      // Force data version increment to trigger refresh
+      useGraphStore.getState().incrementGraphDataVersion()
+    }
+    prevWorkspaceRef.current = currentWorkspaceId
+  }, [currentWorkspaceId])
 
   // Initialize sigma settings based on theme with theme switching protection
   useEffect(() => {

@@ -13,8 +13,10 @@ SCHEMA_DISCOVERY_SYSTEM_PROMPT = """당신은 지식 그래프 스키마 설계 
 
 ## 추출 원칙
 
-1. **도메인 특화**: 범용적인 타입(Person, Organization) 대신 도메인에 맞는 구체적인 타입을 사용합니다.
-   - 나쁜 예: Person → 좋은 예: Customer, Agent, Courier
+1. **도메인 특화 + 보편적 타입 균형**:
+   - 도메인에 맞는 구체적인 타입을 우선 정의합니다.
+   - 단, 보편적으로 유용한 상위 타입(Person, Organization, Location 등)도 필요시 포함합니다.
+   - 예: Customer(도메인 특화) + Person(상위 타입) 모두 유용할 수 있음
 
 2. **일관성**: 동일한 개념에 대해 일관된 이름을 사용합니다.
    - 고객, 구매자, 회원 → Customer로 통일
@@ -27,6 +29,8 @@ SCHEMA_DISCOVERY_SYSTEM_PROMPT = """당신은 지식 그래프 스키마 설계 
    - Customer -[INQUIRY]-> InquiryType (X, 모호함)
 
 5. **실용성**: 실제로 추출 가능한 수준의 타입만 정의합니다.
+
+6. **포괄성**: 문서에 언급되지 않더라도 도메인에서 일반적으로 중요한 개념은 포함합니다.
 
 ## 이름 규칙
 
@@ -76,7 +80,8 @@ SCHEMA_DISCOVERY_USER_PROMPT = """다음 문서들을 분석하여 이 도메인
 ## 추가 컨텍스트
 
 - 언어: {language}
-- 도메인 힌트: {domain_hints}
+- 도메인 컨텍스트: {domain_hints}
+  (도메인 설명과 핵심 키워드를 참고하여 스키마 분석에 활용하세요)
 
 JSON 형식으로 결과를 출력해주세요."""
 
@@ -133,6 +138,110 @@ SCHEMA_REFINEMENT_USER_PROMPT = """다음 초기 스키마를 검토하고 개�
 4. 이름 규칙 정규화
 
 개선된 스키마와 변경 내역을 JSON 형식으로 출력해주세요."""
+
+
+# =============================================================================
+# Domain Keyword Discovery Prompts
+# =============================================================================
+
+DOMAIN_KEYWORD_DISCOVERY_SYSTEM_PROMPT = """당신은 지식 그래프 스키마 설계 전문가입니다.
+주어진 도메인 키워드를 **심층 분석**하여 해당 도메인의 **포괄적인** 엔티티 타입과 관계 타입을 생성합니다.
+
+## 핵심 원칙: 키워드는 힌트이지 엔티티 목록이 아닙니다!
+
+**잘못된 접근**: 키워드 "호텔"을 받으면 Hotel 엔티티 1개만 생성
+**올바른 접근**: 키워드 "호텔"을 받으면 호텔 도메인 분석 후 관련 엔티티들 생성
+  - Hotel (호텔), Room (객실), RoomType (객실유형), Amenity (편의시설),
+  - Floor (층), Building (건물), Guest (투숙객), Staff (직원) 등
+
+## 생성 원칙
+
+1. **도메인 심층 분석**: 각 키워드가 나타내는 도메인 영역을 깊이 분석합니다.
+2. **계층 구조 파악**: 상위 개념과 하위 개념을 구분합니다 (예: 음식 → 중식, 한식, 양식)
+3. **숨겨진 개념 발굴**: 키워드에 없더라도 도메인에서 필수적인 개념을 추가합니다.
+4. **행위자/객체/속성 분류**:
+   - 행위자: 고객, 직원, 운영자 등
+   - 객체: 예약, 주문, 메뉴 등
+   - 속성/타입: 상태, 유형, 카테고리 등
+5. **관계 풍부화**: 단순 소유 관계 외에도 동작, 상태 변화, 연관 관계를 정의합니다.
+
+## 이름 규칙
+
+- 엔티티 타입: PascalCase (예: Hotel, RoomType, CustomerService)
+- 관계 타입: UPPER_SNAKE_CASE (예: LOCATED_AT, BELONGS_TO, SERVES)
+
+## 출력 형식
+
+반드시 아래 JSON 형식으로 출력하세요:
+
+```json
+{
+  "entity_types": [
+    {
+      "name": "EnglishName",
+      "display_name": "한글표시명",
+      "description": "이 엔티티 타입에 대한 설명",
+      "examples": ["예시1", "예시2", "예시3"]
+    }
+  ],
+  "relation_types": [
+    {
+      "name": "RELATION_NAME",
+      "display_name": "관계표시명",
+      "description": "이 관계에 대한 설명",
+      "source_types": ["SourceEntityType"],
+      "target_types": ["TargetEntityType"]
+    }
+  ],
+  "domain_summary": "이 도메인에 대한 간략한 요약"
+}
+```"""
+
+DOMAIN_KEYWORD_DISCOVERY_USER_PROMPT = """다음 도메인 키워드들을 **심층 분석**하여 포괄적인 스키마를 생성해주세요.
+
+## 도메인 키워드
+
+{domain_keywords}
+
+## 중요: 키워드를 단순히 엔티티로 매핑하지 마세요!
+
+각 키워드를 도메인 힌트로 사용하여 관련된 모든 개념을 도출하세요.
+
+### 예시 - "호텔" 키워드 분석
+- 시설: Hotel, Building, Floor, Room, Lobby
+- 객실: RoomType, Amenity, Bed, Bathroom
+- 인력: Staff, Manager, Receptionist, Housekeeping
+- 서비스: RoomService, Concierge, Valet
+- 운영: Shift, Schedule, Policy
+
+### 예시 - "예약" 키워드 분석
+- 예약: Reservation, Booking, Appointment
+- 상태: ReservationStatus (대기, 확정, 취소, 완료)
+- 관련: TimeSlot, Availability, Capacity
+- 고객: Guest, Customer, Member
+
+## 요청 사항
+
+1. 각 키워드를 **도메인 영역**으로 해석하고 관련 엔티티들을 생성하세요
+2. 최대 {max_entity_types}개의 엔티티 타입을 생성하세요 (적극적으로 채우세요)
+3. 최대 {max_relation_types}개의 관계 타입을 생성하세요
+4. 다음 관점에서 엔티티를 고려하세요:
+   - **행위자**: 누가 관련되는가? (고객, 직원, 관리자 등)
+   - **객체**: 무엇이 관리되는가? (예약, 주문, 좌석 등)
+   - **장소**: 어디서 발생하는가? (매장, 지점, 구역 등)
+   - **시간**: 언제와 관련되는가? (시간대, 요일, 시즌 등)
+   - **분류**: 어떤 유형이 있는가? (메뉴유형, 객실유형 등)
+   - **상태**: 어떤 상태가 있는가? (예약상태, 주문상태 등)
+5. 관계는 다양하게 정의하세요:
+   - 소유/포함: HAS, CONTAINS, INCLUDES
+   - 위치: LOCATED_AT, BELONGS_TO
+   - 동작: SERVES, MANAGES, HANDLES
+   - 상태: HAS_STATUS, TRANSITIONS_TO
+   - 연관: RELATED_TO, ASSOCIATED_WITH
+
+## 출력 언어: {language}
+
+JSON 형식으로 결과를 출력해주세요."""
 
 # =============================================================================
 # Domain-specific Hints
@@ -237,6 +346,159 @@ DOMAIN_HINTS = {
 # =============================================================================
 # Few-shot Examples
 # =============================================================================
+
+# =============================================================================
+# Default Entity/Relation Types for Contact Center Domain
+# =============================================================================
+
+DEFAULT_ENTITY_TYPES = [
+    {
+        "name": "Customer",
+        "display_name": "고객",
+        "description": "서비스를 이용하고 문의를 제기하는 고객",
+        "examples": ["고객", "회원", "이용자", "구매자"],
+    },
+    {
+        "name": "Agent",
+        "display_name": "상담원",
+        "description": "고객 문의를 처리하는 상담 직원",
+        "examples": ["상담원", "담당자", "상담사", "CS직원"],
+    },
+    {
+        "name": "Inquiry",
+        "display_name": "문의",
+        "description": "고객이 제기하는 문의/요청 건",
+        "examples": ["문의", "요청", "민원", "상담건"],
+    },
+    {
+        "name": "InquiryType",
+        "display_name": "문의유형",
+        "description": "문의의 유형/카테고리",
+        "examples": ["배송문의", "환불요청", "제품불량", "사용방법"],
+    },
+    {
+        "name": "Channel",
+        "display_name": "채널",
+        "description": "고객 접촉 채널",
+        "examples": ["전화", "채팅", "이메일", "카카오톡", "홈페이지"],
+    },
+    {
+        "name": "Product",
+        "display_name": "상품",
+        "description": "서비스 또는 상품",
+        "examples": ["상품", "서비스", "제품", "품목"],
+    },
+    {
+        "name": "Policy",
+        "display_name": "정책",
+        "description": "처리 기준이 되는 정책/규정/약관",
+        "examples": ["환불정책", "배송규정", "이용약관", "처리기준"],
+    },
+    {
+        "name": "Resolution",
+        "display_name": "해결방안",
+        "description": "문의에 대한 처리 결과/해결 방법",
+        "examples": ["환불처리", "재배송", "교환", "보상"],
+    },
+    {
+        "name": "Status",
+        "display_name": "상태",
+        "description": "처리 상태/진행 상태",
+        "examples": ["접수", "처리중", "완료", "보류", "이관"],
+    },
+    {
+        "name": "Organization",
+        "display_name": "조직",
+        "description": "회사, 부서, 팀 등 조직 단위",
+        "examples": ["회사", "부서", "팀", "센터", "지점"],
+    },
+    {
+        "name": "Location",
+        "display_name": "장소",
+        "description": "물리적 위치/장소",
+        "examples": ["매장", "센터", "창고", "배송지"],
+    },
+    {
+        "name": "Document",
+        "display_name": "문서",
+        "description": "관련 문서/자료",
+        "examples": ["매뉴얼", "가이드", "안내문", "공지사항"],
+    },
+]
+
+DEFAULT_RELATION_TYPES = [
+    {
+        "name": "SUBMITTED",
+        "display_name": "접수함",
+        "description": "고객이 문의를 접수하는 관계",
+        "source_types": ["Customer"],
+        "target_types": ["Inquiry", "InquiryType"],
+    },
+    {
+        "name": "HANDLED",
+        "display_name": "처리함",
+        "description": "상담원이 문의를 처리하는 관계",
+        "source_types": ["Agent"],
+        "target_types": ["Inquiry", "InquiryType"],
+    },
+    {
+        "name": "INQUIRED_ABOUT",
+        "display_name": "문의대상",
+        "description": "문의가 특정 상품/서비스에 대한 것임",
+        "source_types": ["Inquiry"],
+        "target_types": ["Product"],
+    },
+    {
+        "name": "RESOLVED_WITH",
+        "display_name": "해결됨",
+        "description": "문의가 특정 방안으로 해결됨",
+        "source_types": ["Inquiry"],
+        "target_types": ["Resolution"],
+    },
+    {
+        "name": "CONTACTED_VIA",
+        "display_name": "채널로연락",
+        "description": "고객이 특정 채널로 연락함",
+        "source_types": ["Customer", "Inquiry"],
+        "target_types": ["Channel"],
+    },
+    {
+        "name": "FOLLOWS_POLICY",
+        "display_name": "정책준수",
+        "description": "처리가 특정 정책을 따름",
+        "source_types": ["Resolution", "Agent"],
+        "target_types": ["Policy"],
+    },
+    {
+        "name": "HAS_STATUS",
+        "display_name": "상태",
+        "description": "문의/처리의 현재 상태",
+        "source_types": ["Inquiry"],
+        "target_types": ["Status"],
+    },
+    {
+        "name": "BELONGS_TO",
+        "display_name": "소속",
+        "description": "소속 관계",
+        "source_types": ["Agent", "Product"],
+        "target_types": ["Organization"],
+    },
+    {
+        "name": "LOCATED_AT",
+        "display_name": "위치",
+        "description": "위치 관계",
+        "source_types": ["Organization", "Product"],
+        "target_types": ["Location"],
+    },
+    {
+        "name": "REFERENCES",
+        "display_name": "참조",
+        "description": "문서/정책을 참조함",
+        "source_types": ["Inquiry", "Resolution"],
+        "target_types": ["Document", "Policy"],
+    },
+]
+
 
 SCHEMA_DISCOVERY_EXAMPLES = """## 예시 입력
 

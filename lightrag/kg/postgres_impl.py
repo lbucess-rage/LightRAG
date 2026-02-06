@@ -853,6 +853,68 @@ class PostgreSQLDB:
                 f"Failed to add llm_cache_list column to LIGHTRAG_DOC_CHUNKS: {e}"
             )
 
+    async def _migrate_text_chunks_add_structured_content(self):
+        """Add structured_content column to LIGHTRAG_DOC_CHUNKS table if it doesn't exist"""
+        try:
+            # Check if structured_content column exists
+            check_column_sql = """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'lightrag_doc_chunks'
+            AND column_name = 'structured_content'
+            """
+
+            column_info = await self.query(check_column_sql)
+            if not column_info:
+                logger.info("Adding structured_content column to LIGHTRAG_DOC_CHUNKS table")
+                add_column_sql = """
+                ALTER TABLE LIGHTRAG_DOC_CHUNKS
+                ADD COLUMN structured_content JSONB NULL
+                """
+                await self.execute(add_column_sql)
+                logger.info(
+                    "Successfully added structured_content column to LIGHTRAG_DOC_CHUNKS table"
+                )
+            else:
+                logger.info(
+                    "structured_content column already exists in LIGHTRAG_DOC_CHUNKS table"
+                )
+        except Exception as e:
+            logger.warning(
+                f"Failed to add structured_content column to LIGHTRAG_DOC_CHUNKS: {e}"
+            )
+
+    async def _migrate_vdb_chunks_add_structured_content(self):
+        """Add structured_content column to LIGHTRAG_VDB_CHUNKS table if it doesn't exist"""
+        try:
+            # Check if structured_content column exists
+            check_column_sql = """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'lightrag_vdb_chunks'
+            AND column_name = 'structured_content'
+            """
+
+            column_info = await self.query(check_column_sql)
+            if not column_info:
+                logger.info("Adding structured_content column to LIGHTRAG_VDB_CHUNKS table")
+                add_column_sql = """
+                ALTER TABLE LIGHTRAG_VDB_CHUNKS
+                ADD COLUMN structured_content JSONB NULL
+                """
+                await self.execute(add_column_sql)
+                logger.info(
+                    "Successfully added structured_content column to LIGHTRAG_VDB_CHUNKS table"
+                )
+            else:
+                logger.info(
+                    "structured_content column already exists in LIGHTRAG_VDB_CHUNKS table"
+                )
+        except Exception as e:
+            logger.warning(
+                f"Failed to add structured_content column to LIGHTRAG_VDB_CHUNKS: {e}"
+            )
+
     async def _migrate_doc_status_add_track_id(self):
         """Add track_id column to LIGHTRAG_DOC_STATUS table if it doesn't exist and create index"""
         try:
@@ -1254,6 +1316,22 @@ class PostgreSQLDB:
                 f"PostgreSQL, Failed to migrate text chunks llm_cache_list field: {e}"
             )
 
+        # Migrate text chunks to add structured_content field if needed
+        try:
+            await self._migrate_text_chunks_add_structured_content()
+        except Exception as e:
+            logger.error(
+                f"PostgreSQL, Failed to migrate text chunks structured_content field: {e}"
+            )
+
+        # Migrate vdb chunks to add structured_content field if needed
+        try:
+            await self._migrate_vdb_chunks_add_structured_content()
+        except Exception as e:
+            logger.error(
+                f"PostgreSQL, Failed to migrate vdb chunks structured_content field: {e}"
+            )
+
         # Migrate field lengths for entity_name, source_id, target_id, and file_path
         try:
             await self._migrate_field_lengths()
@@ -1297,6 +1375,46 @@ class PostgreSQLDB:
             logger.error(
                 f"PostgreSQL, Failed to create full entities/relations tables: {e}"
             )
+
+        # Migrate to ensure LIGHTRAG_WORKSPACES table exists and discover existing workspaces
+        try:
+            await self._migrate_workspaces()
+        except Exception as e:
+            logger.error(f"PostgreSQL, Failed to migrate workspaces: {e}")
+
+    async def _migrate_workspaces(self):
+        """Ensure LIGHTRAG_WORKSPACES table exists and discover existing workspaces."""
+        table_name = "LIGHTRAG_WORKSPACES"
+
+        try:
+            # Check if table exists
+            check_sql = f"SELECT 1 FROM {table_name} LIMIT 1"
+            await self.query(check_sql)
+            logger.debug(f"Table {table_name} already exists")
+        except Exception:
+            # Create table
+            try:
+                await self.execute(TABLES[table_name]["ddl"])
+                logger.info(f"Successfully created {table_name} table")
+
+                # Create index
+                try:
+                    index_sql = f"CREATE INDEX idx_{table_name.lower()}_is_default ON {table_name}(is_default)"
+                    await self.execute(index_sql)
+                    logger.info(f"Created index on {table_name}")
+                except Exception as e:
+                    logger.warning(f"Failed to create index on {table_name}: {e}")
+            except Exception as e:
+                logger.error(f"Failed to create {table_name} table: {e}")
+                return
+
+        # Discover and register existing workspaces from data tables
+        try:
+            discovered = await self.discover_and_register_workspaces()
+            if discovered:
+                logger.info(f"Discovered {len(discovered)} workspaces: {discovered}")
+        except Exception as e:
+            logger.warning(f"Failed to discover existing workspaces: {e}")
 
     async def _migrate_create_full_entities_relations_tables(self):
         """Create LIGHTRAG_FULL_ENTITIES and LIGHTRAG_FULL_RELATIONS tables if they don't exist"""
@@ -1478,6 +1596,385 @@ class PostgreSQLDB:
                     )
             except Exception as e:
                 logger.error(f"Failed to create vector index on table {k}, Got: {e}")
+
+    # =====================================================
+    # Workspace Management Methods
+    # =====================================================
+
+    async def create_workspace(
+        self,
+        workspace_id: str,
+        name: str,
+        description: str | None = None,
+        is_default: bool = False,
+        metadata: dict | None = None,
+    ) -> dict | None:
+        """Create a new workspace.
+
+        Args:
+            workspace_id: Unique identifier for the workspace
+            name: Display name for the workspace
+            description: Optional description
+            is_default: Whether this is the default workspace
+            metadata: Optional JSON metadata
+
+        Returns:
+            Created workspace data or None if failed
+        """
+        import json
+
+        try:
+            sql = SQL_TEMPLATES["create_workspace"]
+            metadata_json = json.dumps(metadata) if metadata else "{}"
+            result = await self.query(
+                sql,
+                [workspace_id, name, description, is_default, metadata_json],
+            )
+            if result:
+                # Parse metadata JSON string back to dict
+                result_metadata = result.get("metadata", {})
+                if isinstance(result_metadata, str):
+                    try:
+                        result_metadata = json.loads(result_metadata)
+                    except (json.JSONDecodeError, TypeError):
+                        result_metadata = {}
+                result["metadata"] = result_metadata
+                logger.info(f"Created workspace: {workspace_id}")
+            return result
+        except Exception as e:
+            if "duplicate key" in str(e).lower() or "unique constraint" in str(e).lower():
+                logger.warning(f"Workspace already exists: {workspace_id}")
+                return await self.get_workspace(workspace_id)
+            logger.error(f"Failed to create workspace {workspace_id}: {e}")
+            raise
+
+    async def get_workspace(self, workspace_id: str) -> dict | None:
+        """Get workspace by ID.
+
+        Args:
+            workspace_id: Workspace identifier
+
+        Returns:
+            Workspace data or None if not found
+        """
+        import json
+
+        try:
+            sql = SQL_TEMPLATES["get_workspace"]
+            result = await self.query(sql, [workspace_id])
+            if result:
+                # Parse metadata JSON string back to dict
+                metadata = result.get("metadata", {})
+                if isinstance(metadata, str):
+                    try:
+                        metadata = json.loads(metadata)
+                    except (json.JSONDecodeError, TypeError):
+                        metadata = {}
+                result["metadata"] = metadata
+            return result
+        except Exception as e:
+            logger.error(f"Failed to get workspace {workspace_id}: {e}")
+            return None
+
+    async def list_workspaces(
+        self,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> tuple[list[dict], int]:
+        """List all workspaces with pagination.
+
+        Args:
+            limit: Maximum number of workspaces to return (None for all)
+            offset: Number of workspaces to skip
+
+        Returns:
+            Tuple of (list of workspaces, total count)
+        """
+        import json
+
+        try:
+            # Get total count
+            count_result = await self.query(SQL_TEMPLATES["count_workspaces"])
+            total = count_result["total"] if count_result else 0
+
+            # Get workspaces with pagination
+            if limit is not None:
+                sql = SQL_TEMPLATES["list_workspaces"]
+                workspaces = await self.query(sql, [limit, offset], multirows=True)
+            else:
+                sql = SQL_TEMPLATES["list_workspaces_all"]
+                workspaces = await self.query(sql, multirows=True)
+
+            # Parse metadata JSON string back to dict for each workspace
+            if workspaces:
+                for ws in workspaces:
+                    metadata = ws.get("metadata", {})
+                    if isinstance(metadata, str):
+                        try:
+                            metadata = json.loads(metadata)
+                        except (json.JSONDecodeError, TypeError):
+                            metadata = {}
+                    ws["metadata"] = metadata
+
+            return workspaces or [], total
+        except Exception as e:
+            logger.error(f"Failed to list workspaces: {e}")
+            return [], 0
+
+    async def update_workspace(
+        self,
+        workspace_id: str,
+        name: str | None = None,
+        description: str | None = None,
+        metadata: dict | None = None,
+    ) -> dict | None:
+        """Update workspace information.
+
+        Args:
+            workspace_id: Workspace identifier
+            name: New name (optional)
+            description: New description (optional)
+            metadata: New metadata (optional)
+
+        Returns:
+            Updated workspace data or None if not found
+        """
+        import json
+
+        try:
+            sql = SQL_TEMPLATES["update_workspace"]
+            metadata_json = json.dumps(metadata) if metadata is not None else None
+            result = await self.query(sql, [workspace_id, name, description, metadata_json])
+            if result:
+                # Parse metadata JSON string back to dict
+                result_metadata = result.get("metadata", {})
+                if isinstance(result_metadata, str):
+                    try:
+                        result_metadata = json.loads(result_metadata)
+                    except (json.JSONDecodeError, TypeError):
+                        result_metadata = {}
+                result["metadata"] = result_metadata
+                logger.info(f"Updated workspace: {workspace_id}")
+            return result
+        except Exception as e:
+            logger.error(f"Failed to update workspace {workspace_id}: {e}")
+            raise
+
+    async def delete_workspace(self, workspace_id: str, delete_data: bool = True) -> bool:
+        """Delete a workspace and optionally its data.
+
+        Args:
+            workspace_id: Workspace identifier
+            delete_data: If True, delete all data in the workspace
+
+        Returns:
+            True if deleted successfully
+        """
+        try:
+            if delete_data:
+                # Delete all data from workspace across all tables
+                tables_to_clean = [
+                    "LIGHTRAG_DOC_FULL",
+                    "LIGHTRAG_DOC_CHUNKS",
+                    "LIGHTRAG_DOC_STATUS",
+                    "LIGHTRAG_VDB_CHUNKS",
+                    "LIGHTRAG_VDB_ENTITY",
+                    "LIGHTRAG_VDB_RELATION",
+                    "LIGHTRAG_LLM_CACHE",
+                    "LIGHTRAG_FULL_ENTITIES",
+                    "LIGHTRAG_FULL_RELATIONS",
+                    "LIGHTRAG_ENTITY_CHUNKS",
+                    "LIGHTRAG_RELATION_CHUNKS",
+                    "LIGHTRAG_PROMPTS",
+                    "LIGHTRAG_USER_PROMPT_TEMPLATES",
+                ]
+                for table in tables_to_clean:
+                    try:
+                        delete_sql = SQL_TEMPLATES["drop_specifiy_table_workspace"].format(
+                            table_name=table
+                        )
+                        await self.execute(delete_sql, {"workspace": workspace_id})
+                        logger.debug(f"Deleted data from {table} for workspace {workspace_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to delete from {table}: {e}")
+
+            # Delete workspace record
+            sql = SQL_TEMPLATES["delete_workspace"]
+            await self.execute(sql, {"workspace_id": workspace_id})
+            logger.info(f"Deleted workspace: {workspace_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete workspace {workspace_id}: {e}")
+            return False
+
+    async def set_default_workspace(self, workspace_id: str) -> bool:
+        """Set a workspace as the default.
+
+        Args:
+            workspace_id: Workspace identifier to set as default
+
+        Returns:
+            True if set successfully
+        """
+        try:
+            sql = SQL_TEMPLATES["set_default_workspace"]
+            await self.execute(sql, {"workspace_id": workspace_id})
+            logger.info(f"Set default workspace: {workspace_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to set default workspace {workspace_id}: {e}")
+            return False
+
+    async def workspace_exists(self, workspace_id: str) -> bool:
+        """Check if a workspace exists.
+
+        Args:
+            workspace_id: Workspace identifier
+
+        Returns:
+            True if workspace exists
+        """
+        try:
+            sql = SQL_TEMPLATES["workspace_exists"]
+            result = await self.query(sql, [workspace_id])
+            return result.get("exists", False) if result else False
+        except Exception as e:
+            logger.error(f"Failed to check workspace existence {workspace_id}: {e}")
+            return False
+
+    async def get_workspace_stats(self, workspace_id: str) -> dict:
+        """Get statistics for a workspace.
+
+        Args:
+            workspace_id: Workspace identifier
+
+        Returns:
+            Dictionary with document_count, entity_count, relation_count
+        """
+        try:
+            sql = SQL_TEMPLATES["get_workspace_stats"]
+            result = await self.query(sql, [workspace_id])
+            return result or {"document_count": 0, "entity_count": 0, "relation_count": 0}
+        except Exception as e:
+            logger.error(f"Failed to get workspace stats {workspace_id}: {e}")
+            return {"document_count": 0, "entity_count": 0, "relation_count": 0}
+
+    async def update_workspace_counts(
+        self,
+        workspace_id: str,
+        document_count: int | None = None,
+        entity_count: int | None = None,
+        relation_count: int | None = None,
+    ) -> bool:
+        """Update workspace statistics.
+
+        Args:
+            workspace_id: Workspace identifier
+            document_count: New document count
+            entity_count: New entity count
+            relation_count: New relation count
+
+        Returns:
+            True if updated successfully
+        """
+        try:
+            # Get current stats if any value is None
+            if document_count is None or entity_count is None or relation_count is None:
+                current_stats = await self.get_workspace_stats(workspace_id)
+                document_count = document_count if document_count is not None else current_stats["document_count"]
+                entity_count = entity_count if entity_count is not None else current_stats["entity_count"]
+                relation_count = relation_count if relation_count is not None else current_stats["relation_count"]
+
+            sql = SQL_TEMPLATES["update_workspace_counts"]
+            await self.execute(
+                sql,
+                {
+                    "workspace_id": workspace_id,
+                    "document_count": document_count,
+                    "entity_count": entity_count,
+                    "relation_count": relation_count,
+                },
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to update workspace counts {workspace_id}: {e}")
+            return False
+
+    async def discover_and_register_workspaces(self) -> list[str]:
+        """Discover existing workspaces from data tables and register them.
+
+        This is a migration helper that finds all workspaces used in existing data
+        and ensures they are registered in LIGHTRAG_WORKSPACES table.
+
+        Returns:
+            List of discovered workspace IDs
+        """
+        discovered = []
+        try:
+            # Find all unique workspaces from data tables
+            sql = SQL_TEMPLATES["discover_workspaces"]
+            results = await self.query(sql, multirows=True)
+
+            if results:
+                for row in results:
+                    workspace_id = row.get("workspace")
+                    if workspace_id:
+                        # Check if already registered
+                        if not await self.workspace_exists(workspace_id):
+                            # Register the workspace
+                            await self.create_workspace(
+                                workspace_id=workspace_id,
+                                name=workspace_id,  # Use ID as name initially
+                                description=f"Auto-discovered workspace: {workspace_id}",
+                                is_default=(workspace_id == "base"),
+                            )
+                            discovered.append(workspace_id)
+                            logger.info(f"Discovered and registered workspace: {workspace_id}")
+
+            # Also ensure 'base' workspace exists
+            if not await self.workspace_exists("base"):
+                await self.create_workspace(
+                    workspace_id="base",
+                    name="Base",
+                    description="Default workspace",
+                    is_default=True,
+                )
+                if "base" not in discovered:
+                    discovered.append("base")
+
+            return discovered
+        except Exception as e:
+            logger.error(f"Failed to discover workspaces: {e}")
+            return []
+
+    async def sync_workspace_stats(self, workspace_id: str | None = None) -> None:
+        """Synchronize workspace statistics with actual data counts.
+
+        Args:
+            workspace_id: Specific workspace to sync, or None for all workspaces
+        """
+        try:
+            if workspace_id:
+                workspaces = [{"workspace_id": workspace_id}]
+            else:
+                workspaces, _ = await self.list_workspaces()
+
+            for ws in workspaces:
+                ws_id = ws["workspace_id"]
+                stats = await self.get_workspace_stats(ws_id)
+                await self.update_workspace_counts(
+                    ws_id,
+                    document_count=stats["document_count"],
+                    entity_count=stats["entity_count"],
+                    relation_count=stats["relation_count"],
+                )
+                logger.debug(f"Synced stats for workspace {ws_id}: {stats}")
+        except Exception as e:
+            logger.error(f"Failed to sync workspace stats: {e}")
+
+    # =====================================================
+    # End of Workspace Management Methods
+    # =====================================================
 
     async def query(
         self,
@@ -1773,6 +2270,14 @@ class PGKVStorage(BaseKVStorage):
                 except json.JSONDecodeError:
                     llm_cache_list = []
             response["llm_cache_list"] = llm_cache_list
+            # Parse structured_content JSON string back to dict
+            structured_content = response.get("structured_content")
+            if isinstance(structured_content, str):
+                try:
+                    structured_content = json.loads(structured_content)
+                except json.JSONDecodeError:
+                    structured_content = None
+            response["structured_content"] = structured_content
             create_time = response.get("create_time", 0)
             update_time = response.get("update_time", 0)
             response["create_time"] = create_time
@@ -1907,6 +2412,14 @@ class PGKVStorage(BaseKVStorage):
                     except json.JSONDecodeError:
                         llm_cache_list = []
                 result["llm_cache_list"] = llm_cache_list
+                # Parse structured_content JSON string back to dict
+                structured_content = result.get("structured_content")
+                if isinstance(structured_content, str):
+                    try:
+                        structured_content = json.loads(structured_content)
+                    except json.JSONDecodeError:
+                        structured_content = None
+                result["structured_content"] = structured_content
                 create_time = result.get("create_time", 0)
                 update_time = result.get("update_time", 0)
                 result["create_time"] = create_time
@@ -2040,6 +2553,9 @@ class PGKVStorage(BaseKVStorage):
             current_time = datetime.datetime.now(timezone.utc).replace(tzinfo=None)
             for k, v in data.items():
                 upsert_sql = SQL_TEMPLATES["upsert_text_chunk"]
+                # Handle structured_content - convert to JSON string if it exists
+                structured_content = v.get("structured_content")
+                structured_content_json = json.dumps(structured_content) if structured_content else None
                 _data = {
                     "workspace": self.workspace,
                     "id": k,
@@ -2049,6 +2565,7 @@ class PGKVStorage(BaseKVStorage):
                     "content": v["content"],
                     "file_path": v["file_path"],
                     "llm_cache_list": json.dumps(v.get("llm_cache_list", [])),
+                    "structured_content": structured_content_json,
                     "create_time": current_time,
                     "update_time": current_time,
                 }
@@ -2255,6 +2772,10 @@ class PGVectorStorage(BaseVectorStorage):
     ) -> tuple[str, dict[str, Any]]:
         try:
             upsert_sql = SQL_TEMPLATES["upsert_chunk"]
+            # Handle structured_content - convert to JSON string if present
+            structured_content = item.get("structured_content")
+            if structured_content is not None:
+                structured_content = json.dumps(structured_content)
             data: dict[str, Any] = {
                 "workspace": self.workspace,
                 "id": item["__id__"],
@@ -2264,6 +2785,7 @@ class PGVectorStorage(BaseVectorStorage):
                 "content": item["content"],
                 "content_vector": json.dumps(item["__vector__"].tolist()),
                 "file_path": item["file_path"],
+                "structured_content": structured_content,
                 "create_time": current_time,
                 "update_time": current_time,
             }
@@ -2381,6 +2903,18 @@ class PGVectorStorage(BaseVectorStorage):
             "top_k": top_k,
         }
         results = await self.db.query(sql, params=list(params.values()), multirows=True)
+
+        # Parse structured_content JSON string back to dict for chunk results
+        if results and is_namespace(self.namespace, NameSpace.VECTOR_STORE_CHUNKS):
+            for result in results:
+                structured_content = result.get("structured_content")
+                if isinstance(structured_content, str):
+                    try:
+                        structured_content = json.loads(structured_content)
+                    except json.JSONDecodeError:
+                        structured_content = None
+                    result["structured_content"] = structured_content
+
         return results
 
     async def index_done_callback(self) -> None:
@@ -2940,6 +3474,7 @@ class PGDocStatusStorage(DocStatusStorage):
         page_size: int = 50,
         sort_field: str = "updated_at",
         sort_direction: str = "desc",
+        workspace: str | None = None,
     ) -> tuple[list[tuple[str, DocProcessingStatus]], int]:
         """Get documents with pagination support
 
@@ -2949,10 +3484,14 @@ class PGDocStatusStorage(DocStatusStorage):
             page_size: Number of documents per page (10-200)
             sort_field: Field to sort by ('created_at', 'updated_at', 'id')
             sort_direction: Sort direction ('asc' or 'desc')
+            workspace: Optional workspace to query. If None, uses self.workspace
 
         Returns:
             Tuple of (list of (doc_id, DocProcessingStatus) tuples, total_count)
         """
+        # Use provided workspace or fall back to self.workspace
+        target_workspace = workspace if workspace is not None else self.workspace
+
         # Validate parameters
         if page < 1:
             page = 1
@@ -2976,7 +3515,7 @@ class PGDocStatusStorage(DocStatusStorage):
         offset = (page - 1) * page_size
 
         # Build parameterized query components
-        params = {"workspace": self.workspace}
+        params = {"workspace": target_workspace}
         param_count = 1
 
         # Build WHERE clause with parameterized query
@@ -3050,19 +3589,27 @@ class PGDocStatusStorage(DocStatusStorage):
 
         return documents, total_count
 
-    async def get_all_status_counts(self) -> dict[str, int]:
+    async def get_all_status_counts(
+        self, workspace: str | None = None
+    ) -> dict[str, int]:
         """Get counts of documents in each status for all documents
+
+        Args:
+            workspace: Optional workspace to query. If None, uses self.workspace
 
         Returns:
             Dictionary mapping status names to counts, including 'all' field
         """
+        # Use provided workspace or fall back to self.workspace
+        target_workspace = workspace if workspace is not None else self.workspace
+
         sql = """
             SELECT status, COUNT(*) as count
             FROM LIGHTRAG_DOC_STATUS
             WHERE workspace=$1
             GROUP BY status
         """
-        params = {"workspace": self.workspace}
+        params = {"workspace": target_workspace}
         result = await self.db.query(sql, list(params.values()), True)
 
         counts = {}
@@ -4861,6 +5408,7 @@ TABLES = {
                     content TEXT,
                     file_path TEXT NULL,
                     llm_cache_list JSONB NULL DEFAULT '[]'::jsonb,
+                    structured_content JSONB NULL,
                     create_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
                     update_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
 	                CONSTRAINT LIGHTRAG_DOC_CHUNKS_PK PRIMARY KEY (workspace, id)
@@ -4876,6 +5424,7 @@ TABLES = {
                     content TEXT,
                     content_vector VECTOR({os.environ.get("EMBEDDING_DIM", 1024)}),
                     file_path TEXT NULL,
+                    structured_content JSONB NULL,
                     create_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
                     update_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
 	                CONSTRAINT LIGHTRAG_VDB_CHUNKS_PK PRIMARY KEY (workspace, id)
@@ -5013,6 +5562,33 @@ TABLES = {
                     CONSTRAINT LIGHTRAG_USER_PROMPT_TEMPLATES_PK PRIMARY KEY (workspace, template_id)
                     )"""
     },
+    "LIGHTRAG_WORKSPACES": {
+        "ddl": """CREATE TABLE LIGHTRAG_WORKSPACES (
+                    workspace_id VARCHAR(255) NOT NULL,
+                    name VARCHAR(255) NOT NULL,
+                    description TEXT,
+                    is_default BOOLEAN DEFAULT FALSE,
+                    document_count INTEGER DEFAULT 0,
+                    entity_count INTEGER DEFAULT 0,
+                    relation_count INTEGER DEFAULT 0,
+                    metadata JSONB DEFAULT '{}'::jsonb,
+                    create_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
+                    update_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT LIGHTRAG_WORKSPACES_PK PRIMARY KEY (workspace_id)
+                    )"""
+    },
+    "LIGHTRAG_WORKSPACE_SCHEMA": {
+        "ddl": """CREATE TABLE LIGHTRAG_WORKSPACE_SCHEMA (
+                    workspace VARCHAR(255) NOT NULL,
+                    entity_types JSONB DEFAULT '[]'::jsonb,
+                    relation_types JSONB DEFAULT '[]'::jsonb,
+                    source VARCHAR(255),
+                    applied_at TIMESTAMP(0),
+                    create_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
+                    update_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT LIGHTRAG_WORKSPACE_SCHEMA_PK PRIMARY KEY (workspace)
+                    )"""
+    },
 }
 
 
@@ -5025,6 +5601,7 @@ SQL_TEMPLATES = {
     "get_by_id_text_chunks": """SELECT id, tokens, COALESCE(content, '') as content,
                                 chunk_order_index, full_doc_id, file_path,
                                 COALESCE(llm_cache_list, '[]'::jsonb) as llm_cache_list,
+                                structured_content,
                                 EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
                                 EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
                                 FROM LIGHTRAG_DOC_CHUNKS WHERE workspace=$1 AND id=$2
@@ -5041,6 +5618,7 @@ SQL_TEMPLATES = {
     "get_by_ids_text_chunks": """SELECT id, tokens, COALESCE(content, '') as content,
                                   chunk_order_index, full_doc_id, file_path,
                                   COALESCE(llm_cache_list, '[]'::jsonb) as llm_cache_list,
+                                  structured_content,
                                   EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
                                   EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
                                    FROM LIGHTRAG_DOC_CHUNKS WHERE workspace=$1 AND id = ANY($2)
@@ -5110,8 +5688,8 @@ SQL_TEMPLATES = {
                                      """,
     "upsert_text_chunk": """INSERT INTO LIGHTRAG_DOC_CHUNKS (workspace, id, tokens,
                       chunk_order_index, full_doc_id, content, file_path, llm_cache_list,
-                      create_time, update_time)
-                      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                      structured_content, create_time, update_time)
+                      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                       ON CONFLICT (workspace,id) DO UPDATE
                       SET tokens=EXCLUDED.tokens,
                       chunk_order_index=EXCLUDED.chunk_order_index,
@@ -5119,6 +5697,7 @@ SQL_TEMPLATES = {
                       content = EXCLUDED.content,
                       file_path=EXCLUDED.file_path,
                       llm_cache_list=EXCLUDED.llm_cache_list,
+                      structured_content=EXCLUDED.structured_content,
                       update_time = EXCLUDED.update_time
                      """,
     "upsert_full_entities": """INSERT INTO LIGHTRAG_FULL_ENTITIES (workspace, id, entity_names, count,
@@ -5156,8 +5735,8 @@ SQL_TEMPLATES = {
     # SQL for VectorStorage
     "upsert_chunk": """INSERT INTO LIGHTRAG_VDB_CHUNKS (workspace, id, tokens,
                       chunk_order_index, full_doc_id, content, content_vector, file_path,
-                      create_time, update_time)
-                      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                      structured_content, create_time, update_time)
+                      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                       ON CONFLICT (workspace,id) DO UPDATE
                       SET tokens=EXCLUDED.tokens,
                       chunk_order_index=EXCLUDED.chunk_order_index,
@@ -5165,6 +5744,7 @@ SQL_TEMPLATES = {
                       content = EXCLUDED.content,
                       content_vector=EXCLUDED.content_vector,
                       file_path=EXCLUDED.file_path,
+                      structured_content=EXCLUDED.structured_content,
                       update_time = EXCLUDED.update_time
                      """,
     "upsert_entity": """INSERT INTO LIGHTRAG_VDB_ENTITY (workspace, id, entity_name, content,
@@ -5214,6 +5794,7 @@ SQL_TEMPLATES = {
                      c.content,
                      c.file_path,
                      c.full_doc_id,
+                     c.structured_content,
                      EXTRACT(EPOCH FROM c.create_time)::BIGINT AS created_at
               FROM LIGHTRAG_VDB_CHUNKS c
               WHERE c.workspace = $1
@@ -5246,4 +5827,283 @@ SQL_TEMPLATES = {
                         update_time = CURRENT_TIMESTAMP
                        """,
     "delete_prompt": """DELETE FROM LIGHTRAG_PROMPTS WHERE workspace=$1 AND prompt_key=$2""",
+    # SQL for Workspaces
+    "create_workspace": """INSERT INTO LIGHTRAG_WORKSPACES
+                           (workspace_id, name, description, is_default, metadata)
+                           VALUES ($1, $2, $3, $4, $5)
+                           RETURNING workspace_id, name, description, is_default, document_count,
+                                     entity_count, relation_count, metadata,
+                                     EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
+                                     EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
+                          """,
+    "get_workspace": """SELECT w.workspace_id, w.name, w.description, w.is_default,
+                        (SELECT COUNT(*) FROM LIGHTRAG_DOC_STATUS WHERE workspace=w.workspace_id AND status='processed') as document_count,
+                        (SELECT COUNT(*) FROM LIGHTRAG_VDB_ENTITY WHERE workspace=w.workspace_id) as entity_count,
+                        (SELECT COUNT(*) FROM LIGHTRAG_VDB_RELATION WHERE workspace=w.workspace_id) as relation_count,
+                        w.metadata,
+                        EXTRACT(EPOCH FROM w.create_time)::BIGINT as create_time,
+                        EXTRACT(EPOCH FROM w.update_time)::BIGINT as update_time
+                        FROM LIGHTRAG_WORKSPACES w WHERE w.workspace_id=$1
+                       """,
+    "list_workspaces": """SELECT w.workspace_id, w.name, w.description, w.is_default,
+                          (SELECT COUNT(*) FROM LIGHTRAG_DOC_STATUS WHERE workspace=w.workspace_id AND status='processed') as document_count,
+                          (SELECT COUNT(*) FROM LIGHTRAG_VDB_ENTITY WHERE workspace=w.workspace_id) as entity_count,
+                          (SELECT COUNT(*) FROM LIGHTRAG_VDB_RELATION WHERE workspace=w.workspace_id) as relation_count,
+                          w.metadata,
+                          EXTRACT(EPOCH FROM w.create_time)::BIGINT as create_time,
+                          EXTRACT(EPOCH FROM w.update_time)::BIGINT as update_time
+                          FROM LIGHTRAG_WORKSPACES w
+                          ORDER BY w.is_default DESC, w.create_time ASC
+                          LIMIT $1 OFFSET $2
+                         """,
+    "list_workspaces_all": """SELECT w.workspace_id, w.name, w.description, w.is_default,
+                              (SELECT COUNT(*) FROM LIGHTRAG_DOC_STATUS WHERE workspace=w.workspace_id AND status='processed') as document_count,
+                              (SELECT COUNT(*) FROM LIGHTRAG_VDB_ENTITY WHERE workspace=w.workspace_id) as entity_count,
+                              (SELECT COUNT(*) FROM LIGHTRAG_VDB_RELATION WHERE workspace=w.workspace_id) as relation_count,
+                              w.metadata,
+                              EXTRACT(EPOCH FROM w.create_time)::BIGINT as create_time,
+                              EXTRACT(EPOCH FROM w.update_time)::BIGINT as update_time
+                              FROM LIGHTRAG_WORKSPACES w
+                              ORDER BY w.is_default DESC, w.create_time ASC
+                             """,
+    "count_workspaces": """SELECT COUNT(*) as total FROM LIGHTRAG_WORKSPACES""",
+    "update_workspace": """UPDATE LIGHTRAG_WORKSPACES
+                           SET name = COALESCE($2, name),
+                               description = COALESCE($3, description),
+                               metadata = COALESCE($4, metadata),
+                               update_time = CURRENT_TIMESTAMP
+                           WHERE workspace_id = $1
+                           RETURNING workspace_id, name, description, is_default,
+                                     document_count, entity_count, relation_count, metadata,
+                                     EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
+                                     EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
+                          """,
+    "delete_workspace": """DELETE FROM LIGHTRAG_WORKSPACES WHERE workspace_id=$1""",
+    "set_default_workspace": """UPDATE LIGHTRAG_WORKSPACES SET is_default = (workspace_id = $1),
+                                update_time = CURRENT_TIMESTAMP""",
+    "workspace_exists": """SELECT EXISTS(SELECT 1 FROM LIGHTRAG_WORKSPACES WHERE workspace_id=$1) as exists""",
+    "update_workspace_counts": """UPDATE LIGHTRAG_WORKSPACES
+                                  SET document_count = $2, entity_count = $3, relation_count = $4,
+                                      update_time = CURRENT_TIMESTAMP
+                                  WHERE workspace_id = $1
+                                 """,
+    "get_workspace_stats": """SELECT
+                              (SELECT COUNT(*) FROM LIGHTRAG_DOC_STATUS WHERE workspace=$1 AND status='processed') as document_count,
+                              (SELECT COUNT(*) FROM LIGHTRAG_VDB_ENTITY WHERE workspace=$1) as entity_count,
+                              (SELECT COUNT(*) FROM LIGHTRAG_VDB_RELATION WHERE workspace=$1) as relation_count
+                             """,
+    "discover_workspaces": """SELECT DISTINCT workspace FROM LIGHTRAG_DOC_STATUS
+                              WHERE workspace IS NOT NULL AND workspace != ''
+                              UNION
+                              SELECT DISTINCT workspace FROM LIGHTRAG_DOC_FULL
+                              WHERE workspace IS NOT NULL AND workspace != ''
+                             """,
+    # Workspace Schema SQL
+    "upsert_workspace_schema": """INSERT INTO LIGHTRAG_WORKSPACE_SCHEMA
+                                  (workspace, entity_types, relation_types, source, applied_at, create_time, update_time)
+                                  VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                                  ON CONFLICT (workspace) DO UPDATE
+                                  SET entity_types = EXCLUDED.entity_types,
+                                      relation_types = EXCLUDED.relation_types,
+                                      source = EXCLUDED.source,
+                                      applied_at = EXCLUDED.applied_at,
+                                      update_time = CURRENT_TIMESTAMP
+                                 """,
+    "get_workspace_schema": """SELECT workspace, entity_types, relation_types, source,
+                               EXTRACT(EPOCH FROM applied_at)::BIGINT as applied_at,
+                               EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
+                               EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
+                               FROM LIGHTRAG_WORKSPACE_SCHEMA WHERE workspace=$1
+                              """,
+    "delete_workspace_schema": """DELETE FROM LIGHTRAG_WORKSPACE_SCHEMA WHERE workspace=$1""",
+    "list_workspace_schemas": """SELECT workspace, entity_types, relation_types, source,
+                                 EXTRACT(EPOCH FROM applied_at)::BIGINT as applied_at,
+                                 EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
+                                 EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
+                                 FROM LIGHTRAG_WORKSPACE_SCHEMA
+                                 ORDER BY update_time DESC
+                                """,
 }
+
+
+# =============================================================================
+# Workspace Schema Storage Functions
+# =============================================================================
+
+
+class WorkspaceSchemaStorage:
+    """Workspace schema persistent storage using PostgreSQL.
+
+    This class manages workspace-specific schema settings (entity_types, relation_types)
+    that persist across server restarts.
+    """
+
+    def __init__(self, db: PostgreSQLDB):
+        self.db = db
+
+    async def save_schema(
+        self,
+        workspace: str,
+        entity_types: list[str],
+        relation_types: list[dict] | None = None,
+        source: str | None = None,
+        applied_at: str | None = None,
+    ) -> bool:
+        """Save workspace schema to database.
+
+        Args:
+            workspace: Workspace identifier
+            entity_types: List of entity type names
+            relation_types: List of relation type definitions (dicts with name, source_types, target_types, etc.)
+            source: Schema source (e.g., "template:domain", "discovery", "custom")
+            applied_at: ISO format timestamp when schema was applied
+
+        Returns:
+            True if successful
+        """
+        try:
+            import json
+            from datetime import datetime
+
+            # Parse applied_at or use current time
+            if applied_at:
+                try:
+                    applied_dt = datetime.fromisoformat(applied_at.replace("Z", "+00:00"))
+                except (ValueError, AttributeError):
+                    applied_dt = datetime.now()
+            else:
+                applied_dt = datetime.now()
+
+            # Default to empty list if relation_types is None
+            if relation_types is None:
+                relation_types = []
+
+            # PostgreSQLDB.execute expects a dict, values are used in order
+            data = {
+                "workspace": workspace,
+                "entity_types": json.dumps(entity_types),
+                "relation_types": json.dumps(relation_types),
+                "source": source,
+                "applied_at": applied_dt,
+            }
+            await self.db.execute(
+                SQL_TEMPLATES["upsert_workspace_schema"],
+                data,
+                upsert=True,
+            )
+            logger.debug(
+                f"Saved schema for workspace '{workspace}': "
+                f"{len(entity_types)} entity types, {len(relation_types)} relation types"
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save workspace schema for '{workspace}': {e}")
+            return False
+
+    async def load_schema(self, workspace: str) -> dict | None:
+        """Load workspace schema from database.
+
+        Args:
+            workspace: Workspace identifier
+
+        Returns:
+            Dict with schema data or None if not found
+        """
+        try:
+            # PostgreSQLDB.query: multirows=False returns single dict or None
+            result = await self.db.query(
+                SQL_TEMPLATES["get_workspace_schema"],
+                [workspace],
+                multirows=False,
+            )
+            if result:
+                import json
+                from datetime import datetime
+
+                entity_types = result.get("entity_types", [])
+                if isinstance(entity_types, str):
+                    entity_types = json.loads(entity_types)
+
+                relation_types = result.get("relation_types", [])
+                if isinstance(relation_types, str):
+                    relation_types = json.loads(relation_types)
+
+                applied_at = result.get("applied_at")
+                if applied_at:
+                    applied_at = datetime.fromtimestamp(applied_at).isoformat()
+
+                return {
+                    "workspace": result["workspace"],
+                    "entity_types": entity_types,
+                    "relation_types": relation_types,
+                    "source": result.get("source"),
+                    "applied_at": applied_at,
+                }
+            return None
+        except Exception as e:
+            logger.error(f"Failed to load workspace schema for '{workspace}': {e}")
+            return None
+
+    async def delete_schema(self, workspace: str) -> bool:
+        """Delete workspace schema from database.
+
+        Args:
+            workspace: Workspace identifier
+
+        Returns:
+            True if successful
+        """
+        try:
+            await self.db.execute(
+                SQL_TEMPLATES["delete_workspace_schema"],
+                {"workspace": workspace},
+            )
+            logger.debug(f"Deleted schema for workspace '{workspace}'")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete workspace schema for '{workspace}': {e}")
+            return False
+
+    async def load_all_schemas(self) -> dict[str, dict]:
+        """Load all workspace schemas from database.
+
+        Returns:
+            Dict mapping workspace to schema data
+        """
+        try:
+            # PostgreSQLDB.query: multirows=True returns list of dicts
+            results = await self.db.query(
+                SQL_TEMPLATES["list_workspace_schemas"],
+                None,
+                multirows=True,
+            )
+            schemas = {}
+            if results:
+                import json
+                from datetime import datetime
+
+                for row in results:
+                    workspace = row["workspace"]
+                    entity_types = row.get("entity_types", [])
+                    if isinstance(entity_types, str):
+                        entity_types = json.loads(entity_types)
+
+                    relation_types = row.get("relation_types", [])
+                    if isinstance(relation_types, str):
+                        relation_types = json.loads(relation_types)
+
+                    applied_at = row.get("applied_at")
+                    if applied_at:
+                        applied_at = datetime.fromtimestamp(applied_at).isoformat()
+
+                    schemas[workspace] = {
+                        "entity_types": entity_types,
+                        "relation_types": relation_types,
+                        "source": row.get("source"),
+                        "applied_at": applied_at,
+                    }
+            logger.debug(f"Loaded schemas for {len(schemas)} workspaces")
+            return schemas
+        except Exception as e:
+            logger.error(f"Failed to load all workspace schemas: {e}")
+            return {}

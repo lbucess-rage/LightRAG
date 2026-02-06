@@ -5,10 +5,11 @@ Allows managing user prompt templates stored in PostgreSQL per workspace.
 
 import uuid
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from lightrag.utils import logger
+from lightrag.kg.shared_storage import get_default_workspace
 from ..utils_api import get_combined_auth_dependency
 
 router = APIRouter(
@@ -53,20 +54,21 @@ def create_user_prompt_template_routes(rag, api_key: Optional[str] = None):
             return rag.text_chunks.db
         return None
 
-    async def get_workspace():
-        """Get current workspace from rag."""
-        if hasattr(rag, 'llm_response_cache') and hasattr(rag.llm_response_cache, 'workspace'):
-            return rag.llm_response_cache.workspace or "base"
-        return "base"
+    def _get_workspace_from_request(request: Request) -> str:
+        """Extract workspace from request header, fall back to server default."""
+        workspace = request.headers.get("LIGHTRAG-WORKSPACE", "").strip()
+        if workspace:
+            return workspace
+        return get_default_workspace() or "base"
 
     @router.get("", dependencies=[Depends(combined_auth)])
-    async def get_all_templates() -> dict:
+    async def get_all_templates(http_request: Request) -> dict:
         """
         Get all user prompt templates for the current workspace.
         """
         try:
             db = await get_db()
-            workspace = await get_workspace()
+            workspace = _get_workspace_from_request(http_request)
 
             templates = []
 
@@ -105,13 +107,13 @@ def create_user_prompt_template_routes(rag, api_key: Optional[str] = None):
             raise HTTPException(status_code=500, detail=str(e))
 
     @router.get("/{template_id}", dependencies=[Depends(combined_auth)])
-    async def get_template(template_id: str) -> dict:
+    async def get_template(template_id: str, http_request: Request) -> dict:
         """
         Get a specific template by ID.
         """
         try:
             db = await get_db()
-            workspace = await get_workspace()
+            workspace = _get_workspace_from_request(http_request)
 
             if db is None or db.pool is None:
                 raise HTTPException(status_code=503, detail="Database not available")
@@ -147,13 +149,13 @@ def create_user_prompt_template_routes(rag, api_key: Optional[str] = None):
             raise HTTPException(status_code=500, detail=str(e))
 
     @router.post("", dependencies=[Depends(combined_auth)])
-    async def create_template(request: UserPromptTemplateCreateRequest) -> dict:
+    async def create_template(request: UserPromptTemplateCreateRequest, http_request: Request) -> dict:
         """
         Create a new user prompt template.
         """
         try:
             db = await get_db()
-            workspace = await get_workspace()
+            workspace = _get_workspace_from_request(http_request)
 
             if db is None or db.pool is None:
                 raise HTTPException(status_code=503, detail="Database not available")
@@ -193,13 +195,13 @@ def create_user_prompt_template_routes(rag, api_key: Optional[str] = None):
             raise HTTPException(status_code=500, detail=str(e))
 
     @router.put("/{template_id}", dependencies=[Depends(combined_auth)])
-    async def update_template(template_id: str, request: UserPromptTemplateUpdateRequest) -> dict:
+    async def update_template(template_id: str, request: UserPromptTemplateUpdateRequest, http_request: Request) -> dict:
         """
         Update an existing template.
         """
         try:
             db = await get_db()
-            workspace = await get_workspace()
+            workspace = _get_workspace_from_request(http_request)
 
             if db is None or db.pool is None:
                 raise HTTPException(status_code=503, detail="Database not available")
@@ -259,13 +261,13 @@ def create_user_prompt_template_routes(rag, api_key: Optional[str] = None):
             raise HTTPException(status_code=500, detail=str(e))
 
     @router.delete("/{template_id}", dependencies=[Depends(combined_auth)])
-    async def delete_template(template_id: str) -> dict:
+    async def delete_template(template_id: str, http_request: Request) -> dict:
         """
         Delete a template.
         """
         try:
             db = await get_db()
-            workspace = await get_workspace()
+            workspace = _get_workspace_from_request(http_request)
 
             if db is None or db.pool is None:
                 raise HTTPException(status_code=503, detail="Database not available")

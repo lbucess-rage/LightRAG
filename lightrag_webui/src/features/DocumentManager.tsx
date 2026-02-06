@@ -31,6 +31,7 @@ import {
 import { errorMessage } from '@/lib/utils'
 import { toast } from 'sonner'
 import { useBackendState } from '@/stores/state'
+import { useWorkspaceStore } from '@/stores/workspace'
 
 import { RefreshCwIcon, ActivityIcon, ArrowUpIcon, ArrowDownIcon, RotateCcwIcon, CheckSquareIcon, XIcon, AlertTriangle, Info } from 'lucide-react'
 import PipelineStatusDialog from '@/components/documents/PipelineStatusDialog'
@@ -222,6 +223,7 @@ export default function DocumentManager() {
   const { t, i18n } = useTranslation()
   const health = useBackendState.use.health()
   const pipelineBusy = useBackendState.use.pipelineBusy()
+  const currentWorkspaceId = useWorkspaceStore.use.currentWorkspaceId()
 
   // Legacy state for backward compatibility
   const [docs, setDocs] = useState<DocsStatusesResponse | null>(null)
@@ -1109,8 +1111,50 @@ export default function DocumentManager() {
     statusFilter,
     sortField,
     sortDirection,
-    fetchPaginatedDocuments
+    fetchPaginatedDocuments,
+    currentWorkspaceId // Refetch when workspace changes
   ]);
+
+  // Reset all state when workspace changes
+  useEffect(() => {
+    // Clear polling interval to prevent fetching old workspace data
+    clearPollingInterval();
+
+    // Reset all document-related state
+    setDocs(null);
+    setCurrentPageDocs([]);
+    setStatusCounts({ all: 0 });
+    setPagination(prev => ({
+      ...prev,
+      page: 1,
+      total_count: 0,
+      total_pages: 0,
+      has_next: false,
+      has_prev: false
+    }));
+    setPageByStatus({
+      all: 1,
+      processed: 1,
+      preprocessed: 1,
+      processing: 1,
+      pending: 1,
+      failed: 1,
+    });
+    setSelectedDocIds([]);
+
+    // Reset error states
+    setRetryState({
+      count: 0,
+      lastError: null,
+      isBackingOff: false
+    });
+    setCircuitBreakerState({
+      isOpen: false,
+      failureCount: 0,
+      lastFailureTime: null,
+      nextRetryTime: null
+    });
+  }, [currentWorkspaceId, clearPollingInterval]);
 
   return (
     <Card className="!rounded-none !overflow-hidden flex flex-col h-full min-h-0">

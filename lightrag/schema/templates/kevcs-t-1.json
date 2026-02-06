@@ -1,0 +1,1123 @@
+{
+  "domain": "kevcs-t-1",
+  "display_name": "한국전기차 충전 스키마 v1",
+  "description": "이 도메인은 전기차 충전 서비스를 제공하는 기업의 고객 센터 및 운영 관리 시스템을 중심으로 하며, 고객이 접수하는 문의, 고장 신고, 결제 이슈, 환불 요청 등을 중심으로 구성됨. 핵심 엔티티는 고객, 충전기, 멤버십카드, 신용카드, 커넥터, LCD 화면, 통신 상태 등이며, 프로모션, 구독 상품, 환불, 결제 거래, 수리 보고 등이 주요 관계로 존재함. 도메인은 고객 서비스 운영, 장비 모니터링, 결제 및 환불 처리, 서비스 개선을 통합적으로 관리하는 시스템을 의미함.",
+  "entity_types": [
+    {
+      "name": "Customer",
+      "display_name": "고객",
+      "description": "전기차 충전 서비스를 이용하는 개인 사용자로, 센디카드, 해피차저 멤버십 등 서비스에 가입하거나 결제를 진행한 사용자",
+      "examples": [
+        "김민수 (센디카드 회원)",
+        "이지은 (해피차저 신규 회원)",
+        "박철수 (E-pit 비회원 결제 사용자)"
+      ]
+    },
+    {
+      "name": "ChargeStation",
+      "display_name": "충전기",
+      "description": "전기차 충전을 위한 물리적 장비로, 충전 상태, 고장 증상, 통신 상태 등을 모니터링하는 대상",
+      "examples": [
+        "EVC-00123",
+        "서울역 1번 충전기",
+        "인천공항 2층 A구역 충전기"
+      ]
+    },
+    {
+      "name": "MembershipCard",
+      "display_name": "멤버십카드",
+      "description": "해피차저 및 센디 플랫폼에서 발급하는 전용 카드로, 충전 서비스 이용 시 인식되는 카드 유형",
+      "examples": [
+        "해피차저 멤버십카드",
+        "센디 EV충전카드",
+        "타사 로밍 회원 카드"
+      ]
+    },
+    {
+      "name": "CreditCard",
+      "display_name": "신용카드",
+      "description": "충전 결제 시 사용되는 신용카드로, 결제 인증 및 카드리더기 인식 여부를 확인하는 대상",
+      "examples": [
+        "삼성카드 1234-****-****-5678",
+        "국민카드 9876-****-****-2345"
+      ]
+    },
+    {
+      "name": "Connector",
+      "display_name": "커넥터",
+      "description": "충전기와 전기차 간의 물리적 연결을 담당하는 충전용 커넥터로, 외관 및 기능 이상 여부를 점검 대상",
+      "examples": [
+        "CCS 커넥터 (파손)",
+        "CHAdeMO 커넥터 (이격)"
+      ]
+    },
+    {
+      "name": "Display",
+      "display_name": "LCD 화면",
+      "description": "충전기 내부의 디스플레이 장치로, 화면 표시, 터치 반응, 백화현상 등 이상 여부를 확인하는 대상",
+      "examples": [
+        "화면 터치 불가",
+        "검은 줄 표시",
+        "화면 완전 블랙"
+      ]
+    },
+    {
+      "name": "NetworkStatus",
+      "display_name": "통신 상태",
+      "description": "충전기의 네트워크 연결 상태를 나타내며, 통신 장애 여부를 판단하는 핵심 요소",
+      "examples": [
+        "안테나 표시 X",
+        "통신 연결 실패",
+        "서버 연결 지연"
+      ]
+    },
+    {
+      "name": "InquiryType",
+      "display_name": "문의 유형",
+      "description": "고객이 접수한 상담 또는 장애 신고의 분류 기준으로, 고장증상, 결제 이슈, 진행 상황 확인 등으로 구분",
+      "examples": [
+        "LCD 불량",
+        "멤버십카드 인식오류",
+        "신용카드 인식오류",
+        "진행상황 확인 요청",
+        "기타"
+      ]
+    },
+    {
+      "name": "ServicePlan",
+      "display_name": "구독 상품",
+      "description": "고객이 정기적으로 결제하여 이용하는 충전 서비스 요금제로, 센디 플랜 등이 포함됨",
+      "examples": [
+        "센디 플랜 (월 24,900원, 1,000kWh)",
+        "해피패스 (기존 구독 상품)"
+      ]
+    },
+    {
+      "name": "Promotion",
+      "display_name": "프로모션",
+      "description": "카드 발급, 구독 유도 등을 위한 마케팅 이벤트로, 일정 기간 내에 제공되는 혜택을 포함",
+      "examples": [
+        "카드 발급 선착순 10명, 1개월 무료",
+        "운송료 0.5% 크레딧 적립"
+      ]
+    },
+    {
+      "name": "RefundRequest",
+      "display_name": "환불 요청",
+      "description": "고장 또는 오류로 인해 결제된 금액에 대해 환불을 요청하는 행위로, E-pit 결제 오류 등에서 발생",
+      "examples": [
+        "E-pit eMSP 확인불가환불",
+        "비회원 결제 실패 환불 요청"
+      ]
+    },
+    {
+      "name": "PaymentTransaction",
+      "display_name": "결제 거래",
+      "description": "고객이 충전 서비스 이용 시 발생하는 결제 이력으로, 승인, 취소, 실패 등 상태 포함",
+      "examples": [
+        "2025-08-22, 15,000원 승인",
+        "2025-08-23, 12,000원 취소 실패"
+      ]
+    },
+    {
+      "name": "RepairReport",
+      "display_name": "수리 보고",
+      "description": "고장 증상이 확인된 후, 인프라운영팀 또는 담당자가 등록하는 수리 작업 기록",
+      "examples": [
+        "EVC-00123, LCD 불량, 2025-08-25 수리 완료",
+        "충전기 12번, 커넥터 파손, 긴급 보고"
+      ]
+    },
+    {
+      "name": "CustomerSupportAgent",
+      "display_name": "상담사",
+      "description": "고객 문의를 처리하는 고객센터 상담원으로, 상담 내용, 환불 안내, 보상 설명을 수행",
+      "examples": [
+        "김지영 상담사",
+        "이성준 담당자"
+      ]
+    },
+    {
+      "name": "Account",
+      "display_name": "회원 계정",
+      "description": "고객이 해피차저 또는 센디 플랫폼에 가입하여 이용하는 계정 정보로, 아이디, 비밀번호, 인증 상태 포함",
+      "examples": [
+        "user123@happycharger.com",
+        "sandi_user_456"
+      ]
+    },
+    {
+      "name": "CreditBalance",
+      "display_name": "크레딧 잔액",
+      "description": "고객이 카드 발급, 프로모션 등으로 적립한 충전 서비스 사용용 포인트 또는 크레딧",
+      "examples": [
+        "5,000 크레딧 적립",
+        "1,200 크레딧 사용"
+      ]
+    },
+    {
+      "name": "MembershipCardRegistration",
+      "display_name": "멤버십카드 등록",
+      "description": "고객이 센디카드 등록을 위해 정보를 입력하고 수령을 확인하는 과정",
+      "examples": [
+        "카드번호 입력 완료",
+        "배송지 등록 완료"
+      ]
+    },
+    {
+      "name": "RefundPayment",
+      "display_name": "환불 입금",
+      "description": "환불 처리 완료 후 고객 계좌로 입금된 금액 정보로, 입금일자, 은행명, 예금주 포함",
+      "examples": [
+        "2025-09-01, 한국전기차충전서비스, 12,500원 입금",
+        "2025-09-03, 국민은행, 이지은 계좌"
+      ]
+    },
+    {
+      "name": "ChargeHistory",
+      "display_name": "충전 이력",
+      "description": "고객이 실제로 충전한 기록으로, 시간, 금액, 충전량, 충전기 번호 등 포함",
+      "examples": [
+        "2025-08-22, 30kWh, 25,000원, EVC-00123",
+        "2025-08-23, 15kWh, 12,000원, 서울역 1번 충전기"
+      ]
+    },
+    {
+      "name": "ServiceAgreement",
+      "display_name": "서비스 약관",
+      "description": "고객이 서비스 이용 시 동의하는 약관으로, 회원가입, 결제, 환불 등에 적용됨",
+      "examples": [
+        "해피차저 이용약관 동의",
+        "센디 이용약관 동의"
+      ]
+    },
+    {
+      "name": "DeviceStatus",
+      "display_name": "장비 상태",
+      "description": "충전기 또는 기타 장비의 현재 상태를 나타내며, 고장, 정상, 점검 중 등으로 분류",
+      "examples": [
+        "정상 작동",
+        "고장 상태 (통신장애)",
+        "점검 중"
+      ]
+    },
+    {
+      "name": "CustomerInquiry",
+      "display_name": "고객 문의",
+      "description": "고객이 접수한 상담 요청으로, 문의 내용, 접수 시간, 상태 등 포함",
+      "examples": [
+        "2025-08-22, E-pit 결제 실패 환불 문의",
+        "2025-08-23, LCD 불량 신고"
+      ]
+    },
+    {
+      "name": "MonitoringSystem",
+      "display_name": "모니터링 시스템",
+      "description": "충전기 및 서비스 상태를 실시간으로 감시하는 시스템으로, 오류 발생 시 자동 알림",
+      "examples": [
+        "EVC 실시간 상태 모니터링",
+        "결제 실패 감지 시스템"
+      ]
+    },
+    {
+      "name": "Brand",
+      "display_name": "브랜드",
+      "description": "전기차 충전 서비스를 제공하는 브랜드로, 해피차저, 센디, E-pit 등 포함",
+      "examples": [
+        "해피차저",
+        "센디",
+        "E-pit"
+      ]
+    },
+    {
+      "name": "PromotionEligibility",
+      "display_name": "프로모션 자격",
+      "description": "특정 프로모션에 참여할 수 있는 조건으로, 센디 회원, 신규 가입자 등 포함",
+      "examples": [
+        "센디카드 회원만 참여 가능",
+        "신규 회원만 1개월 무료"
+      ]
+    },
+    {
+      "name": "ServiceStatus",
+      "display_name": "서비스 상태",
+      "description": "전체 서비스 운영 상태로, 정상, 장애, 점검 중 등으로 표시",
+      "examples": [
+        "전체 서비스 정상 운영",
+        "서버 점검 중"
+      ]
+    },
+    {
+      "name": "SupportTicket",
+      "display_name": "상담 티켓",
+      "description": "고객 문의를 시스템에 기록한 일련번호 기반의 티켓으로, 상태, 처리자, 메모 포함",
+      "examples": [
+        "TICKET-20250822-001",
+        "TICKET-20250823-002"
+      ]
+    },
+    {
+      "name": "AccountVerification",
+      "display_name": "계정 인증",
+      "description": "고객 계정 생성 시 휴대폰 본인인증 또는 이메일 인증을 통한 신원 확인 절차",
+      "examples": [
+        "휴대폰 본인인증 완료",
+        "이메일 인증 메일 수신"
+      ]
+    },
+    {
+      "name": "PaymentMethod",
+      "display_name": "결제 수단",
+      "description": "고객이 결제 시 사용하는 수단으로, 신용카드, 계좌이체, 크레딧 등 포함",
+      "examples": [
+        "삼성카드 1234-****-****-5678",
+        "국민은행 계좌 123456-7890-123"
+      ]
+    },
+    {
+      "name": "RefundInterest",
+      "display_name": "환불 이자",
+      "description": "환불 금액에 대해 추가로 지급되는 이자로, 연 5% 기준으로 계산됨",
+      "examples": [
+        "12,000원 환불 + 5% 이자 600원",
+        "이자 계산 기준: 2025-08-22 ~ 2025-09-01"
+      ]
+    },
+    {
+      "name": "CustomerFeedback",
+      "display_name": "고객 피드백",
+      "description": "고객이 서비스 이용 후 제출하는 만족도, 불만, 제안 등 정보",
+      "examples": [
+        "충전기 화면 불량, 3번 이상 반복",
+        "결제 후 환불 지연 불만"
+      ]
+    },
+    {
+      "name": "ServiceImprovement",
+      "display_name": "서비스 개선",
+      "description": "고객 문의나 장애 사례를 기반으로 시스템 및 프로세스 개선을 위한 조치",
+      "examples": [
+        "E-pit 결제 오류 대응 프로세스 개선",
+        "통신장애 모니터링 강화"
+      ]
+    },
+    {
+      "name": "EmergencyReport",
+      "display_name": "긴급 보고",
+      "description": "중대한 고장 또는 안전 문제로 인해 즉시 대응이 필요한 상황에서 등록된 보고",
+      "examples": [
+        "커넥터 분리 시도, 긴급 보고",
+        "화재 위험 신고"
+      ]
+    },
+    {
+      "name": "UserAgreement",
+      "display_name": "이용 약관 동의",
+      "description": "서비스 이용 전 고객이 동의해야 하는 법적 조건으로, 개인정보 수집 등 포함",
+      "examples": [
+        "해피차저 이용약관 동의 완료",
+        "센디 회원가입 약관 동의"
+      ]
+    },
+    {
+      "name": "PaymentFailure",
+      "display_name": "결제 실패",
+      "description": "결제 시 인증 실패, 네트워크 문제 등으로 인해 거래가 완료되지 않은 상태",
+      "examples": [
+        "결제 승인 후 취소 실패",
+        "카드 인식 불가로 결제 실패"
+      ]
+    },
+    {
+      "name": "ChargePoint",
+      "display_name": "충전소",
+      "description": "여러 대의 충전기와 시설이 있는 충전 장소로, 위치, 운영 시간, 상태 정보 포함",
+      "examples": [
+        "서울역 충전소",
+        "인천공항 2층 충전소"
+      ]
+    },
+    {
+      "name": "MaintenanceSchedule",
+      "display_name": "정기 점검 일정",
+      "description": "충전기 또는 시스템에 대한 예정된 점검 일정으로, 정기 유지보수 계획 포함",
+      "examples": [
+        "2025-09-05, EVC-00123 점검 예정",
+        "매월 1일, 전국 충전기 점검"
+      ]
+    },
+    {
+      "name": "ServiceAlert",
+      "display_name": "서비스 알림",
+      "description": "고객에게 전달되는 중요 정보로, 서비스 중단, 업데이트, 보안 이슈 등 포함",
+      "examples": [
+        "2025-08-25, 전국 충전기 점검으로 2시간 중단 예정",
+        "E-pit 결제 오류 대응 완료 안내"
+      ]
+    },
+    {
+      "name": "SystemLog",
+      "display_name": "시스템 로그",
+      "description": "서버나 장비에서 발생한 이벤트 기록으로, 오류, 성공, 실패 등 상태 기록",
+      "examples": [
+        "2025-08-22 14:30, EVC-00123 통신 실패",
+        "2025-08-23 09:15, 결제 승인 완료"
+      ]
+    },
+    {
+      "name": "CustomerProfile",
+      "display_name": "고객 프로필",
+      "description": "고객의 기본 정보, 가입 정보, 이용 이력 등을 포함하는 통합 프로필",
+      "examples": [
+        "김민수, 2025-01-15 가입, 12건 충전 이력",
+        "이지은, 신규 회원, 2025-08-20 등록"
+      ]
+    },
+    {
+      "name": "ServiceFeature",
+      "display_name": "서비스 기능",
+      "description": "고객이 이용할 수 있는 기능으로, 멤버십카드 인식, 크레딧 적립, 구독 등 포함",
+      "examples": [
+        "멤버십카드 인식 기능",
+        "크레딧 적립 기능",
+        "구독 상품 자동 갱신"
+      ]
+    },
+    {
+      "name": "InfrastuctureOperationTeam",
+      "display_name": "InfrastuctureOperationTeam",
+      "description": "Auto-generated entity type referenced in relations",
+      "examples": []
+    },
+    {
+      "name": "System",
+      "display_name": "System",
+      "description": "Auto-generated entity type referenced in relations",
+      "examples": []
+    },
+    {
+      "name": "Agent",
+      "display_name": "상담원",
+      "description": "고객 문의를 처리하는 상담 직원",
+      "examples": [
+        "상담원",
+        "담당자",
+        "상담사",
+        "CS직원"
+      ]
+    },
+    {
+      "name": "Inquiry",
+      "display_name": "문의",
+      "description": "고객이 제기하는 문의/요청 건",
+      "examples": [
+        "문의",
+        "요청",
+        "민원",
+        "상담건"
+      ]
+    },
+    {
+      "name": "Channel",
+      "display_name": "채널",
+      "description": "고객 접촉 채널",
+      "examples": [
+        "전화",
+        "채팅",
+        "이메일",
+        "카카오톡",
+        "홈페이지"
+      ]
+    },
+    {
+      "name": "Product",
+      "display_name": "상품",
+      "description": "서비스 또는 상품",
+      "examples": [
+        "상품",
+        "서비스",
+        "제품",
+        "품목"
+      ]
+    },
+    {
+      "name": "Policy",
+      "display_name": "정책",
+      "description": "처리 기준이 되는 정책/규정/약관",
+      "examples": [
+        "환불정책",
+        "배송규정",
+        "이용약관",
+        "처리기준"
+      ]
+    },
+    {
+      "name": "Resolution",
+      "display_name": "해결방안",
+      "description": "문의에 대한 처리 결과/해결 방법",
+      "examples": [
+        "환불처리",
+        "재배송",
+        "교환",
+        "보상"
+      ]
+    },
+    {
+      "name": "Status",
+      "display_name": "상태",
+      "description": "처리 상태/진행 상태",
+      "examples": [
+        "접수",
+        "처리중",
+        "완료",
+        "보류",
+        "이관"
+      ]
+    },
+    {
+      "name": "Organization",
+      "display_name": "조직",
+      "description": "회사, 부서, 팀 등 조직 단위",
+      "examples": [
+        "회사",
+        "부서",
+        "팀",
+        "센터",
+        "지점"
+      ]
+    },
+    {
+      "name": "Location",
+      "display_name": "장소",
+      "description": "물리적 위치/장소",
+      "examples": [
+        "매장",
+        "센터",
+        "창고",
+        "배송지"
+      ]
+    },
+    {
+      "name": "Document",
+      "display_name": "문서",
+      "description": "관련 문서/자료",
+      "examples": [
+        "매뉴얼",
+        "가이드",
+        "안내문",
+        "공지사항"
+      ]
+    }
+  ],
+  "relation_types": [
+    {
+      "name": "SUBMITTED",
+      "display_name": "제출함",
+      "description": "고객이 장애 또는 문의를 접수하는 관계",
+      "source_types": [
+        "Customer"
+      ],
+      "target_types": [
+        "CustomerInquiry"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_INQUIRY_TYPE",
+      "display_name": "문의 유형 포함",
+      "description": "문의 또는 장애 신고에 대해 고장증상 또는 유형을 지정하는 관계",
+      "source_types": [
+        "CustomerInquiry"
+      ],
+      "target_types": [
+        "InquiryType"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "ASSOCIATED_WITH",
+      "display_name": "연결됨",
+      "description": "고객 문의가 특정 충전기 또는 장비와 관련된 경우",
+      "source_types": [
+        "CustomerInquiry"
+      ],
+      "target_types": [
+        "ChargeStation"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "REPORTED_BY",
+      "display_name": "보고함",
+      "description": "고장 또는 이상 상태를 담당자가 보고하는 관계",
+      "source_types": [
+        "RepairReport"
+      ],
+      "target_types": [
+        "ChargeStation"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "REGISTERED",
+      "display_name": "등록함",
+      "description": "고객이 멤버십카드를 등록하거나 수령하는 과정",
+      "source_types": [
+        "Customer"
+      ],
+      "target_types": [
+        "MembershipCardRegistration"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "ENROLLS_IN",
+      "display_name": "가입함",
+      "description": "고객이 구독 상품에 가입하는 관계",
+      "source_types": [
+        "Customer"
+      ],
+      "target_types": [
+        "ServicePlan"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "RECEIVES_PROMOTION",
+      "display_name": "프로모션 수혜",
+      "description": "고객이 특정 프로모션에 참여하여 혜택을 받는 관계",
+      "source_types": [
+        "Customer"
+      ],
+      "target_types": [
+        "Promotion"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "REQUESTS_REFUND",
+      "display_name": "환불 요청함",
+      "description": "고객이 결제 오류 등으로 인해 환불을 요청하는 관계",
+      "source_types": [
+        "Customer"
+      ],
+      "target_types": [
+        "RefundRequest"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "PROCESSING",
+      "display_name": "처리 중",
+      "description": "상담사가 고객 문의를 처리 중임을 나타내는 관계",
+      "source_types": [
+        "CustomerSupportAgent"
+      ],
+      "target_types": [
+        "CustomerInquiry"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "MONITORED_BY",
+      "display_name": "모니터링함",
+      "description": "시스템이 특정 장비 또는 서비스 상태를 실시간 모니터링하는 관계",
+      "source_types": [
+        "MonitoringSystem"
+      ],
+      "target_types": [
+        "ChargeStation"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_STATUS",
+      "display_name": "상태 보유",
+      "description": "장비 또는 서비스가 현재 상태를 가지는 관계",
+      "source_types": [
+        "ChargeStation"
+      ],
+      "target_types": [
+        "DeviceStatus"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_HISTORY",
+      "display_name": "이력 보유",
+      "description": "고객 또는 장비가 이전의 거래 또는 작업 이력을 포함하는 관계",
+      "source_types": [
+        "Customer"
+      ],
+      "target_types": [
+        "ChargeHistory"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "PAYS_WITH",
+      "display_name": "결제 수단 사용",
+      "description": "고객이 특정 수단으로 결제하는 관계",
+      "source_types": [
+        "Customer"
+      ],
+      "target_types": [
+        "PaymentMethod"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "ENTERS_SERVICE",
+      "display_name": "서비스 이용",
+      "description": "고객이 특정 서비스를 이용하는 관계",
+      "source_types": [
+        "Customer"
+      ],
+      "target_types": [
+        "ServiceFeature"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "APPLIES_TO",
+      "display_name": "적용됨",
+      "description": "프로모션 또는 정책이 특정 고객 또는 상품에 적용되는 관계",
+      "source_types": [
+        "Promotion"
+      ],
+      "target_types": [
+        "Customer"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "LINKED_TO",
+      "display_name": "연결됨",
+      "description": "문의 또는 장애가 여러 충전기와 관련된 경우, 각 충전기와 연결하는 관계",
+      "source_types": [
+        "CustomerInquiry"
+      ],
+      "target_types": [
+        "ChargeStation"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "RECEIVES_PAYMENT",
+      "display_name": "입금 수령",
+      "description": "환불 금액이 고객 계좌로 입금되는 관계",
+      "source_types": [
+        "RefundPayment"
+      ],
+      "target_types": [
+        "Customer"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "GENERATED_BY",
+      "display_name": "생성함",
+      "description": "시스템 또는 사용자가 특정 로그나 기록을 생성하는 관계",
+      "source_types": [
+        "SystemLog"
+      ],
+      "target_types": [
+        "ChargeStation"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "ENROLLS_IN_PLAN",
+      "display_name": "구독 상품 가입",
+      "description": "고객이 특정 구독 상품에 가입하는 관계",
+      "source_types": [
+        "Customer"
+      ],
+      "target_types": [
+        "ServicePlan"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_CREDIT",
+      "display_name": "크레딧 보유",
+      "description": "고객이 특정 크레딧 잔액을 보유하는 관계",
+      "source_types": [
+        "Customer"
+      ],
+      "target_types": [
+        "CreditBalance"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "IS_ELIGIBLE_FOR",
+      "display_name": "자격 있음",
+      "description": "고객이 특정 프로모션 또는 혜택에 자격이 있는 관계",
+      "source_types": [
+        "Customer"
+      ],
+      "target_types": [
+        "Promotion"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_SERVICE",
+      "display_name": "서비스 제공",
+      "description": "브랜드가 특정 서비스를 제공하는 관계",
+      "source_types": [
+        "Brand"
+      ],
+      "target_types": [
+        "ServiceFeature"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "REPORTS_TO",
+      "display_name": "보고함",
+      "description": "담당자가 보고서를 상위 담당자에게 제출하는 관계",
+      "source_types": [
+        "RepairReport"
+      ],
+      "target_types": [
+        "InfrastuctureOperationTeam"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_ALERT",
+      "display_name": "알림 포함",
+      "description": "서비스 상태 변경 시 고객에게 알림을 전달하는 관계",
+      "source_types": [
+        "ServiceAlert"
+      ],
+      "target_types": [
+        "Customer"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_PAYMENT_TRANSACTION",
+      "display_name": "결제 거래 포함",
+      "description": "고객이 특정 거래를 수행한 관계",
+      "source_types": [
+        "Customer"
+      ],
+      "target_types": [
+        "PaymentTransaction"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "IS_IN",
+      "display_name": "소속됨",
+      "description": "고객이 특정 브랜드 또는 플랫폼에 소속되는 관계",
+      "source_types": [
+        "Customer"
+      ],
+      "target_types": [
+        "Brand"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_PROFILE",
+      "display_name": "프로필 보유",
+      "description": "고객이 자신의 프로필 정보를 보유하는 관계",
+      "source_types": [
+        "Customer"
+      ],
+      "target_types": [
+        "CustomerProfile"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "IS_PART_OF",
+      "display_name": "소속됨",
+      "description": "장비 또는 서비스가 특정 충전소에 속하는 관계",
+      "source_types": [
+        "ChargeStation"
+      ],
+      "target_types": [
+        "ChargePoint"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_MAINTENANCE",
+      "display_name": "정기 점검 포함",
+      "description": "장비가 정기 점검 일정에 포함되는 관계",
+      "source_types": [
+        "ChargeStation"
+      ],
+      "target_types": [
+        "MaintenanceSchedule"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_SYSTEM_LOG",
+      "display_name": "시스템 로그 포함",
+      "description": "장비가 발생한 이벤트 로그를 보유하는 관계",
+      "source_types": [
+        "ChargeStation"
+      ],
+      "target_types": [
+        "SystemLog"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_SERVICE_STATUS",
+      "display_name": "서비스 상태 포함",
+      "description": "서비스 전체의 현재 상태를 나타내는 관계",
+      "source_types": [
+        "ServiceStatus"
+      ],
+      "target_types": [
+        "Brand"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "IS_REGISTERED",
+      "display_name": "등록됨",
+      "description": "고객이 특정 계정으로 등록된 상태",
+      "source_types": [
+        "Customer"
+      ],
+      "target_types": [
+        "Account"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_PAYMENT_FAILURE",
+      "display_name": "결제 실패 포함",
+      "description": "거래가 실패한 상태를 나타내는 관계",
+      "source_types": [
+        "PaymentTransaction"
+      ],
+      "target_types": [
+        "PaymentFailure"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_REFUND_INTEREST",
+      "display_name": "환불 이자 포함",
+      "description": "환불 금액에 대해 이자가 포함된 상태",
+      "source_types": [
+        "RefundRequest"
+      ],
+      "target_types": [
+        "RefundInterest"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "IS_IMPROVED_BY",
+      "display_name": "개선됨",
+      "description": "고객 피드백을 기반으로 서비스가 개선되는 관계",
+      "source_types": [
+        "CustomerFeedback"
+      ],
+      "target_types": [
+        "ServiceImprovement"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "IS_EMERGENCY_REPORTED",
+      "display_name": "긴급 보고됨",
+      "description": "중대한 고장 또는 위험이 긴급 보고된 상태",
+      "source_types": [
+        "ChargeStation"
+      ],
+      "target_types": [
+        "EmergencyReport"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_AGREEMENT",
+      "display_name": "약관 동의",
+      "description": "고객이 특정 약관에 동의한 상태",
+      "source_types": [
+        "Customer"
+      ],
+      "target_types": [
+        "UserAgreement"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "IS_PART_OF_SYSTEM",
+      "display_name": "시스템 구성 요소",
+      "description": "장비 또는 기능이 전체 시스템에 포함됨을 나타냄",
+      "source_types": [
+        "ServiceFeature"
+      ],
+      "target_types": [
+        "System"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HANDLED",
+      "display_name": "처리함",
+      "description": "상담원이 문의를 처리하는 관계",
+      "source_types": [
+        "Agent"
+      ],
+      "target_types": [
+        "Inquiry",
+        "InquiryType"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "INQUIRED_ABOUT",
+      "display_name": "문의대상",
+      "description": "문의가 특정 상품/서비스에 대한 것임",
+      "source_types": [
+        "Inquiry"
+      ],
+      "target_types": [
+        "Product"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "RESOLVED_WITH",
+      "display_name": "해결됨",
+      "description": "문의가 특정 방안으로 해결됨",
+      "source_types": [
+        "Inquiry"
+      ],
+      "target_types": [
+        "Resolution"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "CONTACTED_VIA",
+      "display_name": "채널로연락",
+      "description": "고객이 특정 채널로 연락함",
+      "source_types": [
+        "Customer",
+        "Inquiry"
+      ],
+      "target_types": [
+        "Channel"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "FOLLOWS_POLICY",
+      "display_name": "정책준수",
+      "description": "처리가 특정 정책을 따름",
+      "source_types": [
+        "Resolution",
+        "Agent"
+      ],
+      "target_types": [
+        "Policy"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "BELONGS_TO",
+      "display_name": "소속",
+      "description": "소속 관계",
+      "source_types": [
+        "Agent",
+        "Product"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "LOCATED_AT",
+      "display_name": "위치",
+      "description": "위치 관계",
+      "source_types": [
+        "Organization",
+        "Product"
+      ],
+      "target_types": [
+        "Location"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "REFERENCES",
+      "display_name": "참조",
+      "description": "문서/정책을 참조함",
+      "source_types": [
+        "Inquiry",
+        "Resolution"
+      ],
+      "target_types": [
+        "Document",
+        "Policy"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    }
+  ],
+  "version": "1.0.0",
+  "tags": [],
+  "created_at": "2026-02-05T08:53:27.166214",
+  "updated_at": "2026-02-05T08:53:27.166214"
+}

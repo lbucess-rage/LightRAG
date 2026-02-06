@@ -13,9 +13,12 @@ import { ZapIcon } from 'lucide-react'
 
 import GraphViewer from '@/features/GraphViewer'
 import DocumentManager from '@/features/DocumentManager'
+import EntityManagement from '@/features/EntityManagement'
+import SchemaManager from '@/features/SchemaManager'
 import RetrievalTesting from '@/features/RetrievalTesting'
 import ApiSite from '@/features/ApiSite'
 import PromptSettings from '@/features/PromptSettings'
+import WorkspaceManagement from '@/features/WorkspaceManagement'
 
 import { Tabs, TabsContent } from '@/components/ui/Tabs'
 
@@ -199,7 +202,7 @@ function App() {
           // Main content after initialization
           <main className="flex h-screen w-screen overflow-hidden">
             <Tabs
-              defaultValue={currentTab}
+              value={currentTab}
               className="!m-0 flex grow flex-col !p-0 overflow-hidden"
               onValueChange={handleTabChange}
             >
@@ -211,6 +214,12 @@ function App() {
                 <TabsContent value="knowledge-graph" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
                   <GraphViewer />
                 </TabsContent>
+                <TabsContent value="entity-management" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
+                  <EntityManagement />
+                </TabsContent>
+                <TabsContent value="schema" className="absolute top-0 right-0 bottom-0 left-0 overflow-auto">
+                  <SchemaManager />
+                </TabsContent>
                 <TabsContent value="retrieval" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
                   <RetrievalTesting />
                 </TabsContent>
@@ -219,6 +228,9 @@ function App() {
                 </TabsContent>
                 <TabsContent value="prompts" className="absolute top-0 right-0 bottom-0 left-0 overflow-auto">
                   <PromptSettings />
+                </TabsContent>
+                <TabsContent value="workspaces" className="absolute top-0 right-0 bottom-0 left-0 overflow-auto">
+                  <WorkspaceManagement />
                 </TabsContent>
               </div>
             </Tabs>

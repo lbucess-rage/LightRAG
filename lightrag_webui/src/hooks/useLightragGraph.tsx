@@ -8,6 +8,7 @@ import { toast } from 'sonner'
 import { queryGraphs } from '@/api/lightrag'
 import { useBackendState } from '@/stores/state'
 import { useSettingsStore } from '@/stores/settings'
+import { useWorkspaceStore } from '@/stores/workspace'
 
 import seedrandom from 'seedrandom'
 import { resolveNodeColor, DEFAULT_NODE_COLOR } from '@/utils/graphColor'
@@ -269,6 +270,7 @@ const useLightrangeGraph = () => {
   const nodeToExpand = useGraphStore.use.nodeToExpand()
   const nodeToPrune = useGraphStore.use.nodeToPrune()
   const graphDataVersion = useGraphStore.use.graphDataVersion()
+  const currentWorkspaceId = useWorkspaceStore.use.currentWorkspaceId()
 
 
   // Use ref to track if data has been loaded and initial load
@@ -305,6 +307,18 @@ const useLightrangeGraph = () => {
       initialLoadRef.current = false
     }
   }, [queryLabel, rawGraph, sigmaGraph])
+
+  // Reset graph data when workspace changes
+  useEffect(() => {
+    const state = useGraphStore.getState()
+    state.reset()
+    state.setGraphDataFetchAttempted(false)
+    state.setLabelsFetchAttempted(false)
+    dataLoadedRef.current = false
+    initialLoadRef.current = false
+    emptyDataHandledRef.current = false
+    fetchInProgressRef.current = false
+  }, [currentWorkspaceId])
 
   // Graph data fetching logic
   useEffect(() => {
@@ -455,7 +469,7 @@ const useLightrangeGraph = () => {
         state.setLastSuccessfulQueryLabel('') // Clear last successful query label on error
       })
     }
-  }, [queryLabel, maxQueryDepth, maxNodes, isFetching, t, graphDataVersion])
+  }, [queryLabel, maxQueryDepth, maxNodes, isFetching, t, graphDataVersion, currentWorkspaceId])
 
   // Handle node expansion
   useEffect(() => {

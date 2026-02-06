@@ -13,6 +13,7 @@ import {
   PromptUpdateRequest
 } from '@/api/lightrag'
 import { errorMessage } from '@/lib/utils'
+import { useWorkspaceStore } from '@/stores/workspace'
 
 type PromptItemProps = {
   prompt: PromptResponse
@@ -154,6 +155,7 @@ export default function PromptSettings() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const currentWorkspaceId = useWorkspaceStore.use.currentWorkspaceId()
 
   const fetchPrompts = useCallback(async () => {
     setLoading(true)
@@ -168,9 +170,10 @@ export default function PromptSettings() {
     }
   }, [])
 
+  // Fetch prompts on mount and when workspace changes
   useEffect(() => {
     fetchPrompts()
-  }, [fetchPrompts])
+  }, [fetchPrompts, currentWorkspaceId])
 
   const handleSave = async (key: string, request: PromptUpdateRequest) => {
     setSaving(true)

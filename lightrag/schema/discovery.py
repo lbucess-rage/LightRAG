@@ -21,6 +21,10 @@ from .prompts import (
     SCHEMA_DISCOVERY_USER_PROMPT,
     SCHEMA_REFINEMENT_SYSTEM_PROMPT,
     SCHEMA_REFINEMENT_USER_PROMPT,
+    DOMAIN_KEYWORD_DISCOVERY_SYSTEM_PROMPT,
+    DOMAIN_KEYWORD_DISCOVERY_USER_PROMPT,
+    DEFAULT_ENTITY_TYPES,
+    DEFAULT_RELATION_TYPES,
 )
 from .templates import SchemaTemplateManager
 
@@ -120,6 +124,15 @@ class SchemaDiscoveryEngine:
             f"{len(result.relation_types)} relation types"
         )
 
+        # Merge with default common types if requested
+        include_common_types = options.get("include_common_types", False)
+        if include_common_types:
+            result = self._merge_with_common_types(result)
+            logger.info(
+                f"After merging common types: {len(result.entity_types)} entity types, "
+                f"{len(result.relation_types)} relation types"
+            )
+
         return result
 
     async def discover_from_domain(
@@ -127,39 +140,84 @@ class SchemaDiscoveryEngine:
         domains: list[str],
         options: Optional[dict[str, Any]] = None,
     ) -> SchemaDiscoveryResult:
-        """도메인 키워드에서 스키마 추천
+        """도메인 키워드에서 스키마 생성
 
-        등록된 템플릿을 기반으로 스키마를 추천합니다.
+        LLM을 사용하여 도메인 키워드 기반 스키마를 생성합니다.
+        기존 템플릿이 있으면 참고하여 보완합니다.
 
         Args:
-            domains: 도메인 식별자 목록
+            domains: 도메인 키워드 목록
             options: 옵션
-                - merge_strategy: 병합 전략 (union, intersection)
+                - max_entity_types: 최대 엔티티 타입 수 (기본: 30)
+                - max_relation_types: 최대 관계 타입 수 (기본: 25)
+                - language: 출력 언어 (기본: Korean)
+                - use_templates: 기존 템플릿 참조 여부 (기본: True)
 
         Returns:
             SchemaDiscoveryResult
         """
         options = options or {}
-        merge_strategy = options.get("merge_strategy", "union")
+        max_entity_types = options.get("max_entity_types", 30)
+        max_relation_types = options.get("max_relation_types", 25)
+        language = options.get("language", "Korean")
+        use_templates = options.get("use_templates", True)
 
-        logger.info(f"Discovering schema from domains: {domains}")
+        logger.info(f"Discovering schema from domain keywords: {domains}")
 
-        # 템플릿 병합
-        merged = await self.template_manager.merge_schemas(
-            domains, merge_strategy=merge_strategy
+        # 기존 템플릿 확인 (참조용)
+        similar_templates = []
+        if use_templates:
+            try:
+                merged = await self.template_manager.merge_schemas(
+                    domains, merge_strategy="union"
+                )
+                if merged:
+                    similar_templates = domains
+                    logger.info(f"Found existing templates for reference: {domains}")
+            except Exception:
+                pass
+
+        # LLM을 사용하여 스키마 생성
+        keywords_text = "\n".join([f"- {kw}" for kw in domains])
+
+        user_prompt = DOMAIN_KEYWORD_DISCOVERY_USER_PROMPT.format(
+            domain_keywords=keywords_text,
+            max_entity_types=max_entity_types,
+            max_relation_types=max_relation_types,
+            language=language,
         )
 
-        if merged is None:
-            raise ValueError(f"No templates found for domains: {domains}")
+        logger.debug(f"Calling LLM for domain keyword discovery...")
 
-        return SchemaDiscoveryResult(
-            entity_types=merged.entity_types,
-            relation_types=merged.relation_types,
-            source_type="domain_keyword",
-            confidence=1.0,  # 템플릿 기반이므로 신뢰도 높음
-            similar_templates=domains,
-            domain_summary=merged.description,
+        try:
+            response = await self.llm_func(
+                user_prompt,
+                system_prompt=DOMAIN_KEYWORD_DISCOVERY_SYSTEM_PROMPT,
+            )
+        except Exception as e:
+            logger.error(f"LLM call failed: {e}")
+            raise RuntimeError(f"Schema discovery from domain keywords failed: {e}")
+
+        # 결과 파싱
+        result = self._parse_llm_response(response)
+        result.source_type = "domain_keyword"
+        result.similar_templates = similar_templates
+
+        logger.info(
+            f"Generated {len(result.entity_types)} entity types, "
+            f"{len(result.relation_types)} relation types from keywords: {domains}"
         )
+
+        # Merge with default common types if requested
+        include_common_types = options.get("include_common_types", False)
+        if include_common_types:
+            result = self._merge_with_common_types(result)
+            logger.info(
+                f"After merging common types: {len(result.entity_types)} entity types, "
+                f"{len(result.relation_types)} relation types"
+            )
+
+        return result
 
     async def discover_hybrid(
         self,
@@ -323,6 +381,11 @@ class SchemaDiscoveryEngine:
             except Exception as e:
                 logger.warning(f"Failed to parse relation type: {e}")
 
+        # 관계 타입 유효성 검증 및 수정
+        entity_types, relation_types = self._validate_and_fix_schema(
+            entity_types, relation_types
+        )
+
         # 신뢰도 계산 (엔티티/관계 수 기반)
         confidence = min(
             1.0,
@@ -350,6 +413,11 @@ class SchemaDiscoveryEngine:
             RelationType.from_dict(rt) for rt in schema_data.get("relation_types", [])
         ]
 
+        # 관계 타입 유효성 검증 및 수정
+        entity_types, relation_types = self._validate_and_fix_schema(
+            entity_types, relation_types
+        )
+
         return SchemaDiscoveryResult(
             entity_types=entity_types,
             relation_types=relation_types,
@@ -370,6 +438,65 @@ class SchemaDiscoveryEngine:
 
         raise ValueError("JSON not found in response")
 
+    def _validate_and_fix_schema(
+        self,
+        entity_types: list[EntityType],
+        relation_types: list[RelationType],
+    ) -> tuple[list[EntityType], list[RelationType]]:
+        """스키마 유효성 검증 및 수정
+
+        관계 타입의 source_types/target_types에서 참조하는 엔티티 타입이
+        실제로 존재하는지 확인하고, 누락된 엔티티를 자동으로 추가합니다.
+
+        Args:
+            entity_types: 엔티티 타입 목록
+            relation_types: 관계 타입 목록
+
+        Returns:
+            수정된 (엔티티 타입 목록, 관계 타입 목록)
+        """
+        # 기존 엔티티 타입 이름 집합
+        entity_names = {et.name for et in entity_types}
+
+        # 관계에서 참조하는 모든 엔티티 타입 수집
+        referenced_types: set[str] = set()
+        for rt in relation_types:
+            referenced_types.update(rt.source_types)
+            referenced_types.update(rt.target_types)
+
+        # 누락된 엔티티 타입 찾기
+        missing_types = referenced_types - entity_names
+
+        if missing_types:
+            logger.info(
+                f"Found {len(missing_types)} missing entity types referenced in relations: "
+                f"{missing_types}"
+            )
+
+            # 누락된 엔티티 타입을 자동으로 추가
+            for missing_name in missing_types:
+                new_entity = EntityType(
+                    name=missing_name,
+                    display_name=missing_name,
+                    description=f"Auto-generated entity type referenced in relations",
+                    examples=[],
+                )
+                entity_types.append(new_entity)
+                logger.debug(f"Auto-added missing entity type: {missing_name}")
+
+        # 관계 타입의 source_types/target_types 정리 (빈 값 제거)
+        valid_relation_types = []
+        for rt in relation_types:
+            # 빈 source_types나 target_types가 있는 관계는 제외
+            if rt.source_types and rt.target_types:
+                valid_relation_types.append(rt)
+            else:
+                logger.warning(
+                    f"Removed relation type '{rt.name}' due to empty source or target types"
+                )
+
+        return entity_types, valid_relation_types
+
     def _extract_changes(self, response: str) -> list[str]:
         """개선 응답에서 변경 사항 추출"""
         changes = []
@@ -383,6 +510,63 @@ class SchemaDiscoveryEngine:
         except Exception:
             pass
         return changes
+
+    def _merge_with_common_types(
+        self,
+        result: SchemaDiscoveryResult,
+    ) -> SchemaDiscoveryResult:
+        """Merge discovery result with default common entity/relation types.
+
+        This adds common contact center entity types and relation types
+        that may not have been discovered from the documents but are
+        generally useful in the domain.
+
+        Args:
+            result: Original discovery result
+
+        Returns:
+            SchemaDiscoveryResult with merged common types
+        """
+        # Get existing type names (case-insensitive)
+        existing_entity_names = {et.name.lower() for et in result.entity_types}
+        existing_relation_names = {rt.name.lower() for rt in result.relation_types}
+
+        # Add default entity types that don't already exist
+        merged_entity_types = list(result.entity_types)
+        for default_et in DEFAULT_ENTITY_TYPES:
+            if default_et["name"].lower() not in existing_entity_names:
+                merged_entity_types.append(
+                    EntityType(
+                        name=default_et["name"],
+                        display_name=default_et["display_name"],
+                        description=default_et["description"],
+                        examples=default_et.get("examples", []),
+                    )
+                )
+
+        # Add default relation types that don't already exist
+        merged_relation_types = list(result.relation_types)
+        for default_rt in DEFAULT_RELATION_TYPES:
+            if default_rt["name"].lower() not in existing_relation_names:
+                merged_relation_types.append(
+                    RelationType(
+                        name=default_rt["name"],
+                        display_name=default_rt["display_name"],
+                        description=default_rt["description"],
+                        source_types=default_rt["source_types"],
+                        target_types=default_rt["target_types"],
+                    )
+                )
+
+        return SchemaDiscoveryResult(
+            entity_types=merged_entity_types,
+            relation_types=merged_relation_types,
+            source_type=result.source_type,
+            confidence=result.confidence,
+            similar_templates=result.similar_templates,
+            suggestions=result.suggestions,
+            domain_summary=result.domain_summary,
+        )
 
     async def _find_similar_templates(
         self,

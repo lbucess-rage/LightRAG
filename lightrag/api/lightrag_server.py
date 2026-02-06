@@ -49,14 +49,27 @@ from lightrag.constants import (
 from lightrag.api.routers.document_routes import (
     DocumentManager,
     create_document_routes,
+    set_rag_workspace_getter as set_document_rag_workspace_getter,
 )
-from lightrag.api.routers.query_routes import create_query_routes
-from lightrag.api.routers.graph_routes import create_graph_routes
+from lightrag.api.routers.query_routes import (
+    create_query_routes,
+    set_rag_workspace_getter as set_query_rag_workspace_getter,
+)
+from lightrag.api.routers.graph_routes import (
+    create_graph_routes,
+    set_rag_workspace_getter as set_graph_rag_workspace_getter,
+)
 from lightrag.api.routers.prompt_routes import create_prompt_routes
 from lightrag.api.routers.user_prompt_template_routes import create_user_prompt_template_routes
-from lightrag.api.routers.entity_management_routes import create_entity_management_routes
+from lightrag.api.routers.entity_management_routes import (
+    create_entity_management_routes,
+    set_rag_workspace_getter as set_entity_mgmt_rag_workspace_getter,
+)
+from lightrag.api.routers.workspace_routes import create_workspace_routes
 from lightrag.api.routers.ollama_api import OllamaAPI
-from lightrag.api.routers.schema_routes import router as schema_router, set_discovery_engine
+from lightrag.api.routers.ollama_api import set_rag_workspace_getter as set_ollama_rag_workspace_getter
+from lightrag.api.routers.schema_routes import router as schema_router, set_discovery_engine, set_rag_instance
+from lightrag.api.routers.schema_routes import set_rag_workspace_getter as set_schema_rag_workspace_getter
 
 from lightrag.utils import logger, set_verbose_debug
 from lightrag.kg.shared_storage import (
@@ -68,11 +81,82 @@ from lightrag.kg.shared_storage import (
 )
 from fastapi.security import OAuth2PasswordRequestForm
 from lightrag.api.auth import auth_handler
+from lightrag.exceptions import PipelineNotInitializedError
 
 # use the .env that is inside the current folder
 # allows to use different .env file for each lightrag instance
 # the OS environment variables take precedence over the .env file
 load_dotenv(dotenv_path=".env", override=False)
+
+
+# =============================================================================
+# Workspace-specific RAG Instance Cache
+# =============================================================================
+# Global cache for RAG instances keyed by workspace
+_rag_instance_cache: dict[str, LightRAG] = {}
+_rag_factory_config: dict = {}  # Stores configuration for creating new RAG instances
+_default_rag_instance: LightRAG | None = None
+
+
+def set_rag_factory_config(config: dict):
+    """Store configuration for creating new RAG instances."""
+    global _rag_factory_config
+    _rag_factory_config = config
+
+
+def set_default_rag_instance(rag: LightRAG):
+    """Set the default RAG instance (created at server startup)."""
+    global _default_rag_instance
+    _default_rag_instance = rag
+    # Also cache it under its workspace
+    if rag.workspace:
+        _rag_instance_cache[rag.workspace] = rag
+
+
+async def get_rag_for_workspace(workspace: str) -> LightRAG:
+    """Get or create a RAG instance for the specified workspace.
+
+    Args:
+        workspace: The workspace identifier
+
+    Returns:
+        LightRAG instance for the workspace (initialized)
+    """
+    global _rag_instance_cache, _rag_factory_config, _default_rag_instance
+
+    # Return cached instance if available
+    if workspace in _rag_instance_cache:
+        return _rag_instance_cache[workspace]
+
+    # If no factory config, return default instance
+    if not _rag_factory_config:
+        logger.warning(f"No RAG factory config, using default instance for workspace: {workspace}")
+        return _default_rag_instance
+
+    # Create new RAG instance for this workspace
+    try:
+        logger.info(f"Creating new RAG instance for workspace: {workspace}")
+        config = _rag_factory_config.copy()
+        config["workspace"] = workspace
+
+        new_rag = LightRAG(**config)
+
+        # Initialize storages (critical for database connections)
+        logger.info(f"Initializing storages for workspace: {workspace}")
+        await new_rag.initialize_storages()
+
+        _rag_instance_cache[workspace] = new_rag
+        logger.info(f"RAG instance created, initialized, and cached for workspace: {workspace}")
+        return new_rag
+    except Exception as e:
+        logger.error(f"Failed to create RAG instance for workspace {workspace}: {e}")
+        # Fall back to default instance
+        return _default_rag_instance
+
+
+def get_default_rag() -> LightRAG | None:
+    """Get the default RAG instance."""
+    return _default_rag_instance
 
 
 webui_title = os.getenv("WEBUI_TITLE")
@@ -464,27 +548,48 @@ def create_app(args):
     # Create combined auth dependency for all endpoints
     combined_auth = get_combined_auth_dependency(api_key)
 
-    def get_workspace_from_request(request: Request) -> str | None:
+    def get_workspace_from_request(
+        request: Request,
+        query_workspace: str | None = None,
+        body_workspace: str | None = None,
+    ) -> str | None:
         """
-        Extract workspace from HTTP request header or use default.
+        Extract workspace from multiple sources with priority.
 
-        This enables multi-workspace API support by checking the custom
-        'LIGHTRAG-WORKSPACE' header. If not present, falls back to the
-        server's default workspace configuration.
+        Priority order (highest to lowest):
+        1. Body parameter (if provided)
+        2. Query parameter (if provided)
+        3. HTTP header 'LIGHTRAG-WORKSPACE'
+        4. None (will use server default)
+
+        This enables flexible multi-workspace API support:
+        - Header: For SDK/client-level workspace configuration
+        - Query param: For URL-based workspace selection
+        - Body: For per-request workspace override
 
         Args:
             request: FastAPI Request object
+            query_workspace: Workspace from query parameter
+            body_workspace: Workspace from request body
 
         Returns:
-            Workspace identifier (may be empty string for global namespace)
+            Workspace identifier or None for default
         """
-        # Check custom header first
-        workspace = request.headers.get("LIGHTRAG-WORKSPACE", "").strip()
+        # Priority 1: Body parameter
+        if body_workspace and body_workspace.strip():
+            return body_workspace.strip()
 
-        if not workspace:
-            workspace = None
+        # Priority 2: Query parameter
+        if query_workspace and query_workspace.strip():
+            return query_workspace.strip()
 
-        return workspace
+        # Priority 3: HTTP header
+        header_workspace = request.headers.get("LIGHTRAG-WORKSPACE", "").strip()
+        if header_workspace:
+            return header_workspace
+
+        # Priority 4: Return None (caller will use default)
+        return None
 
     # Create working directory if it doesn't exist
     Path(args.working_dir).mkdir(parents=True, exist_ok=True)
@@ -1086,6 +1191,45 @@ def create_app(args):
             },
             ollama_server_infos=ollama_server_infos,
         )
+
+        # Store factory config for creating workspace-specific RAG instances
+        rag_factory_config = {
+            "working_dir": args.working_dir,
+            "llm_model_func": create_llm_model_func(args.llm_binding),
+            "llm_model_name": args.llm_model,
+            "llm_model_max_async": args.max_async,
+            "summary_max_tokens": args.summary_max_tokens,
+            "summary_context_size": args.summary_context_size,
+            "chunk_token_size": int(args.chunk_size),
+            "chunk_overlap_token_size": int(args.chunk_overlap_size),
+            "llm_model_kwargs": create_llm_model_kwargs(args.llm_binding, args, llm_timeout),
+            "embedding_func": embedding_func,
+            "default_llm_timeout": llm_timeout,
+            "default_embedding_timeout": embedding_timeout,
+            "kv_storage": args.kv_storage,
+            "graph_storage": args.graph_storage,
+            "vector_storage": args.vector_storage,
+            "doc_status_storage": args.doc_status_storage,
+            "vector_db_storage_cls_kwargs": {"cosine_better_than_threshold": args.cosine_threshold},
+            "enable_llm_cache_for_entity_extract": args.enable_llm_cache_for_extract,
+            "enable_llm_cache": args.enable_llm_cache,
+            "rerank_model_func": rerank_model_func,
+            "max_parallel_insert": args.max_parallel_insert,
+            "max_graph_nodes": args.max_graph_nodes,
+            "addon_params": {"language": args.summary_language, "entity_types": args.entity_types},
+            "ollama_server_infos": ollama_server_infos,
+        }
+        set_rag_factory_config(rag_factory_config)
+        set_default_rag_instance(rag)
+        # Set workspace getter for all route modules
+        set_document_rag_workspace_getter(get_rag_for_workspace)
+        set_graph_rag_workspace_getter(get_rag_for_workspace)
+        set_query_rag_workspace_getter(get_rag_for_workspace, get_default_workspace)
+        set_entity_mgmt_rag_workspace_getter(get_rag_for_workspace)
+        set_schema_rag_workspace_getter(get_rag_for_workspace)
+        set_ollama_rag_workspace_getter(get_rag_for_workspace)
+        logger.info(f"RAG factory config stored, default workspace: {args.workspace or 'base'}")
+
     except Exception as e:
         logger.error(f"Failed to initialize LightRAG: {e}")
         raise
@@ -1103,6 +1247,7 @@ def create_app(args):
     app.include_router(create_prompt_routes(rag, api_key))
     app.include_router(create_user_prompt_template_routes(rag, api_key))
     app.include_router(create_entity_management_routes(rag, api_key))
+    app.include_router(create_workspace_routes(rag, api_key))
 
     # Add Schema API routes
     app.include_router(schema_router, prefix="/api/schema")
@@ -1120,9 +1265,12 @@ def create_app(args):
 
         discovery_engine = SchemaDiscoveryEngine(llm_func=schema_llm_func)
         set_discovery_engine(discovery_engine)
-        logger.info("Schema Discovery Engine initialized")
+        set_rag_instance(rag)
+        logger.info("Schema Discovery Engine initialized with RAG instance")
     except Exception as e:
         logger.warning(f"Failed to initialize Schema Discovery Engine: {e}")
+        # RAG 인스턴스는 Discovery 없이도 설정
+        set_rag_instance(rag)
 
     # Add Ollama API routes
     ollama_api = OllamaAPI(rag, top_k=args.top_k, api_key=api_key)
@@ -1260,9 +1408,22 @@ def create_app(args):
             default_workspace = get_default_workspace()
             if workspace is None:
                 workspace = default_workspace
-            pipeline_status = await get_namespace_data(
-                "pipeline_status", workspace=workspace
-            )
+
+            # Try to get pipeline status, fallback to default workspace or empty dict
+            pipeline_status = {}
+            try:
+                pipeline_status = await get_namespace_data(
+                    "pipeline_status", workspace=workspace
+                )
+            except PipelineNotInitializedError:
+                # If the requested workspace isn't initialized, try default workspace
+                if workspace != default_workspace:
+                    try:
+                        pipeline_status = await get_namespace_data(
+                            "pipeline_status", workspace=default_workspace
+                        )
+                    except PipelineNotInitializedError:
+                        pass  # Use empty dict as fallback
 
             if not auth_configured:
                 auth_mode = "disabled"

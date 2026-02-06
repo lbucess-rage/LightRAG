@@ -1819,16 +1819,30 @@ class LightRAG:
                                     f"got {type(chunking_result)}"
                                 )
 
-                            # Build chunks dictionary
-                            chunks: dict[str, Any] = {
-                                compute_mdhash_id(dp["content"], prefix="chunk-"): {
+                            # Build chunks dictionary with structured_content for text type
+                            chunks: dict[str, Any] = {}
+                            for dp in chunking_result:
+                                chunk_id = compute_mdhash_id(dp["content"], prefix="chunk-")
+                                chunks[chunk_id] = {
                                     **dp,
                                     "full_doc_id": doc_id,
                                     "file_path": file_path,  # Add file path to each chunk
                                     "llm_cache_list": [],  # Initialize empty LLM cache list for each chunk
+                                    # Add structured_content for consistent API response format
+                                    "structured_content": {
+                                        "version": "1.0",
+                                        "type": "text",
+                                        "source": {
+                                            "file_path": file_path,
+                                            "doc_id": doc_id,
+                                            "chunk_order_index": dp.get("chunk_order_index", 0),
+                                        },
+                                        "content": {
+                                            "text": dp["content"],
+                                            "format": "plain",
+                                        },
+                                    },
                                 }
-                                for dp in chunking_result
-                            }
 
                             if not chunks:
                                 logger.warning("No document chunks to process")

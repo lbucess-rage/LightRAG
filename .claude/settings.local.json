@@ -27,7 +27,9 @@
       "Bash(lightrag_webui/src/stores/settings.ts)",
       "Bash(git commit:*)",
       "Bash(PGPASSWORD=lightrag_secure_2024 psql:*)",
-      "Bash(docker exec:*)"
+      "Bash(docker exec:*)",
+      "Skill(lightrag-ops)",
+      "Bash(git status:*)"
     ],
     "deny": [],
     "ask": []
