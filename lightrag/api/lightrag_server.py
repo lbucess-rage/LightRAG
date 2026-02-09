@@ -70,6 +70,13 @@ from lightrag.api.routers.ollama_api import OllamaAPI
 from lightrag.api.routers.ollama_api import set_rag_workspace_getter as set_ollama_rag_workspace_getter
 from lightrag.api.routers.schema_routes import router as schema_router, set_discovery_engine, set_rag_instance
 from lightrag.api.routers.schema_routes import set_rag_workspace_getter as set_schema_rag_workspace_getter
+from lightrag.api.routers.multimodal_routes import (
+    create_multimodal_routes,
+    set_rag_workspace_getter as set_multimodal_rag_workspace_getter,
+    set_multimodal_config,
+    set_vlm_model_func,
+    set_llm_model_func as set_multimodal_llm_func,
+)
 
 from lightrag.utils import logger, set_verbose_debug
 from lightrag.kg.shared_storage import (
@@ -1228,6 +1235,7 @@ def create_app(args):
         set_entity_mgmt_rag_workspace_getter(get_rag_for_workspace)
         set_schema_rag_workspace_getter(get_rag_for_workspace)
         set_ollama_rag_workspace_getter(get_rag_for_workspace)
+        set_multimodal_rag_workspace_getter(get_rag_for_workspace)
         logger.info(f"RAG factory config stored, default workspace: {args.workspace or 'base'}")
 
     except Exception as e:
@@ -1271,6 +1279,79 @@ def create_app(args):
         logger.warning(f"Failed to initialize Schema Discovery Engine: {e}")
         # RAG 인스턴스는 Discovery 없이도 설정
         set_rag_instance(rag)
+
+    # Add Multimodal Processing routes
+    app.include_router(create_multimodal_routes())
+
+    # Initialize VLM model function for multimodal processing
+    try:
+        from lightrag.multimodal.config import MultimodalConfig
+
+        mm_config = MultimodalConfig()
+        set_multimodal_config(mm_config)
+
+        # Set LLM function for table/equation processing (reuse RAG's LLM)
+        async def multimodal_llm_func(prompt: str, system_prompt: str = None, **kwargs) -> str:
+            return await rag.llm_model_func(prompt, system_prompt=system_prompt)
+
+        set_multimodal_llm_func(multimodal_llm_func)
+
+        # Initialize VLM if configured
+        if mm_config.vlm_api_base and mm_config.vlm_model:
+            try:
+                from openai import AsyncOpenAI
+
+                vlm_client = AsyncOpenAI(
+                    base_url=mm_config.vlm_api_base,
+                    api_key=mm_config.vlm_api_key,
+                )
+
+                async def vlm_model_func(
+                    prompt: str,
+                    image_data: str = None,
+                    system_prompt: str = None,
+                    **kwargs,
+                ) -> str:
+                    """Call VLM with optional image data."""
+                    messages = []
+                    if system_prompt:
+                        messages.append({"role": "system", "content": system_prompt})
+
+                    if image_data:
+                        # Multimodal message with image
+                        content = [
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/png;base64,{image_data}"},
+                            },
+                            {"type": "text", "text": prompt},
+                        ]
+                        messages.append({"role": "user", "content": content})
+                    else:
+                        messages.append({"role": "user", "content": prompt})
+
+                    response = await vlm_client.chat.completions.create(
+                        model=mm_config.vlm_model,
+                        messages=messages,
+                        max_tokens=4096,
+                        temperature=0.1,
+                    )
+                    return response.choices[0].message.content
+
+                set_vlm_model_func(vlm_model_func)
+                logger.info(
+                    f"Multimodal VLM initialized: {mm_config.vlm_model} at {mm_config.vlm_api_base}"
+                )
+            except ImportError:
+                logger.warning("openai package not installed, VLM model not available")
+            except Exception as e:
+                logger.warning(f"Failed to initialize VLM: {e}")
+        else:
+            logger.info("VLM not configured (set VLM_API_BASE and VLM_MODEL env vars)")
+
+        logger.info("Multimodal processing routes initialized")
+    except Exception as e:
+        logger.warning(f"Failed to initialize multimodal processing: {e}")
 
     # Add Ollama API routes
     ollama_api = OllamaAPI(rag, top_k=args.top_k, api_key=api_key)
