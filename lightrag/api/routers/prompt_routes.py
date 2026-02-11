@@ -14,6 +14,9 @@ from lightrag.prompt import PROMPTS
 from lightrag.kg.shared_storage import get_default_workspace
 from ..utils_api import get_combined_auth_dependency
 
+# Capture default prompt values at import time (before load_custom_prompts_from_db overwrites them)
+_DEFAULT_PROMPTS = dict(PROMPTS)
+
 router = APIRouter(
     prefix="/prompts",
     tags=["prompts"],
@@ -258,13 +261,15 @@ def create_prompt_routes(rag, api_key: Optional[str] = None):
             async with db.pool.acquire() as conn:
                 await conn.execute(sql, workspace, prompt_key, value, request.prompt_type, description)
 
-            # Return updated value
+            # Update in-memory PROMPTS dict immediately (no restart needed)
             return_value = request.prompt_value
             if request.prompt_type == 'json' and isinstance(request.prompt_value, str):
                 try:
                     return_value = json.loads(request.prompt_value)
                 except json.JSONDecodeError:
                     pass
+            PROMPTS[prompt_key] = return_value
+            logger.info(f"Prompt '{prompt_key}' updated in memory (immediate effect)")
 
             return {
                 "status": "success",
@@ -301,8 +306,10 @@ def create_prompt_routes(rag, api_key: Optional[str] = None):
                 async with db.pool.acquire() as conn:
                     await conn.execute(sql, workspace, prompt_key)
 
-            # Return default value
-            default_value = PROMPTS.get(prompt_key, "")
+            # Restore default value in memory immediately
+            default_value = _DEFAULT_PROMPTS.get(prompt_key, "")
+            PROMPTS[prompt_key] = default_value
+            logger.info(f"Prompt '{prompt_key}' reset to default in memory (immediate effect)")
             prompt_type = "json" if isinstance(default_value, list) else "text"
 
             return {
@@ -336,6 +343,12 @@ def create_prompt_routes(rag, api_key: Optional[str] = None):
                 sql = """DELETE FROM LIGHTRAG_PROMPTS WHERE workspace=$1"""
                 async with db.pool.acquire() as conn:
                     await conn.execute(sql, workspace)
+
+            # Restore all editable prompts to defaults in memory
+            for key in EDITABLE_PROMPTS:
+                if key in _DEFAULT_PROMPTS:
+                    PROMPTS[key] = _DEFAULT_PROMPTS[key]
+            logger.info("All prompts reset to defaults in memory (immediate effect)")
 
             return {
                 "status": "success",

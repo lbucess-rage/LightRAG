@@ -1,5 +1,5 @@
 import { ReactNode, useEffect, useMemo, useRef, memo, useState } from 'react' // Import useMemo
-import { Message } from '@/api/lightrag'
+import { Message, ReferenceItem } from '@/api/lightrag'
 import useTheme from '@/hooks/useTheme'
 import { cn } from '@/lib/utils'
 
@@ -17,6 +17,7 @@ import { oneLight, oneDark } from 'react-syntax-highlighter/dist/cjs/styles/pris
 
 import { LoaderIcon, ChevronDownIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import ReferencePanel from '@/components/retrieval/ReferencePanel'
 
 // KaTeX configuration options interface
 interface KaTeXOptions {
@@ -58,6 +59,10 @@ export type MessageWithError = Message & {
     chunk_top_k?: number
     history_turns?: number
   }
+  /**
+   * Reference documents returned from the query.
+   */
+  references?: ReferenceItem[]
 }
 
 // Restore original component definition and export
@@ -318,6 +323,10 @@ export const ChatMessage = ({
             {finalDisplayContent}
           </ReactMarkdown>
         </div>
+      )}
+      {/* Reference panel - only for assistant messages with references */}
+      {message.role === 'assistant' && message.references && message.references.length > 0 && (
+        <ReferencePanel references={message.references} />
       )}
       {/* Loading indicator - only show in active tab */}
       {isTabActive && (() => {

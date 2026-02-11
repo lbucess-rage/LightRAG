@@ -119,6 +119,72 @@
         "duplicateFile": "File name already exists in server cache"
       }
     },
+    "urlIngest": {
+      "button": "URL",
+      "tooltip": "Ingest web content from URLs into the knowledge graph",
+      "title": "URL Knowledge Ingestion",
+      "description": "Extract content from web pages and convert it into knowledge graph entries.",
+      "singleTab": "Single URL",
+      "batchTab": "Batch URLs",
+      "urlPlaceholder": "https://example.com/article",
+      "validate": "Validate",
+      "invalidUrl": "Invalid URL",
+      "ingest": "Start Ingestion",
+      "ingestBatch": "Start Batch Ingestion",
+      "batchPlaceholder": "Enter one URL per line\nhttps://example.com/page1\nhttps://example.com/page2",
+      "processImages": "Process images",
+      "processTables": "Process tables",
+      "skipDuplicates": "Skip duplicates",
+      "alreadyIngested": "URL already ingested. Uncheck 'Skip duplicates' to re-process.",
+      "batchStarted": "{{submitted}} URL(s) submitted ({{skipped}} skipped)",
+      "allSkipped": "All URLs were skipped (duplicate or invalid)",
+      "skippedUrls": "Skipped URLs ({{count}})",
+      "followLinks": "Crawl sub-links",
+      "maxDepth": "Max depth",
+      "close": "Close"
+    },
+    "multimodalUpload": {
+      "button": "Multimodal",
+      "tooltip": "Process documents with multimodal analysis (images, tables, equations)",
+      "title": "Multimodal Document Processing",
+      "description": "Analyze images, tables, and equations in documents using VLM/LLM and convert to knowledge graph.",
+      "dropZone": "Drag and drop a file here, or click to select",
+      "acceptedFormats": "Supported formats: PDF, DOCX, PPTX, XLSX",
+      "unsupportedType": "Unsupported file type. Supported: PDF, DOCX, PPTX, XLSX",
+      "pymupdfUnsupported": "PDF only",
+      "parser": "Parser",
+      "pymupdfDesc": "Fast, CPU-based",
+      "doclingDesc": "Deep, GPU-based",
+      "processImages": "Process images",
+      "processTables": "Process tables",
+      "processEquations": "Process equations",
+      "filePathLabel": "File path label (optional)",
+      "filePathLabelPlaceholder": "Custom file path for the knowledge graph",
+      "pdfPassword": "PDF password (optional)",
+      "pdfPasswordPlaceholder": "Password for encrypted PDF",
+      "uploading": "Uploading... {{percent}}%",
+      "process": "Start Processing",
+      "close": "Close"
+    },
+    "taskProgress": {
+      "status": {
+        "pending": "Pending",
+        "running": "Running",
+        "completed": "Completed",
+        "failed": "Failed",
+        "cancelled": "Cancelled"
+      },
+      "cancelling": "Cancelling...",
+      "cancellationRequested": "Cancellation requested",
+      "cancelFailed": "Failed to request cancellation",
+      "unknownError": "An unknown error occurred"
+    },
+    "activeTasks": {
+      "title": "Active Tasks",
+      "done": "done",
+      "dismiss": "Dismiss",
+      "clearCompleted": "Clear all completed"
+    },
     "documentManager": {
       "title": "Document Management",
       "scanButton": "Scan/Retry",
@@ -453,6 +519,10 @@
       "userPromptPlaceholder": "Enter custom prompt (optional)",
       "enableRerank": "Enable Rerank",
       "enableRerankTooltip": "Enable reranking for retrieved text chunks. If True but no rerank model is configured, a warning will be issued. Default is True.",
+      "includeReferences": "Include References",
+      "includeReferencesTooltip": "Include reference documents (source files, scores) in the query response",
+      "includeChunkContent": "Include Chunk Content",
+      "includeChunkContentTooltip": "Include structured content (images, tables, text) from referenced chunks. Requires 'Include References' to be enabled.",
       "selectTemplate": "Select Template",
       "noTemplate": "-- No Template --",
       "loadingTemplates": "Loading templates...",
@@ -472,6 +542,26 @@
       "confirmDeleteTemplate": "Delete Template",
       "confirmDeleteTemplateDescription": "Are you sure you want to delete this template? This action cannot be undone.",
       "deleting": "Deleting..."
+    },
+    "references": {
+      "title": "References",
+      "score": "Score",
+      "page": "Page",
+      "download": "Download",
+      "viewFile": "View File",
+      "images": "Images",
+      "tables": "Tables",
+      "bestMatch": "Best Match",
+      "otherImages": "Other Images",
+      "imageLabel": "Image",
+      "textContent": "Text Content",
+      "showMore": "Show More",
+      "showLess": "Show Less",
+      "viewMode": {
+        "grid": "Grid",
+        "vertical": "Vertical",
+        "horizontal": "Horizontal"
+      }
     }
   },
   "apiSite": {

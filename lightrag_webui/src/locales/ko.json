@@ -119,6 +119,72 @@
         "duplicateFile": "서버 캐시에 같은 이름의 파일이 이미 존재합니다"
       }
     },
+    "urlIngest": {
+      "button": "URL",
+      "tooltip": "웹 URL에서 콘텐츠를 수집하여 지식 그래프에 추가",
+      "title": "URL 지식 수집",
+      "description": "웹 페이지의 콘텐츠를 추출하여 지식 그래프로 변환합니다.",
+      "singleTab": "단일 URL",
+      "batchTab": "일괄 URL",
+      "urlPlaceholder": "https://example.com/article",
+      "validate": "검증",
+      "invalidUrl": "유효하지 않은 URL입니다",
+      "ingest": "수집 시작",
+      "ingestBatch": "일괄 수집 시작",
+      "batchPlaceholder": "URL을 한 줄에 하나씩 입력하세요\nhttps://example.com/page1\nhttps://example.com/page2",
+      "processImages": "이미지 처리",
+      "processTables": "테이블 처리",
+      "skipDuplicates": "중복 건너뛰기",
+      "alreadyIngested": "이미 수집된 URL입니다. 재처리하려면 중복 건너뛰기를 해제하세요.",
+      "batchStarted": "{{submitted}}개 URL 수집 시작 ({{skipped}}개 건너뜀)",
+      "allSkipped": "모든 URL이 건너뛰어졌습니다 (중복 또는 유효하지 않음)",
+      "skippedUrls": "건너뛴 URL ({{count}}개)",
+      "followLinks": "하위 링크 크롤링",
+      "maxDepth": "최대 깊이",
+      "close": "닫기"
+    },
+    "multimodalUpload": {
+      "button": "멀티모달",
+      "tooltip": "문서를 멀티모달 처리 (이미지, 테이블, 수식 추출)",
+      "title": "멀티모달 문서 처리",
+      "description": "VLM/LLM을 사용하여 문서의 이미지, 테이블, 수식을 분석하고 지식 그래프로 변환합니다.",
+      "dropZone": "파일을 여기로 드래그하거나 클릭하여 선택하세요",
+      "acceptedFormats": "지원 형식: PDF, DOCX, PPTX, XLSX",
+      "unsupportedType": "지원하지 않는 파일 형식입니다. PDF, DOCX, PPTX, XLSX만 가능합니다.",
+      "pymupdfUnsupported": "PDF만 지원",
+      "parser": "파서 선택",
+      "pymupdfDesc": "빠름, CPU 기반",
+      "doclingDesc": "정밀, GPU 기반",
+      "processImages": "이미지 처리",
+      "processTables": "테이블 처리",
+      "processEquations": "수식 처리",
+      "filePathLabel": "파일 경로 라벨 (선택사항)",
+      "filePathLabelPlaceholder": "지식 그래프에서 사용할 파일 경로",
+      "pdfPassword": "PDF 비밀번호 (선택사항)",
+      "pdfPasswordPlaceholder": "암호화된 PDF의 비밀번호",
+      "uploading": "업로드 중... {{percent}}%",
+      "process": "처리 시작",
+      "close": "닫기"
+    },
+    "taskProgress": {
+      "status": {
+        "pending": "대기 중",
+        "running": "처리 중",
+        "completed": "완료",
+        "failed": "실패",
+        "cancelled": "취소됨"
+      },
+      "cancelling": "취소 중...",
+      "cancellationRequested": "취소가 요청되었습니다",
+      "cancelFailed": "취소 요청에 실패했습니다",
+      "unknownError": "알 수 없는 오류가 발생했습니다"
+    },
+    "activeTasks": {
+      "title": "활성 태스크",
+      "done": "완료",
+      "dismiss": "닫기",
+      "clearCompleted": "완료된 태스크 모두 지우기"
+    },
     "documentManager": {
       "title": "문서 관리",
       "scanButton": "스캔/재시도",
@@ -453,6 +519,10 @@
       "userPromptPlaceholder": "사용자 정의 프롬프트 입력 (선택사항)",
       "enableRerank": "리랭크 활성화",
       "enableRerankTooltip": "검색된 텍스트 청크에 대한 리랭킹을 활성화합니다. True이지만 리랭크 모델이 설정되지 않은 경우 경고가 표시됩니다. 기본값은 True입니다.",
+      "includeReferences": "참조 문서 포함",
+      "includeReferencesTooltip": "쿼리 응답에 참조 문서(소스 파일, 점수)를 포함합니다",
+      "includeChunkContent": "청크 콘텐츠 포함",
+      "includeChunkContentTooltip": "참조 청크의 구조화된 콘텐츠(이미지, 테이블, 텍스트)를 포함합니다. '참조 문서 포함'이 활성화되어야 합니다.",
       "selectTemplate": "템플릿 선택",
       "noTemplate": "-- 템플릿 없음 --",
       "loadingTemplates": "템플릿 로딩 중...",
@@ -472,6 +542,26 @@
       "confirmDeleteTemplate": "템플릿 삭제",
       "confirmDeleteTemplateDescription": "이 템플릿을 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.",
       "deleting": "삭제 중..."
+    },
+    "references": {
+      "title": "참조 자료",
+      "score": "점수",
+      "page": "페이지",
+      "download": "다운로드",
+      "viewFile": "파일 보기",
+      "images": "이미지",
+      "tables": "테이블",
+      "bestMatch": "최적 일치",
+      "otherImages": "기타 이미지",
+      "imageLabel": "이미지",
+      "textContent": "텍스트 내용",
+      "showMore": "더 보기",
+      "showLess": "접기",
+      "viewMode": {
+        "grid": "격자",
+        "vertical": "세로",
+        "horizontal": "가로"
+      }
     }
   },
   "apiSite": {

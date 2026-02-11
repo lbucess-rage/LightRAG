@@ -3,7 +3,7 @@ import Input from '@/components/ui/Input'
 import Button from '@/components/ui/Button'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { throttle } from '@/lib/utils'
-import { queryText, queryTextStream } from '@/api/lightrag'
+import { queryText, queryTextStream, ReferenceItem } from '@/api/lightrag'
 import { errorMessage } from '@/lib/utils'
 import { useSettingsStore } from '@/stores/settings'
 import { useDebounce } from '@/hooks/useDebounce'
@@ -386,9 +386,24 @@ export default function RetrievalTesting() {
         // Run query
         if (state.querySettings.stream) {
           let errorMessage = ''
-          await queryTextStream(queryParams, updateAssistantMessage, (error) => {
-            errorMessage += error
-          })
+          await queryTextStream(
+            queryParams,
+            updateAssistantMessage,
+            (error) => {
+              errorMessage += error
+            },
+            (references: ReferenceItem[]) => {
+              assistantMessage.references = references
+              setMessages((prev) => {
+                const newMessages = [...prev]
+                const lastMessage = newMessages[newMessages.length - 1]
+                if (lastMessage && lastMessage.id === assistantMessage.id) {
+                  lastMessage.references = references
+                }
+                return newMessages
+              })
+            }
+          )
           if (errorMessage) {
             if (assistantMessage.content) {
               errorMessage = assistantMessage.content + '\n' + errorMessage
@@ -398,6 +413,17 @@ export default function RetrievalTesting() {
         } else {
           const response = await queryText(queryParams)
           updateAssistantMessage(response.response)
+          if (response.references) {
+            assistantMessage.references = response.references
+            setMessages((prev) => {
+              const newMessages = [...prev]
+              const lastMessage = newMessages[newMessages.length - 1]
+              if (lastMessage && lastMessage.id === assistantMessage.id) {
+                lastMessage.references = response.references
+              }
+              return newMessages
+            })
+          }
         }
       } catch (err) {
         // Handle error
@@ -435,11 +461,24 @@ export default function RetrievalTesting() {
           thinkingStartTime.current = null
         }
 
-        // Save history with error handling
+        // Save history with error handling - strip base64 image data to avoid localStorage bloat
         try {
-          useSettingsStore
-            .getState()
-            .setRetrievalHistory([...prevMessages, userMessage, assistantMessage])
+          const stripBase64FromRefs = (refs?: ReferenceItem[]) =>
+            refs?.map((r) => ({
+              ...r,
+              structured_content: r.structured_content?.map((sc) =>
+                sc.type === 'image' ? { ...sc, image: undefined } : sc
+              )
+            }))
+
+          const historyMessages = [...prevMessages, userMessage, assistantMessage].map((msg) => {
+            if ('references' in msg && (msg as MessageWithError).references) {
+              return { ...msg, references: stripBase64FromRefs((msg as MessageWithError).references) }
+            }
+            return msg
+          })
+
+          useSettingsStore.getState().setRetrievalHistory(historyMessages)
         } catch (error) {
           console.error('Error saving retrieval history:', error)
         }

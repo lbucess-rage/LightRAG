@@ -1222,8 +1222,17 @@ class PostgreSQLDB:
             if existing_indexes_result:
                 existing_indexes = {row["indexname"] for row in existing_indexes_result}
 
+            # Tables that don't follow the standard (workspace, id) schema
+            _SKIP_STANDARD_INDEX = {
+                "LIGHTRAG_WORKSPACES",       # PK: workspace_id (no 'workspace' or 'id' columns)
+                "LIGHTRAG_WORKSPACE_SCHEMA", # PK: workspace (no 'id' column)
+            }
+
             # Create missing indexes
             for k in table_names:
+                if k.upper() in _SKIP_STANDARD_INDEX:
+                    continue
+
                 # Create index for id column if missing
                 index_name = f"idx_{k.lower()}_id"
                 if index_name not in existing_indexes:
@@ -1382,6 +1391,14 @@ class PostgreSQLDB:
         except Exception as e:
             logger.error(f"PostgreSQL, Failed to migrate workspaces: {e}")
 
+        # Migrate workspace schema to add entity_type_details column if needed
+        try:
+            await self._migrate_workspace_schema_add_entity_type_details()
+        except Exception as e:
+            logger.error(
+                f"PostgreSQL, Failed to migrate workspace schema entity_type_details: {e}"
+            )
+
     async def _migrate_workspaces(self):
         """Ensure LIGHTRAG_WORKSPACES table exists and discover existing workspaces."""
         table_name = "LIGHTRAG_WORKSPACES"
@@ -1415,6 +1432,36 @@ class PostgreSQLDB:
                 logger.info(f"Discovered {len(discovered)} workspaces: {discovered}")
         except Exception as e:
             logger.warning(f"Failed to discover existing workspaces: {e}")
+
+    async def _migrate_workspace_schema_add_entity_type_details(self):
+        """Add entity_type_details column to LIGHTRAG_WORKSPACE_SCHEMA table if it doesn't exist"""
+        try:
+            check_column_sql = """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'lightrag_workspace_schema'
+            AND column_name = 'entity_type_details'
+            """
+
+            column_info = await self.query(check_column_sql)
+            if not column_info:
+                logger.info("Adding entity_type_details column to LIGHTRAG_WORKSPACE_SCHEMA table")
+                add_column_sql = """
+                ALTER TABLE LIGHTRAG_WORKSPACE_SCHEMA
+                ADD COLUMN entity_type_details JSONB DEFAULT NULL
+                """
+                await self.execute(add_column_sql)
+                logger.info(
+                    "Successfully added entity_type_details column to LIGHTRAG_WORKSPACE_SCHEMA table"
+                )
+            else:
+                logger.debug(
+                    "entity_type_details column already exists in LIGHTRAG_WORKSPACE_SCHEMA table"
+                )
+        except Exception as e:
+            logger.warning(
+                f"Failed to add entity_type_details column to LIGHTRAG_WORKSPACE_SCHEMA: {e}"
+            )
 
     async def _migrate_create_full_entities_relations_tables(self):
         """Create LIGHTRAG_FULL_ENTITIES and LIGHTRAG_FULL_RELATIONS tables if they don't exist"""
@@ -5582,6 +5629,7 @@ TABLES = {
                     workspace VARCHAR(255) NOT NULL,
                     entity_types JSONB DEFAULT '[]'::jsonb,
                     relation_types JSONB DEFAULT '[]'::jsonb,
+                    entity_type_details JSONB DEFAULT NULL,
                     source VARCHAR(255),
                     applied_at TIMESTAMP(0),
                     create_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
@@ -5795,7 +5843,8 @@ SQL_TEMPLATES = {
                      c.file_path,
                      c.full_doc_id,
                      c.structured_content,
-                     EXTRACT(EPOCH FROM c.create_time)::BIGINT AS created_at
+                     EXTRACT(EPOCH FROM c.create_time)::BIGINT AS created_at,
+                     (c.content_vector <=> '[{embedding_string}]'::vector) AS distance
               FROM LIGHTRAG_VDB_CHUNKS c
               WHERE c.workspace = $1
                 AND c.content_vector <=> '[{embedding_string}]'::vector < $2
@@ -5900,23 +5949,24 @@ SQL_TEMPLATES = {
                              """,
     # Workspace Schema SQL
     "upsert_workspace_schema": """INSERT INTO LIGHTRAG_WORKSPACE_SCHEMA
-                                  (workspace, entity_types, relation_types, source, applied_at, create_time, update_time)
-                                  VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                                  (workspace, entity_types, relation_types, entity_type_details, source, applied_at, create_time, update_time)
+                                  VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                                   ON CONFLICT (workspace) DO UPDATE
                                   SET entity_types = EXCLUDED.entity_types,
                                       relation_types = EXCLUDED.relation_types,
+                                      entity_type_details = EXCLUDED.entity_type_details,
                                       source = EXCLUDED.source,
                                       applied_at = EXCLUDED.applied_at,
                                       update_time = CURRENT_TIMESTAMP
                                  """,
-    "get_workspace_schema": """SELECT workspace, entity_types, relation_types, source,
+    "get_workspace_schema": """SELECT workspace, entity_types, relation_types, entity_type_details, source,
                                EXTRACT(EPOCH FROM applied_at)::BIGINT as applied_at,
                                EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
                                EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
                                FROM LIGHTRAG_WORKSPACE_SCHEMA WHERE workspace=$1
                               """,
     "delete_workspace_schema": """DELETE FROM LIGHTRAG_WORKSPACE_SCHEMA WHERE workspace=$1""",
-    "list_workspace_schemas": """SELECT workspace, entity_types, relation_types, source,
+    "list_workspace_schemas": """SELECT workspace, entity_types, relation_types, entity_type_details, source,
                                  EXTRACT(EPOCH FROM applied_at)::BIGINT as applied_at,
                                  EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
                                  EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
@@ -5948,6 +5998,7 @@ class WorkspaceSchemaStorage:
         relation_types: list[dict] | None = None,
         source: str | None = None,
         applied_at: str | None = None,
+        entity_type_details: list[dict] | None = None,
     ) -> bool:
         """Save workspace schema to database.
 
@@ -5957,6 +6008,7 @@ class WorkspaceSchemaStorage:
             relation_types: List of relation type definitions (dicts with name, source_types, target_types, etc.)
             source: Schema source (e.g., "template:domain", "discovery", "custom")
             applied_at: ISO format timestamp when schema was applied
+            entity_type_details: List of entity type details (description, examples, extraction_hints)
 
         Returns:
             True if successful
@@ -5983,6 +6035,7 @@ class WorkspaceSchemaStorage:
                 "workspace": workspace,
                 "entity_types": json.dumps(entity_types),
                 "relation_types": json.dumps(relation_types),
+                "entity_type_details": json.dumps(entity_type_details) if entity_type_details else None,
                 "source": source,
                 "applied_at": applied_dt,
             }
@@ -6028,6 +6081,10 @@ class WorkspaceSchemaStorage:
                 if isinstance(relation_types, str):
                     relation_types = json.loads(relation_types)
 
+                entity_type_details = result.get("entity_type_details")
+                if isinstance(entity_type_details, str):
+                    entity_type_details = json.loads(entity_type_details)
+
                 applied_at = result.get("applied_at")
                 if applied_at:
                     applied_at = datetime.fromtimestamp(applied_at).isoformat()
@@ -6036,6 +6093,7 @@ class WorkspaceSchemaStorage:
                     "workspace": result["workspace"],
                     "entity_types": entity_types,
                     "relation_types": relation_types,
+                    "entity_type_details": entity_type_details,
                     "source": result.get("source"),
                     "applied_at": applied_at,
                 }
@@ -6092,6 +6150,10 @@ class WorkspaceSchemaStorage:
                     if isinstance(relation_types, str):
                         relation_types = json.loads(relation_types)
 
+                    entity_type_details = row.get("entity_type_details")
+                    if isinstance(entity_type_details, str):
+                        entity_type_details = json.loads(entity_type_details)
+
                     applied_at = row.get("applied_at")
                     if applied_at:
                         applied_at = datetime.fromtimestamp(applied_at).isoformat()
@@ -6099,6 +6161,7 @@ class WorkspaceSchemaStorage:
                     schemas[workspace] = {
                         "entity_types": entity_types,
                         "relation_types": relation_types,
+                        "entity_type_details": entity_type_details,
                         "source": row.get("source"),
                         "applied_at": applied_at,
                     }

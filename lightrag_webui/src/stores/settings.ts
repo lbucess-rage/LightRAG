@@ -134,7 +134,9 @@ const useSettingsStoreBase = create<SettingsState>()(
         stream: true,
         history_turns: 0,
         user_prompt: '',
-        enable_rerank: true
+        enable_rerank: true,
+        include_references: true,
+        include_chunk_content: false
       },
 
       setTheme: (theme: Theme) => set({ theme }),
@@ -239,7 +241,7 @@ const useSettingsStoreBase = create<SettingsState>()(
     {
       name: 'settings-storage',
       storage: createJSONStorage(() => localStorage),
-      version: 21,
+      version: 22,
       migrate: (state: any, version: number) => {
         if (version < 2) {
           state.showEdgeLabel = false
@@ -348,6 +350,13 @@ const useSettingsStoreBase = create<SettingsState>()(
         if (version < 21) {
           // Show filename by default in document list
           state.showFileName = true
+        }
+        if (version < 22) {
+          // Add include_references and include_chunk_content fields
+          if (state.querySettings) {
+            state.querySettings.include_references ??= true
+            state.querySettings.include_chunk_content ??= false
+          }
         }
         return state
       }

@@ -138,10 +138,38 @@ export type QueryRequest = {
   user_prompt?: string
   /** Enable reranking for retrieved text chunks. If True but no rerank model is configured, a warning will be issued. Default is True. */
   enable_rerank?: boolean
+  /** If True, includes reference documents in the response. */
+  include_references?: boolean
+  /** If True, includes chunk content (images, tables, etc.) in the references. */
+  include_chunk_content?: boolean
+}
+
+export type StructuredContentItem = {
+  type: 'image' | 'table' | 'text' | 'equation' | string
+  image?: { path?: string; s3_url?: string; captions?: string[]; footnotes?: string[] }
+  table?: { caption?: string[]; footnotes?: string[]; body_markdown?: string }
+  equation?: { text?: string; format?: string }
+  content?: { raw?: string } | string
+  entity?: { name?: string; type?: string; summary?: string }
+  source?: { doc_id?: string; page_idx?: number; file_path?: string; chunk_order_index?: number }
+  analysis?: { description?: string }
+  version?: string
+}
+
+export type ReferenceItem = {
+  reference_id: string
+  doc_id?: string
+  file_path: string
+  download_url?: string
+  content?: string[]
+  structured_content?: StructuredContentItem[]
+  score?: number
+  scores?: (number | null)[]
 }
 
 export type QueryResponse = {
   response: string
+  references?: ReferenceItem[]
 }
 
 export type EntityUpdateResponse = {
@@ -399,7 +427,8 @@ export const queryText = async (request: QueryRequest): Promise<QueryResponse> =
 export const queryTextStream = async (
   request: QueryRequest,
   onChunk: (chunk: string) => void,
-  onError?: (error: string) => void
+  onError?: (error: string) => void,
+  onReferences?: (references: ReferenceItem[]) => void
 ) => {
   const apiKey = useSettingsStore.getState().apiKey;
   const token = localStorage.getItem('LIGHTRAG-API-TOKEN');
@@ -476,9 +505,14 @@ export const queryTextStream = async (
         if (line.trim()) {
           try {
             const parsed = JSON.parse(line);
+            // Handle references and response separately (non-streaming sends both in one line)
+            if (parsed.references && onReferences) {
+              onReferences(parsed.references);
+            }
             if (parsed.response) {
               onChunk(parsed.response);
-            } else if (parsed.error && onError) {
+            }
+            if (parsed.error && onError) {
               onError(parsed.error);
             }
           } catch (error) {
@@ -493,9 +527,13 @@ export const queryTextStream = async (
     if (buffer.trim()) {
       try {
         const parsed = JSON.parse(buffer);
+        if (parsed.references && onReferences) {
+          onReferences(parsed.references);
+        }
         if (parsed.response) {
           onChunk(parsed.response);
-        } else if (parsed.error && onError) {
+        }
+        if (parsed.error && onError) {
           onError(parsed.error);
         }
       } catch (error) {
@@ -1351,5 +1389,268 @@ export const moveWorkspaceData = async (
     `/workspaces/${encodeURIComponent(sourceWorkspaceId)}/move-data`,
     request
   )
+  return response.data
+}
+
+// =====================================================
+// URL Knowledge Ingestion Types and API
+// =====================================================
+
+export type URLValidateResponse = {
+  valid: boolean
+  normalized_url: string
+  domain: string
+  doc_id: string
+}
+
+export type URLIngestRequest = {
+  url: string
+  file_path_label?: string
+  process_images?: boolean
+  process_tables?: boolean
+  skip_duplicates?: boolean
+  force_reindex?: boolean
+  follow_links?: boolean
+  max_depth?: number
+}
+
+export type URLIngestResponse = {
+  task_id: string
+  stream_url: string
+  message: string
+}
+
+export type URLBatchIngestRequest = {
+  urls: string[]
+  process_images?: boolean
+  process_tables?: boolean
+  skip_duplicates?: boolean
+  force_reindex?: boolean
+  follow_links?: boolean
+  max_depth?: number
+}
+
+export type URLBatchTaskInfo = {
+  task_id: string
+  stream_url: string
+  url: string
+  message: string
+}
+
+export type URLBatchSkippedInfo = {
+  url: string
+  reason: string
+}
+
+export type URLBatchIngestResponse = {
+  tasks: URLBatchTaskInfo[]
+  skipped: URLBatchSkippedInfo[]
+  total_submitted: number
+  total_skipped: number
+}
+
+export const validateUrl = async (url: string): Promise<URLValidateResponse> => {
+  const response = await axiosInstance.post('/api/url/validate', { url })
+  return response.data
+}
+
+export const ingestUrl = async (request: URLIngestRequest): Promise<URLIngestResponse> => {
+  const response = await axiosInstance.post('/api/url/ingest', request)
+  return response.data
+}
+
+export const ingestUrlBatch = async (request: URLBatchIngestRequest): Promise<URLBatchIngestResponse> => {
+  const response = await axiosInstance.post('/api/url/ingest-batch', request)
+  return response.data
+}
+
+// =====================================================
+// Async Task Types and API
+// =====================================================
+
+export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+
+export type TaskProgressEvent = {
+  task_id: string
+  status: TaskStatus
+  progress: number
+  message: string
+  detail?: Record<string, any>
+  timestamp: number
+}
+
+export type TaskStatusResponse = {
+  task_id: string
+  task_type: string
+  workspace: string
+  status: TaskStatus
+  progress: number
+  message: string
+  created_at: number
+  updated_at: number
+  result?: Record<string, any>
+  error?: string
+  metadata: Record<string, any>
+}
+
+export type TaskCancelResponse = {
+  task_id: string
+  status: string
+  message: string
+}
+
+export const getTaskStatus = async (taskId: string): Promise<TaskStatusResponse> => {
+  const response = await axiosInstance.get(`/api/tasks/${encodeURIComponent(taskId)}`)
+  return response.data
+}
+
+export const cancelTask = async (taskId: string): Promise<TaskCancelResponse> => {
+  const response = await axiosInstance.post(`/api/tasks/${encodeURIComponent(taskId)}/cancel`)
+  return response.data
+}
+
+export const listTasks = async (): Promise<TaskStatusResponse[]> => {
+  const response = await axiosInstance.get('/api/tasks')
+  return response.data.tasks || []
+}
+
+/**
+ * Stream task progress events via NDJSON.
+ * Uses native fetch (not axios) for streaming support.
+ */
+export const streamTaskProgress = (
+  taskId: string,
+  onEvent: (event: TaskProgressEvent) => void,
+  onError?: (error: string) => void
+): AbortController => {
+  const controller = new AbortController()
+  const apiKey = useSettingsStore.getState().apiKey
+  const token = localStorage.getItem('LIGHTRAG-API-TOKEN')
+  const workspaceId = useWorkspaceStore.getState().currentWorkspaceId
+
+  const headers: HeadersInit = {
+    'Accept': 'application/x-ndjson',
+  }
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  if (apiKey) headers['X-API-Key'] = apiKey
+  if (workspaceId) headers['LIGHTRAG-WORKSPACE'] = workspaceId
+
+  const run = async () => {
+    try {
+      const response = await fetch(`${backendBaseUrl}/api/tasks/${encodeURIComponent(taskId)}/stream`, {
+        method: 'GET',
+        headers,
+        signal: controller.signal,
+      })
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          navigationService.navigateToLogin()
+          onError?.('Authentication required')
+          return
+        }
+        const body = await response.text().catch(() => 'Unknown error')
+        onError?.(`${response.status} ${response.statusText}: ${body}`)
+        return
+      }
+
+      if (!response.body) {
+        onError?.('Response body is null')
+        return
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (!line.trim()) continue
+          try {
+            const parsed = JSON.parse(line)
+            // Skip heartbeat events (server sends {"heartbeat": true, "task_id": "..."})
+            if (parsed.heartbeat || !parsed.status) continue
+            const event: TaskProgressEvent = parsed
+            onEvent(event)
+            // Stop streaming on terminal status
+            if (event.status === 'completed' || event.status === 'failed' || event.status === 'cancelled') {
+              controller.abort()
+              return
+            }
+          } catch {
+            // ignore parse errors for partial lines
+          }
+        }
+      }
+
+      // Process remaining buffer
+      if (buffer.trim()) {
+        try {
+          const parsed = JSON.parse(buffer)
+          if (!parsed.heartbeat && parsed.status) onEvent(parsed as TaskProgressEvent)
+        } catch { /* ignore */ }
+      }
+    } catch (err) {
+      if (controller.signal.aborted) return
+      const msg = errorMessage(err)
+      onError?.(msg)
+    }
+  }
+
+  run()
+  return controller
+}
+
+// =====================================================
+// Multimodal Processing Types and API
+// =====================================================
+
+export type MultimodalProcessResponse = {
+  task_id: string
+  stream_url: string
+  message: string
+}
+
+/**
+ * Upload a file for multimodal processing.
+ * Uses FormData with axios for upload progress tracking.
+ */
+export const processMultimodal = async (
+  file: File,
+  options: {
+    parser?: string
+    process_images?: boolean
+    process_tables?: boolean
+    process_equations?: boolean
+    file_path_label?: string
+    pdf_password?: string
+  },
+  onUploadProgress?: (percentCompleted: number) => void
+): Promise<MultimodalProcessResponse> => {
+  const formData = new FormData()
+  formData.append('file', file)
+  if (options.parser) formData.append('parser', options.parser)
+  if (options.process_images !== undefined) formData.append('process_images', String(options.process_images))
+  if (options.process_tables !== undefined) formData.append('process_tables', String(options.process_tables))
+  if (options.process_equations !== undefined) formData.append('process_equations', String(options.process_equations))
+  if (options.file_path_label) formData.append('file_path_label', options.file_path_label)
+  if (options.pdf_password) formData.append('pdf_password', options.pdf_password)
+
+  const response = await axiosInstance.post('/api/multimodal/process', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    onUploadProgress: onUploadProgress
+      ? (progressEvent) => {
+          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total!)
+          onUploadProgress(percentCompleted)
+        }
+      : undefined,
+  })
   return response.data
 }

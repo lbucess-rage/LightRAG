@@ -56,12 +56,26 @@ You are a Knowledge Graph Specialist responsible for extracting entities and rel
 
 8.  **Completion Signal:** Output the literal string `{completion_delimiter}` only after all entities and relationships, following all criteria, have been completely extracted and outputted.
 
+9.  **Specificity Preservation:**
+    *   Always use the **most specific name** as it appears in the text. Never collapse a specific entity name into a broader or shorter form.
+    *   Preserve all model numbers, version identifiers, edition names, and numeric suffixes as part of the entity name.
+    *   Example: "IONIQ 5" and "IONIQ" are **separate entities**. Do not shorten "IONIQ 5" to "IONIQ".
+    *   Example: "Galaxy S24 Ultra" must NOT be shortened to "Galaxy" or "Galaxy S24".
+
+10. **Hierarchical Entity Awareness:**
+    *   When both a general entity (e.g., "IONIQ series") and a specific sub-entity (e.g., "IONIQ 5") appear in the text, extract **both** as separate entities.
+    *   Add an appropriate relationship (e.g., "product variant", "belongs to series") between the general and specific entities.
+
+11. **Disambiguation:**
+    *   If two entity names are similar but refer to different things, extract them as **separate entities** with distinct descriptions that clarify the difference.
+    *   Pay special attention to: product models vs product lines, versions vs base products, subsidiaries vs parent organizations, specific events vs event series.
+
 ---Examples---
 {examples}
 
 ---Real Data to be Processed---
 <Input>
-Entity_types: [{entity_types}]
+{entity_types_guide}
 Text:
 ```
 {input_text}
@@ -208,7 +222,7 @@ Description List:
 """
 
 PROMPTS["fail_response"] = (
-    "Sorry, I'm not able to provide an answer to that question.[no-context]"
+    "죄송합니다. 관련 문서가 없어 해당 질문에 답변을 드리기 어렵습니다.[no-context]"
 )
 
 PROMPTS["rag_response"] = """---Role---
