@@ -108,9 +108,7 @@ class TableModalProcessor(BaseModalProcessor):
             table_footnote = content_data.get("table_footnote", [])
 
             modal_chunk = PROMPTS["table_chunk"].format(
-                table_caption=", ".join(table_caption) if table_caption else "None",
                 table_body=table_body,
-                table_footnote=", ".join(table_footnote) if table_footnote else "None",
                 enhanced_caption=enhanced_caption,
             )
 

@@ -2765,11 +2765,14 @@ async def process_chunks_unified(
             f"(chunk available tokens: {chunk_token_limit}, source: {source_type})"
         )
 
-    # 5. add id field to each chunk
+    # 5. add id field and finalize score
     final_chunks = []
     for i, chunk in enumerate(unique_chunks):
         chunk_with_id = chunk.copy()
         chunk_with_id["id"] = f"DC{i + 1}"
+        # Use rerank_score if available (higher priority), otherwise keep cosine score
+        if chunk_with_id.get("rerank_score") is not None:
+            chunk_with_id["score"] = round(float(chunk_with_id["rerank_score"]), 4)
         final_chunks.append(chunk_with_id)
 
     return final_chunks
@@ -3221,13 +3224,18 @@ def convert_to_user_format(
     for i, chunk in enumerate(chunks):
         chunk_data = {
             "reference_id": chunk.get("reference_id", ""),
-            "content": chunk.get("content", ""),
             "file_path": chunk.get("file_path", "unknown_source"),
             "chunk_id": chunk.get("chunk_id", ""),
         }
-        # Include structured_content if available (for programmatic parsing)
+        # Expose relevance score if available
+        if chunk.get("score") is not None:
+            chunk_data["score"] = chunk["score"]
+        # When structured_content exists, omit verbose text content
         if chunk.get("structured_content"):
-            chunk_data["structured_content"] = chunk.get("structured_content")
+            chunk_data["content"] = ""
+            chunk_data["structured_content"] = chunk["structured_content"]
+        else:
+            chunk_data["content"] = chunk.get("content", "")
         formatted_chunks.append(chunk_data)
 
     logger.debug(

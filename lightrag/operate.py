@@ -2765,6 +2765,51 @@ async def merge_nodes_and_edges(
         pipeline_status["history_messages"].append(log_message)
 
 
+def _build_entity_types_guide(
+    entity_types: list[str],
+    entity_type_details: list[dict] | None = None,
+) -> str:
+    """Build entity types guide for extraction prompt.
+
+    If entity_type_details is provided (from schema), builds a rich guide
+    with descriptions, examples, and hints.
+    Otherwise falls back to simple comma-separated list.
+    """
+    if not entity_type_details:
+        return f"Entity_types: [{','.join(entity_types)}]"
+
+    lines = [f"Entity_types: [{', '.join(entity_types)}]"]
+    lines.append("")
+    lines.append("---Entity Type Guide---")
+    lines.append(
+        "Below are detailed descriptions for each entity type. "
+        "Use these to correctly classify and distinguish entities:"
+    )
+    lines.append("")
+
+    for detail in entity_type_details:
+        name = detail.get("name", "")
+        desc = detail.get("description", "")
+        examples = detail.get("examples", [])
+        hints = detail.get("extraction_hints", [])
+
+        if not name:
+            continue
+
+        line = f"**{name}**"
+        if desc:
+            line += f" — {desc}"
+        lines.append(line)
+
+        if examples:
+            lines.append(f"  Examples: {', '.join(examples)}")
+        if hints:
+            lines.append(f"  Hints: {'; '.join(hints)}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 async def extract_entities(
     chunks: dict[str, TextChunkSchema],
     global_config: dict[str, str],
@@ -2790,6 +2835,12 @@ async def extract_entities(
     entity_types = global_config["addon_params"].get(
         "entity_types", DEFAULT_ENTITY_TYPES
     )
+    entity_type_details = global_config["addon_params"].get(
+        "entity_type_details", None
+    )
+
+    # Build entity types guide for system prompt
+    entity_types_guide = _build_entity_types_guide(entity_types, entity_type_details)
 
     examples = "\n".join(PROMPTS["entity_extraction_examples"])
 
@@ -2797,6 +2848,7 @@ async def extract_entities(
         tuple_delimiter=PROMPTS["DEFAULT_TUPLE_DELIMITER"],
         completion_delimiter=PROMPTS["DEFAULT_COMPLETION_DELIMITER"],
         entity_types=", ".join(entity_types),
+        entity_types_guide=f"Entity_types: [{', '.join(entity_types)}]",
         language=language,
     )
     # add example's format
@@ -2806,6 +2858,7 @@ async def extract_entities(
         tuple_delimiter=PROMPTS["DEFAULT_TUPLE_DELIMITER"],
         completion_delimiter=PROMPTS["DEFAULT_COMPLETION_DELIMITER"],
         entity_types=",".join(entity_types),
+        entity_types_guide=entity_types_guide,
         examples=examples,
         language=language,
     )
@@ -3410,6 +3463,9 @@ async def _get_vector_context(
                 # Include structured_content if available
                 if result.get("structured_content"):
                     chunk_with_metadata["structured_content"] = result["structured_content"]
+                # Add cosine similarity score (1 - distance) if available
+                if result.get("distance") is not None:
+                    chunk_with_metadata["score"] = round(1.0 - float(result["distance"]), 4)
                 valid_chunks.append(chunk_with_metadata)
 
         logger.info(
@@ -3510,6 +3566,31 @@ async def _perform_kg_search(
                 query_param,
                 query_embedding,
             )
+            # Enrich vector chunks missing structured_content from KV store
+            chunks_needing_sc = [
+                c.get("chunk_id") or c.get("id")
+                for c in vector_chunks
+                if not c.get("structured_content")
+            ]
+            if chunks_needing_sc and text_chunks_db:
+                try:
+                    kv_results = await text_chunks_db.get_by_ids(chunks_needing_sc)
+                    sc_map = {}
+                    for kv_chunk in kv_results:
+                        if kv_chunk and kv_chunk.get("structured_content"):
+                            sc_map[kv_chunk["id"]] = kv_chunk["structured_content"]
+                    if sc_map:
+                        for chunk in vector_chunks:
+                            cid = chunk.get("chunk_id") or chunk.get("id")
+                            if cid in sc_map:
+                                chunk["structured_content"] = sc_map[cid]
+                        logger.info(
+                            f"Enriched {len(sc_map)}/{len(chunks_needing_sc)} "
+                            f"vector chunks with structured_content from KV store"
+                        )
+                except Exception as e:
+                    logger.warning(f"Failed to enrich vector chunks with structured_content: {e}")
+
             # Track vector chunks with source metadata
             for i, chunk in enumerate(vector_chunks):
                 chunk_id = chunk.get("chunk_id") or chunk.get("id")
@@ -3844,6 +3925,8 @@ async def _merge_all_chunks(
                 sc = parse_structured_content(chunk.get("structured_content"))
                 if sc:
                     chunk_data["structured_content"] = sc
+                if chunk.get("score") is not None:
+                    chunk_data["score"] = chunk["score"]
                 merged_chunks.append(chunk_data)
 
         # Add from entity chunks (Local mode)
@@ -3861,6 +3944,8 @@ async def _merge_all_chunks(
                 sc = parse_structured_content(chunk.get("structured_content"))
                 if sc:
                     chunk_data["structured_content"] = sc
+                if chunk.get("score") is not None:
+                    chunk_data["score"] = chunk["score"]
                 merged_chunks.append(chunk_data)
 
         # Add from relation chunks (Global mode)
@@ -3878,6 +3963,8 @@ async def _merge_all_chunks(
                 sc = parse_structured_content(chunk.get("structured_content"))
                 if sc:
                     chunk_data["structured_content"] = sc
+                if chunk.get("score") is not None:
+                    chunk_data["score"] = chunk["score"]
                 merged_chunks.append(chunk_data)
 
     logger.info(

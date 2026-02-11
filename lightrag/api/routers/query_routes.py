@@ -172,7 +172,7 @@ class QueryRequest(BaseModel):
         # Use Pydantic's `.model_dump(exclude_none=True)` to remove None values automatically
         # Exclude API-level parameters that don't belong in QueryParam
         request_data = self.model_dump(
-            exclude_none=True, exclude={"query", "include_chunk_content"}
+            exclude_none=True, exclude={"query", "include_chunk_content", "workspace"}
         )
 
         # Ensure `mode` and `stream` are set explicitly
@@ -195,11 +195,19 @@ class ReferenceItem(BaseModel):
     )
     content: Optional[List[str]] = Field(
         default=None,
-        description="List of chunk contents from this file (only present when include_chunk_content=True)",
+        description="List of chunk text contents (empty list when all chunks have structured_content)",
     )
     structured_content: Optional[List[Dict[str, Any]]] = Field(
         default=None,
-        description="List of structured chunk contents for programmatic parsing (only present when include_chunk_content=True and structured_content is available)",
+        description="List of structured chunk contents for programmatic parsing",
+    )
+    score: Optional[float] = Field(
+        default=None,
+        description="Max relevance score across chunks (cosine similarity or rerank score)",
+    )
+    scores: Optional[List[Optional[float]]] = Field(
+        default=None,
+        description="Per-chunk relevance scores, parallel to content/structured_content arrays (sorted by relevance, descending)",
     )
 
 
@@ -500,31 +508,32 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             # Enrich references with chunk content if requested
             if request.include_references and request.include_chunk_content:
                 chunks = data.get("chunks", [])
-                # Create a mapping from reference_id to chunk content and structured_content
-                ref_id_to_content = {}
-                ref_id_to_structured = {}
+                # Collect per-chunk data grouped by reference_id (preserving order)
+                ref_id_to_chunks = {}
                 for chunk in chunks:
                     ref_id = chunk.get("reference_id", "")
-                    content = chunk.get("content", "")
-                    structured_content = chunk.get("structured_content")
-                    if ref_id and content:
-                        # Collect chunk content; join later to avoid quadratic string concatenation
-                        ref_id_to_content.setdefault(ref_id, []).append(content)
-                        # Collect structured_content if available
-                        if structured_content:
-                            ref_id_to_structured.setdefault(ref_id, []).append(structured_content)
+                    if not ref_id:
+                        continue
+                    ref_id_to_chunks.setdefault(ref_id, []).append(chunk)
 
-                # Add content to references
+                # Build enriched references with parallel arrays
                 enriched_references = []
                 for ref in references:
                     ref_copy = ref.copy()
                     ref_id = ref.get("reference_id", "")
-                    if ref_id in ref_id_to_content:
-                        # Keep content as a list of chunks (one file may have multiple chunks)
-                        ref_copy["content"] = ref_id_to_content[ref_id]
-                        # Add structured_content if available (for programmatic parsing)
-                        if ref_id in ref_id_to_structured:
-                            ref_copy["structured_content"] = ref_id_to_structured[ref_id]
+                    chunk_list = ref_id_to_chunks.get(ref_id, [])
+                    if chunk_list:
+                        contents = [c.get("content", "") for c in chunk_list]
+                        # Empty list when all chunks have structured_content (no text content)
+                        ref_copy["content"] = [] if all(not c for c in contents) else contents
+                        sc_list = [c["structured_content"] for c in chunk_list if c.get("structured_content")]
+                        if sc_list:
+                            ref_copy["structured_content"] = sc_list
+                        # Per-chunk scores (parallel to structured_content/content)
+                        per_scores = [c.get("score") for c in chunk_list]
+                        if any(s is not None for s in per_scores):
+                            ref_copy["scores"] = per_scores
+                            ref_copy["score"] = max(s for s in per_scores if s is not None)
                     enriched_references.append(ref_copy)
                 references = enriched_references
 
@@ -769,31 +778,30 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                 if request.include_references and request.include_chunk_content:
                     data = result.get("data", {})
                     chunks = data.get("chunks", [])
-                    # Create a mapping from reference_id to chunk content and structured_content
-                    ref_id_to_content = {}
-                    ref_id_to_structured = {}
+                    # Collect per-chunk data grouped by reference_id (preserving order)
+                    ref_id_to_chunks = {}
                     for chunk in chunks:
                         ref_id = chunk.get("reference_id", "")
-                        content = chunk.get("content", "")
-                        structured_content = chunk.get("structured_content")
-                        if ref_id and content:
-                            # Collect chunk content
-                            ref_id_to_content.setdefault(ref_id, []).append(content)
-                            # Collect structured_content if available
-                            if structured_content:
-                                ref_id_to_structured.setdefault(ref_id, []).append(structured_content)
+                        if not ref_id:
+                            continue
+                        ref_id_to_chunks.setdefault(ref_id, []).append(chunk)
 
-                    # Add content to references
+                    # Build enriched references with parallel arrays
                     enriched_references = []
                     for ref in references:
                         ref_copy = ref.copy()
                         ref_id = ref.get("reference_id", "")
-                        if ref_id in ref_id_to_content:
-                            # Keep content as a list of chunks (one file may have multiple chunks)
-                            ref_copy["content"] = ref_id_to_content[ref_id]
-                            # Add structured_content if available (for programmatic parsing)
-                            if ref_id in ref_id_to_structured:
-                                ref_copy["structured_content"] = ref_id_to_structured[ref_id]
+                        chunk_list = ref_id_to_chunks.get(ref_id, [])
+                        if chunk_list:
+                            contents = [c.get("content", "") for c in chunk_list]
+                            ref_copy["content"] = [] if all(not c for c in contents) else contents
+                            sc_list = [c["structured_content"] for c in chunk_list if c.get("structured_content")]
+                            if sc_list:
+                                ref_copy["structured_content"] = sc_list
+                            per_scores = [c.get("score") for c in chunk_list]
+                            if any(s is not None for s in per_scores):
+                                ref_copy["scores"] = per_scores
+                                ref_copy["score"] = max(s for s in per_scores if s is not None)
                         enriched_references.append(ref_copy)
                     references = enriched_references
 

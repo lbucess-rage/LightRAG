@@ -104,6 +104,34 @@ class ImageModalProcessor(BaseModalProcessor):
             }
             return str(modal_content), fallback_entity
 
+    async def _upload_image_to_s3(
+        self, image_path: str, workspace: str = "", doc_id: str = ""
+    ) -> str | None:
+        """Upload image to S3 if enabled. Returns S3 URL or None."""
+        try:
+            from lightrag.api.utils_s3 import get_s3_client
+
+            s3_client = get_s3_client()
+            if not s3_client.is_enabled():
+                return None
+
+            image_path_obj = Path(image_path)
+            if not image_path_obj.exists():
+                return None
+
+            return await s3_client.upload_image(
+                file_path=image_path_obj,
+                filename=image_path_obj.name,
+                workspace=workspace,
+                doc_id=doc_id,
+            )
+        except ImportError:
+            logger.debug("S3 client not available for image upload")
+            return None
+        except Exception as e:
+            logger.warning(f"Failed to upload image to S3: {e}")
+            return None
+
     async def process_multimodal_content(
         self,
         modal_content,
@@ -133,10 +161,13 @@ class ImageModalProcessor(BaseModalProcessor):
             captions = content_data.get("image_caption", content_data.get("img_caption", []))
             footnotes = content_data.get("image_footnote", content_data.get("img_footnote", []))
 
+            # Upload image to S3
+            workspace = getattr(self.lightrag, "workspace", "") or ""
+            s3_url = await self._upload_image_to_s3(
+                image_path, workspace=workspace, doc_id=doc_id or ""
+            )
+
             modal_chunk = PROMPTS["image_chunk"].format(
-                image_path=image_path,
-                captions=", ".join(captions) if captions else "None",
-                footnotes=", ".join(footnotes) if footnotes else "None",
                 enhanced_caption=enhanced_caption,
             )
 
@@ -151,6 +182,7 @@ class ImageModalProcessor(BaseModalProcessor):
                 },
                 "image": {
                     "path": image_path,
+                    "s3_url": s3_url,
                     "captions": captions if captions else [],
                     "footnotes": footnotes if footnotes else [],
                 },
@@ -162,10 +194,16 @@ class ImageModalProcessor(BaseModalProcessor):
                 },
             }
 
+            # Pass s3_url as extra KG node property for frontend display
+            extra_node_props = {}
+            if s3_url:
+                extra_node_props["s3_url"] = s3_url
+
             return await self._create_entity_and_chunk(
                 modal_chunk, entity_info, file_path,
                 batch_mode, doc_id, chunk_order_index,
                 structured_content=structured_content,
+                extra_node_props=extra_node_props if extra_node_props else None,
             )
 
         except Exception as e:

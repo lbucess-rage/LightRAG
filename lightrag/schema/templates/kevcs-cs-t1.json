@@ -1,0 +1,788 @@
+{
+  "domain": "kevcs-cs-t1",
+  "display_name": "전기차 cs 템플릿 1",
+  "description": "이 도메인은 전기차 충전기 운영 및 고객 센터에서 접수되는 고장 및 문의 사항을 관리하는 시스템으로, 충전기 고장 유형(예: LCD 불량, 카드 인식 오류, 통신 장애 등)을 분류하고, 각 고장에 대해 충전기 번호, 접수 시간, 처리 상태 등을 기록함. 핵심 엔티티는 충전기, VOC 신고 내역, 고장증상, 담당자 등이며, 관계는 고장 유형-충전기-고객-처리 담당자 간의 흐름을 포함함. 이는 전기차 충전 인프라의 안정성과 고객 만족도 향상을 위한 체계적 장애 관리 프로세스를 의미함.",
+  "entity_types": [
+    {
+      "name": "VocReport",
+      "display_name": "VOC 신고 내역",
+      "description": "고객이 접수한 전기차 충전기 관련 고장 또는 문의 사항을 기록한 항목으로, 고장증상, 충전기 번호, 접수 시간 등이 포함됨",
+      "examples": [
+        "충전기 번호: CHG-2023-001, 고장증상: LCD 불량, 접수일: 2023-11-25",
+        "충전기 번호: CHG-2023-005, 고장증상: 통신장애, 접수일: 2023-11-26"
+      ]
+    },
+    {
+      "name": "ChargingStation",
+      "display_name": "충전기",
+      "description": "전기차 충전을 위한 물리적 장비로, 고유의 식별 번호를 가지고 있으며, 다양한 하드웨어 구성 요소(커넥터, LCD, 카드리더기 등)를 포함함",
+      "examples": [
+        "CHG-2023-001",
+        "CHG-2023-005"
+      ]
+    },
+    {
+      "name": "FaultSymptom",
+      "display_name": "고장증상",
+      "description": "고객이 보고한 충전기의 이상 현상으로, 드롭다운 목록에서 선택 가능한 카테고리. 각 증상은 구체적인 현상 정의가 있음",
+      "examples": [
+        "LCD 불량",
+        "맴버십카드 인식오류",
+        "신용카드인식오류",
+        "커넥터 불량",
+        "통신장애",
+        "진행상황 확인 요청",
+        "기타"
+      ]
+    },
+    {
+      "name": "ConnectorCondition",
+      "display_name": "커넥터 상태",
+      "description": "충전기 커넥터의 물리적 상태를 나타내는 정보로, 파손, 벌어짐, 깨짐 등 외관 이상 여부를 기록",
+      "examples": [
+        "커넥터 외함 파손",
+        "커넥터 외관 상태 불량"
+      ]
+    },
+    {
+      "name": "DisplayIssue",
+      "display_name": "화면 문제",
+      "description": "충전기 화면(LCD)의 다양한 이상 현상으로, 터치 불가, 백화, 검은 줄, 파손 등이 포함됨",
+      "examples": [
+        "화면 터치 불가",
+        "화면 백화현상",
+        "가로/세로 검은 줄 표출"
+      ]
+    },
+    {
+      "name": "CardReaderIssue",
+      "display_name": "카드리더기 문제",
+      "description": "맴버십카드 또는 신용카드를 인식하지 못하는 현상으로, 카드 태깅 후 인증 절차 미진행 등이 포함됨",
+      "examples": [
+        "회원 카드 인식 불가",
+        "신용카드 꽂아도 결제 불가"
+      ]
+    },
+    {
+      "name": "CommunicationFailure",
+      "display_name": "통신 장애",
+      "description": "충전기와 서버 간 통신이 불가능한 상태로, 안테나 아이콘에 X 표시 또는 EVC 상태 확인 시 통신 오류 발생",
+      "examples": [
+        "EVC 통신장애로 인해 충전 불가",
+        "화면에 안테나 그림에 X 표시"
+      ]
+    },
+    {
+      "name": "ProgressInquiry",
+      "display_name": "진행 상황 문의",
+      "description": "고객이 접수 후 장애 조치 진행 상황을 확인 요청하는 경우로, 기존 접수 내용 공유 필요",
+      "examples": [
+        "고장조치 진행 중인지 확인 요청"
+      ]
+    },
+    {
+      "name": "OtherIssue",
+      "display_name": "기타 문제",
+      "description": "기타 카테고리에 속하지 않는 별도의 고장 또는 문의 사항으로, 복합 증상이나 비정형 사례 포함",
+      "examples": [
+        "충전기 기능 이상 but 정의되지 않은 증상",
+        "다수 충전기 복합 고장"
+      ]
+    },
+    {
+      "name": "ChargeStationStatus",
+      "display_name": "충전기 상태",
+      "description": "충전기의 현재 운영 상태를 나타내는 정보로, 정상, 고장, 점검 중 등 상태를 포함",
+      "examples": [
+        "정상 작동",
+        "고장 발생",
+        "점검 중"
+      ]
+    },
+    {
+      "name": "Customer",
+      "display_name": "고객",
+      "description": "충전기 고장을 신고하거나 문의하는 사용자로, 고객 식별 정보(이름, 연락처 등)를 포함할 수 있음",
+      "examples": [
+        "김민수",
+        "이지영"
+      ]
+    },
+    {
+      "name": "SupportAgent",
+      "display_name": "지원 담당자",
+      "description": "VOC 신고를 처리하고 장애 조치를 안내하는 인프라운영팀 또는 고객센터 직원",
+      "examples": [
+        "최창수",
+        "이세영"
+      ]
+    },
+    {
+      "name": "InquiryType",
+      "display_name": "문의 유형",
+      "description": "고객이 접수한 문의의 종류로, 고장 신고, 진행 상황 문의, 기능 문의 등으로 구분됨",
+      "examples": [
+        "고장 신고",
+        "진행 상황 확인 요청",
+        "기능 문의"
+      ]
+    },
+    {
+      "name": "MaintenanceRecord",
+      "display_name": "점검 기록",
+      "description": "고장 발생 후 정비 담당자가 수행한 점검 및 수리 작업 기록으로, 조치 결과, 담당자, 날짜 포함",
+      "examples": [
+        "2023-11-26, 수리 완료, 담당자: 홍길동"
+      ]
+    },
+    {
+      "name": "RepairStatus",
+      "display_name": "수리 상태",
+      "description": "고장 조치 진행 상황을 나타내는 상태 정보로, 미처리, 처리 중, 완료 등이 포함됨",
+      "examples": [
+        "처리 중",
+        "완료",
+        "보류"
+      ]
+    },
+    {
+      "name": "Location",
+      "display_name": "위치",
+      "description": "충전기의 설치 위치 정보로, 주소, 지도 좌표, 충전소 이름 등 포함",
+      "examples": [
+        "서울시 강남구 삼성로 123",
+        "경기도 수원시 영통구 영통로 456"
+      ]
+    },
+    {
+      "name": "ChargeHistory",
+      "display_name": "충전 이력",
+      "description": "해당 충전기의 과거 충전 내역으로, 충전 시작/종료 시간, 충전량, 사용자 등 포함",
+      "examples": [
+        "2023-11-25 14:30 ~ 15:15, 35kWh 충전, 사용자: 김민수"
+      ]
+    },
+    {
+      "name": "NetworkStatus",
+      "display_name": "네트워크 상태",
+      "description": "충전기의 통신망 상태 정보로, LTE, 5G, Wi-Fi 연결 여부 및 신호 강도 포함",
+      "examples": [
+        "LTE 연결됨, 신호 강도: -85dBm",
+        "Wi-Fi 연결 실패"
+      ]
+    },
+    {
+      "name": "HardwareComponent",
+      "display_name": "하드웨어 구성 요소",
+      "description": "충전기 내부의 주요 하드웨어 부품으로, LCD, 카드리더기, 커넥터, 전원 공급 장치 등 포함",
+      "examples": [
+        "LCD 모듈",
+        "카드 리더기",
+        "커넥터 외함"
+      ]
+    },
+    {
+      "name": "FaultCategory",
+      "display_name": "고장 카테고리",
+      "description": "고장 증상을 분류하는 상위 카테고리로, 화면 문제, 통신 문제, 결제 문제 등으로 구분",
+      "examples": [
+        "디스플레이 고장",
+        "통신 고장",
+        "결제 기기 고장"
+      ]
+    },
+    {
+      "name": "ReportTimestamp",
+      "display_name": "접수 시간",
+      "description": "VOC 신고가 접수된 시각 정보로, 정확한 날짜 및 시간 기록",
+      "examples": [
+        "2023-11-25T14:20:30",
+        "2023-11-26T09:15:00"
+      ]
+    },
+    {
+      "name": "ContactInformation",
+      "display_name": "연락처 정보",
+      "description": "고객 또는 담당자의 연락처 정보로, 전화번호, 이메일 등 포함",
+      "examples": [
+        "010-1234-5678",
+        "support@happycharger.com"
+      ]
+    },
+    {
+      "name": "SystemLog",
+      "display_name": "시스템 로그",
+      "description": "충전기 내부 시스템에서 발생한 오류 로그 정보로, 고장 원인 분석에 활용됨",
+      "examples": [
+        "Error Code: E102, Timestamp: 2023-11-25T14:18:45"
+      ]
+    },
+    {
+      "name": "EmergencyStatus",
+      "display_name": "긴급 상태",
+      "description": "고장이 심각하거나 사용자 안전에 영향을 줄 수 있는 경우로, 즉시 대응이 필요한 상태",
+      "examples": [
+        "커넥터 미분리 건",
+        "화면 완전 파손"
+      ]
+    },
+    {
+      "name": "VerificationStatus",
+      "display_name": "확인 상태",
+      "description": "고장 증상에 대한 정확한 확인 여부를 나타내는 상태로, 확인 완료, 미확인, 재확인 필요 등 포함",
+      "examples": [
+        "확인 완료",
+        "재확인 필요"
+      ]
+    },
+    {
+      "name": "ServiceLevel",
+      "display_name": "서비스 수준",
+      "description": "장애 대응 속도 및 품질을 평가하는 수준 정보로, 일반, 우선, 긴급 등 분류",
+      "examples": [
+        "긴급",
+        "우선"
+      ]
+    },
+    {
+      "name": "DocumentVersion",
+      "display_name": "문서 버전",
+      "description": "VOC 고장증상 선택 가이드 문서의 버전 정보로, 수정 이력 및 최종 수정자 포함",
+      "examples": [
+        "Ver. 0.02",
+        "Ver. 0.01"
+      ]
+    },
+    {
+      "name": "Agent",
+      "display_name": "상담원",
+      "description": "고객 문의를 처리하는 상담 직원",
+      "examples": [
+        "상담원",
+        "담당자",
+        "상담사",
+        "CS직원"
+      ]
+    },
+    {
+      "name": "Inquiry",
+      "display_name": "문의",
+      "description": "고객이 제기하는 문의/요청 건",
+      "examples": [
+        "문의",
+        "요청",
+        "민원",
+        "상담건"
+      ]
+    },
+    {
+      "name": "Channel",
+      "display_name": "채널",
+      "description": "고객 접촉 채널",
+      "examples": [
+        "전화",
+        "채팅",
+        "이메일",
+        "카카오톡",
+        "홈페이지"
+      ]
+    },
+    {
+      "name": "Product",
+      "display_name": "상품",
+      "description": "서비스 또는 상품",
+      "examples": [
+        "상품",
+        "서비스",
+        "제품",
+        "품목"
+      ]
+    },
+    {
+      "name": "Policy",
+      "display_name": "정책",
+      "description": "처리 기준이 되는 정책/규정/약관",
+      "examples": [
+        "환불정책",
+        "배송규정",
+        "이용약관",
+        "처리기준"
+      ]
+    },
+    {
+      "name": "Resolution",
+      "display_name": "해결방안",
+      "description": "문의에 대한 처리 결과/해결 방법",
+      "examples": [
+        "환불처리",
+        "재배송",
+        "교환",
+        "보상"
+      ]
+    },
+    {
+      "name": "Status",
+      "display_name": "상태",
+      "description": "처리 상태/진행 상태",
+      "examples": [
+        "접수",
+        "처리중",
+        "완료",
+        "보류",
+        "이관"
+      ]
+    },
+    {
+      "name": "Organization",
+      "display_name": "조직",
+      "description": "회사, 부서, 팀 등 조직 단위",
+      "examples": [
+        "회사",
+        "부서",
+        "팀",
+        "센터",
+        "지점"
+      ]
+    },
+    {
+      "name": "Document",
+      "display_name": "문서",
+      "description": "관련 문서/자료",
+      "examples": [
+        "매뉴얼",
+        "가이드",
+        "안내문",
+        "공지사항"
+      ]
+    }
+  ],
+  "relation_types": [
+    {
+      "name": "SUBMITTED_BY",
+      "display_name": "고객이 제출함",
+      "description": "고객이 VOC 신고 내역을 제출함",
+      "source_types": [
+        "Customer"
+      ],
+      "target_types": [
+        "VocReport"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "ASSOCIATED_WITH",
+      "display_name": "관련된 충전기",
+      "description": "VOC 신고 내역이 특정 충전기와 연결됨",
+      "source_types": [
+        "VocReport"
+      ],
+      "target_types": [
+        "ChargingStation"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_FAULT_SYMPTOM",
+      "display_name": "고장증상 포함",
+      "description": "VOC 신고 내역이 특정 고장증상에 해당함",
+      "source_types": [
+        "VocReport"
+      ],
+      "target_types": [
+        "FaultSymptom"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_DISPLAY_ISSUE",
+      "display_name": "화면 문제 포함",
+      "description": "고장증상이 화면 문제로 분류됨",
+      "source_types": [
+        "FaultSymptom"
+      ],
+      "target_types": [
+        "DisplayIssue"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_CARD_READER_ISSUE",
+      "display_name": "카드리더기 문제 포함",
+      "description": "고장증상이 카드리더기 인식 문제로 분류됨",
+      "source_types": [
+        "FaultSymptom"
+      ],
+      "target_types": [
+        "CardReaderIssue"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_CONNECTOR_ISSUE",
+      "display_name": "커넥터 문제 포함",
+      "description": "고장증상이 커넥터 외관 또는 상태 문제로 분류됨",
+      "source_types": [
+        "FaultSymptom"
+      ],
+      "target_types": [
+        "ConnectorCondition"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_COMMUNICATION_FAILURE",
+      "display_name": "통신 장애 포함",
+      "description": "고장증상이 통신 장애로 분류됨",
+      "source_types": [
+        "FaultSymptom"
+      ],
+      "target_types": [
+        "CommunicationFailure"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_PROGRESS_INQUIRY",
+      "display_name": "진행 상황 문의 포함",
+      "description": "고장증상이 고객의 진행 상황 확인 요청으로 분류됨",
+      "source_types": [
+        "FaultSymptom"
+      ],
+      "target_types": [
+        "ProgressInquiry"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_OTHER_ISSUE",
+      "display_name": "기타 문제 포함",
+      "description": "고장증상이 기타 비정형 문제로 분류됨",
+      "source_types": [
+        "FaultSymptom"
+      ],
+      "target_types": [
+        "OtherIssue"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "REPORTED_AT",
+      "display_name": "접수 시각",
+      "description": "VOC 신고 내역이 접수된 시각 정보",
+      "source_types": [
+        "VocReport"
+      ],
+      "target_types": [
+        "ReportTimestamp"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "LOCATED_AT",
+      "display_name": "위치에 설치됨",
+      "description": "충전기가 특정 위치에 설치됨",
+      "source_types": [
+        "ChargingStation"
+      ],
+      "target_types": [
+        "Location"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_MAINTENANCE_RECORD",
+      "display_name": "점검 기록 보유",
+      "description": "충전기 또는 고장 신고에 대한 점검 및 수리 기록이 있음",
+      "source_types": [
+        "ChargingStation"
+      ],
+      "target_types": [
+        "MaintenanceRecord"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HANDLED_BY",
+      "display_name": "처리 담당자",
+      "description": "VOC 신고 내역을 처리하는 담당자",
+      "source_types": [
+        "VocReport"
+      ],
+      "target_types": [
+        "SupportAgent"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "BELONGS_TO_CATEGORY",
+      "display_name": "카테고리에 속함",
+      "description": "고장증상이 특정 고장 카테고리에 분류됨",
+      "source_types": [
+        "FaultSymptom"
+      ],
+      "target_types": [
+        "FaultCategory"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_SYSTEM_LOG",
+      "display_name": "시스템 로그 포함",
+      "description": "충전기 또는 고장 신고 내역과 관련된 시스템 오류 로그 포함",
+      "source_types": [
+        "ChargingStation"
+      ],
+      "target_types": [
+        "SystemLog"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_NETWORK_STATUS",
+      "display_name": "네트워크 상태 포함",
+      "description": "충전기의 통신 상태 정보 포함",
+      "source_types": [
+        "ChargingStation"
+      ],
+      "target_types": [
+        "NetworkStatus"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_HARDWARE_COMPONENT",
+      "display_name": "하드웨어 구성 요소 포함",
+      "description": "충전기 내부의 하드웨어 부품 정보 포함",
+      "source_types": [
+        "ChargingStation"
+      ],
+      "target_types": [
+        "HardwareComponent"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "IS_EMERGENCY",
+      "display_name": "긴급 상태 여부",
+      "description": "고장이 긴급 상태로 분류됨",
+      "source_types": [
+        "FaultSymptom"
+      ],
+      "target_types": [
+        "EmergencyStatus"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "VERIFIED_BY",
+      "display_name": "확인 담당자",
+      "description": "고장 증상 또는 신고 내용의 정확성 확인을 수행한 담당자",
+      "source_types": [
+        "VocReport"
+      ],
+      "target_types": [
+        "SupportAgent"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_SERVICE_LEVEL",
+      "display_name": "서비스 수준 지정",
+      "description": "장애 처리에 대한 우선순위 수준 지정",
+      "source_types": [
+        "VocReport"
+      ],
+      "target_types": [
+        "ServiceLevel"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "DOCUMENTED_IN",
+      "display_name": "문서에 기재됨",
+      "description": "VOC 신고 가이드 문서의 버전 정보 포함",
+      "source_types": [
+        "VocReport"
+      ],
+      "target_types": [
+        "DocumentVersion"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_CHARGE_HISTORY",
+      "display_name": "충전 이력 포함",
+      "description": "충전기의 과거 충전 내역 정보 포함",
+      "source_types": [
+        "ChargingStation"
+      ],
+      "target_types": [
+        "ChargeHistory"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "VERIFIED_STATUS",
+      "display_name": "확인 상태",
+      "description": "고장 증상의 정확성 확인 여부",
+      "source_types": [
+        "FaultSymptom"
+      ],
+      "target_types": [
+        "VerificationStatus"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "SUBMITTED",
+      "display_name": "접수함",
+      "description": "고객이 문의를 접수하는 관계",
+      "source_types": [
+        "Customer"
+      ],
+      "target_types": [
+        "Inquiry",
+        "InquiryType"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HANDLED",
+      "display_name": "처리함",
+      "description": "상담원이 문의를 처리하는 관계",
+      "source_types": [
+        "Agent"
+      ],
+      "target_types": [
+        "Inquiry",
+        "InquiryType"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "INQUIRED_ABOUT",
+      "display_name": "문의대상",
+      "description": "문의가 특정 상품/서비스에 대한 것임",
+      "source_types": [
+        "Inquiry"
+      ],
+      "target_types": [
+        "Product"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "RESOLVED_WITH",
+      "display_name": "해결됨",
+      "description": "문의가 특정 방안으로 해결됨",
+      "source_types": [
+        "Inquiry"
+      ],
+      "target_types": [
+        "Resolution"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "CONTACTED_VIA",
+      "display_name": "채널로연락",
+      "description": "고객이 특정 채널로 연락함",
+      "source_types": [
+        "Customer",
+        "Inquiry"
+      ],
+      "target_types": [
+        "Channel"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "FOLLOWS_POLICY",
+      "display_name": "정책준수",
+      "description": "처리가 특정 정책을 따름",
+      "source_types": [
+        "Resolution",
+        "Agent"
+      ],
+      "target_types": [
+        "Policy"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_STATUS",
+      "display_name": "상태",
+      "description": "문의/처리의 현재 상태",
+      "source_types": [
+        "Inquiry"
+      ],
+      "target_types": [
+        "Status"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "BELONGS_TO",
+      "display_name": "소속",
+      "description": "소속 관계",
+      "source_types": [
+        "Agent",
+        "Product"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "REFERENCES",
+      "display_name": "참조",
+      "description": "문서/정책을 참조함",
+      "source_types": [
+        "Inquiry",
+        "Resolution"
+      ],
+      "target_types": [
+        "Document",
+        "Policy"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    }
+  ],
+  "version": "1.0.0",
+  "tags": [],
+  "created_at": "2026-02-10T15:47:20.321776",
+  "updated_at": "2026-02-10T15:47:20.321776"
+}

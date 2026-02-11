@@ -121,6 +121,7 @@ class BaseModalProcessor:
         doc_id: str = None,
         chunk_order_index: int = 0,
         structured_content: Dict[str, Any] = None,
+        extra_node_props: Dict[str, Any] = None,
     ) -> Tuple[str, Dict[str, Any], Any]:
         """Create entity and text chunk in LightRAG storages.
 
@@ -132,6 +133,7 @@ class BaseModalProcessor:
             doc_id: Document ID
             chunk_order_index: Order index of the chunk
             structured_content: Optional structured content dict
+            extra_node_props: Optional extra properties for the KG node (e.g., s3_url)
 
         Returns:
             Tuple of (summary, entity_info_dict, chunk_results)
@@ -153,16 +155,8 @@ class BaseModalProcessor:
 
         await self.text_chunks_db.upsert({chunk_id: chunk_data})
 
-        # Store chunk in vector DB
-        await self.chunks_vdb.upsert({
-            chunk_id: {
-                "content": modal_chunk,
-                "full_doc_id": actual_doc_id,
-                "tokens": tokens,
-                "chunk_order_index": chunk_order_index,
-                "file_path": file_path,
-            }
-        })
+        # Store chunk in vector DB (reuse chunk_data to include structured_content)
+        await self.chunks_vdb.upsert({chunk_id: chunk_data})
 
         # Create entity node in graph
         node_data = {
@@ -173,6 +167,8 @@ class BaseModalProcessor:
             "file_path": file_path,
             "created_at": int(time.time()),
         }
+        if extra_node_props:
+            node_data.update(extra_node_props)
         await self.knowledge_graph_inst.upsert_node(entity_info["entity_name"], node_data)
 
         # Insert entity into vector DB

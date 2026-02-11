@@ -338,13 +338,19 @@ export default function EntityDetailPanel() {
     return false
   }, [displayMode, graphSelectedNodeData, selectedEntity])
 
-  // Get image URL from file_path
+  // Get image URL: prefer s3_url, fall back to file_path via backend proxy
   const imageUrl = useMemo(() => {
     if (!isImageType) return null
+
+    // Prefer S3 URL if available (uploaded images)
+    const s3Url = graphSelectedNodeData?.properties?.s3_url ||
+                  selectedEntity?.s3_url || ''
+    if (s3Url) return s3Url
+
+    // Fallback to local file path via backend proxy
     const filePath = graphSelectedNodeData?.properties?.file_path ||
                     selectedEntity?.file_path || ''
     if (!filePath) return null
-    // Construct image URL - adjust based on your backend setup
     return `${backendBaseUrl}/documents/file?path=${encodeURIComponent(filePath)}`
   }, [isImageType, graphSelectedNodeData, selectedEntity])
 

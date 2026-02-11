@@ -35,6 +35,9 @@ import { useWorkspaceStore } from '@/stores/workspace'
 
 import { RefreshCwIcon, ActivityIcon, ArrowUpIcon, ArrowDownIcon, RotateCcwIcon, CheckSquareIcon, XIcon, AlertTriangle, Info } from 'lucide-react'
 import PipelineStatusDialog from '@/components/documents/PipelineStatusDialog'
+import URLIngestDialog from '@/components/documents/URLIngestDialog'
+import MultimodalUploadDialog from '@/components/documents/MultimodalUploadDialog'
+import ActiveTasksPanel from '@/components/documents/ActiveTasksPanel'
 
 type StatusFilter = DocStatus | 'all';
 
@@ -1228,6 +1231,8 @@ export default function DocumentManager() {
             ) : !isSelectionMode ? (
               <ClearDocumentsDialog onDocumentsCleared={handleDocumentsCleared} />
             ) : null}
+            <URLIngestDialog onDocumentsUploaded={fetchDocuments} />
+            <MultimodalUploadDialog onDocumentsUploaded={fetchDocuments} />
             <UploadDocumentsDialog onDocumentsUploaded={fetchDocuments} />
             <PipelineStatusDialog
               open={showPipelineStatus}
@@ -1235,6 +1240,8 @@ export default function DocumentManager() {
             />
           </div>
         </div>
+
+        <ActiveTasksPanel onTaskComplete={fetchDocuments} />
 
         <Card className="flex-1 flex flex-col border rounded-md min-h-0 mb-2">
           <CardHeader className="flex-none py-2 px-4">

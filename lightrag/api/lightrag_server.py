@@ -77,6 +77,17 @@ from lightrag.api.routers.multimodal_routes import (
     set_vlm_model_func,
     set_llm_model_func as set_multimodal_llm_func,
 )
+from lightrag.api.routers.task_routes import (
+    create_task_routes,
+    set_rag_workspace_getter as set_task_rag_workspace_getter,
+)
+from lightrag.api.routers.url_routes import (
+    create_url_routes,
+    set_rag_workspace_getter as set_url_rag_workspace_getter,
+    set_vlm_model_func as set_url_vlm_model_func,
+    set_llm_model_func as set_url_llm_model_func,
+)
+from lightrag.api.task_manager import init_task_service
 
 from lightrag.utils import logger, set_verbose_debug
 from lightrag.kg.shared_storage import (
@@ -1236,6 +1247,8 @@ def create_app(args):
         set_schema_rag_workspace_getter(get_rag_for_workspace)
         set_ollama_rag_workspace_getter(get_rag_for_workspace)
         set_multimodal_rag_workspace_getter(get_rag_for_workspace)
+        set_task_rag_workspace_getter(get_rag_for_workspace)
+        set_url_rag_workspace_getter(get_rag_for_workspace)
         logger.info(f"RAG factory config stored, default workspace: {args.workspace or 'base'}")
 
     except Exception as e:
@@ -1283,6 +1296,15 @@ def create_app(args):
     # Add Multimodal Processing routes
     app.include_router(create_multimodal_routes())
 
+    # Add Task Management routes and initialize TaskService
+    app.include_router(create_task_routes())
+    init_task_service(log_storage_path=Path(args.working_dir) / "task_logs")
+    logger.info("Task management routes initialized")
+
+    # Add URL Knowledge Ingestion routes
+    app.include_router(create_url_routes())
+    logger.info("URL knowledge ingestion routes initialized")
+
     # Initialize VLM model function for multimodal processing
     try:
         from lightrag.multimodal.config import MultimodalConfig
@@ -1295,6 +1317,7 @@ def create_app(args):
             return await rag.llm_model_func(prompt, system_prompt=system_prompt)
 
         set_multimodal_llm_func(multimodal_llm_func)
+        set_url_llm_model_func(multimodal_llm_func)
 
         # Initialize VLM if configured
         if mm_config.vlm_api_base and mm_config.vlm_model:
@@ -1339,6 +1362,7 @@ def create_app(args):
                     return response.choices[0].message.content
 
                 set_vlm_model_func(vlm_model_func)
+                set_url_vlm_model_func(vlm_model_func)
                 logger.info(
                     f"Multimodal VLM initialized: {mm_config.vlm_model} at {mm_config.vlm_api_base}"
                 )

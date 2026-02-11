@@ -932,6 +932,9 @@ class ApplySchemaRequest(BaseModel):
     entity_types: list[str] = Field(..., description="적용할 엔티티 타입 목록")
     relation_types: Optional[list[dict]] = Field(None, description="적용할 관계 타입 목록 (name, source_types, target_types 등)")
     source: Optional[str] = Field(None, description="스키마 출처 (template:name, discovery, custom)")
+    entity_type_details: Optional[list[dict]] = Field(
+        None, description="엔티티 타입 상세정보 (description, examples, extraction_hints)"
+    )
 
 
 class MergePreviewRequest(BaseModel):
@@ -1000,6 +1003,7 @@ async def _save_workspace_schema_to_db(
     relation_types: list[dict] | None = None,
     source: str | None = None,
     applied_at: str | None = None,
+    entity_type_details: list[dict] | None = None,
 ) -> bool:
     """DB에 워크스페이스 스키마 저장"""
     storage = await _get_schema_storage()
@@ -1010,6 +1014,7 @@ async def _save_workspace_schema_to_db(
             relation_types=relation_types,
             source=source,
             applied_at=applied_at,
+            entity_type_details=entity_type_details,
         )
     return False
 
@@ -1038,6 +1043,7 @@ async def _get_workspace_schema_meta(workspace: str) -> dict[str, Any]:
             "applied_at": db_schema.get("applied_at"),
             "entity_types": db_schema.get("entity_types"),
             "relation_types": db_schema.get("relation_types", []),
+            "entity_type_details": db_schema.get("entity_type_details"),
         }
         _schema_cache_loaded.add(workspace)
         logger.debug(f"Loaded schema from DB for workspace '{workspace}'")
@@ -1050,6 +1056,7 @@ async def _get_workspace_schema_meta(workspace: str) -> dict[str, Any]:
             "applied_at": None,
             "entity_types": None,
             "relation_types": None,
+            "entity_type_details": None,
         }
     _schema_cache_loaded.add(workspace)
     return _workspace_schema_cache[workspace]
@@ -1061,6 +1068,7 @@ def _update_schema_cache(
     relation_types: list[dict] | None = None,
     source: str | None = None,
     applied_at: str | None = None,
+    entity_type_details: list[dict] | None = None,
 ):
     """스키마 캐시 업데이트 (메모리)"""
     global _workspace_schema_cache
@@ -1069,6 +1077,7 @@ def _update_schema_cache(
         "applied_at": applied_at,
         "entity_types": entity_types,
         "relation_types": relation_types,
+        "entity_type_details": entity_type_details,
     }
     _schema_cache_loaded.add(workspace)
 
@@ -1094,11 +1103,28 @@ async def get_current_schema(request: Request):
         # relation_types도 반환 (없으면 빈 리스트)
         current_relation_types = schema_meta.get("relation_types") or []
 
+        # entity_type_details도 반환 (DB에서 로드된 것 포함)
+        current_entity_type_details = schema_meta.get("entity_type_details")
+
+        # DB에서 로드한 스키마가 있고 RAG addon_params에 아직 반영되지 않았으면 적용
+        workspace_rag = await _get_workspace_rag(workspace)
+        if (
+            workspace_rag
+            and hasattr(workspace_rag, "addon_params")
+            and schema_meta.get("entity_types") is not None
+        ):
+            workspace_rag.addon_params["entity_types"] = list(current_entity_types)
+            if current_entity_type_details:
+                workspace_rag.addon_params["entity_type_details"] = current_entity_type_details
+            else:
+                workspace_rag.addon_params.pop("entity_type_details", None)
+
         return ApiResponse(
             success=True,
             data={
                 "entity_types": list(current_entity_types),
                 "relation_types": current_relation_types,
+                "entity_type_details": current_entity_type_details,
                 "source": schema_meta.get("source"),
                 "applied_at": schema_meta.get("applied_at"),
                 "is_default": current_entity_types == get_default_entity_types(),
@@ -1111,6 +1137,37 @@ async def get_current_schema(request: Request):
     except Exception as e:
         logger.error(f"Failed to get current schema: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _resolve_entity_type_details(
+    schema_request: ApplySchemaRequest,
+    entity_types: list[str],
+) -> list[dict] | None:
+    """ApplySchemaRequest에서 entity_type_details 추출.
+
+    entity_type_details가 요청에 있으면 사용,
+    없으면 저장된 DomainSchema 템플릿에서 조회 시도.
+    """
+    if schema_request.entity_type_details:
+        return schema_request.entity_type_details
+
+    # 스키마 소스가 template인 경우 템플릿에서 상세정보 로드
+    if schema_request.source and schema_request.source.startswith("template:"):
+        domain = schema_request.source.replace("template:", "")
+        if _template_manager:
+            template = await _template_manager.get_template(domain)
+            if template:
+                return [
+                    {
+                        "name": et.name,
+                        "description": et.description,
+                        "examples": et.examples,
+                        "extraction_hints": et.extraction_hints or [],
+                    }
+                    for et in template.entity_types
+                    if et.name in entity_types
+                ]
+    return None
 
 
 @router.post("/apply", summary="스키마 적용")
@@ -1136,6 +1193,11 @@ async def apply_schema(request: Request, schema_request: ApplySchemaRequest):
         entity_types = list(dict.fromkeys(schema_request.entity_types))
         relation_types = schema_request.relation_types or []
 
+        # entity_type_details 해석 (요청 또는 템플릿에서)
+        entity_type_details = await _resolve_entity_type_details(
+            schema_request, entity_types
+        )
+
         # 이전 entity_types 저장
         old_entity_types = schema_meta.get("entity_types") or get_default_entity_types()
         old_relation_types = schema_meta.get("relation_types") or []
@@ -1151,6 +1213,7 @@ async def apply_schema(request: Request, schema_request: ApplySchemaRequest):
             relation_types=relation_types,
             source=schema_request.source,
             applied_at=applied_at,
+            entity_type_details=entity_type_details,
         )
 
         # 메모리 캐시 업데이트
@@ -1160,11 +1223,16 @@ async def apply_schema(request: Request, schema_request: ApplySchemaRequest):
             relation_types=relation_types,
             source=schema_request.source,
             applied_at=applied_at,
+            entity_type_details=entity_type_details,
         )
 
         # 워크스페이스별 RAG 인스턴스의 addon_params 업데이트
         if workspace_rag and hasattr(workspace_rag, "addon_params"):
             workspace_rag.addon_params["entity_types"] = entity_types
+            if entity_type_details:
+                workspace_rag.addon_params["entity_type_details"] = entity_type_details
+            else:
+                workspace_rag.addon_params.pop("entity_type_details", None)
 
         logger.info(
             f"Schema applied for workspace '{workspace}': "
@@ -1227,6 +1295,7 @@ async def reset_schema(request: Request):
         # 워크스페이스별 RAG 인스턴스의 addon_params 초기화
         if workspace_rag and hasattr(workspace_rag, "addon_params"):
             workspace_rag.addon_params["entity_types"] = list(default_types)
+            workspace_rag.addon_params.pop("entity_type_details", None)
 
         logger.info(
             f"Schema reset for workspace '{workspace}': {len(default_types)} entity types "
