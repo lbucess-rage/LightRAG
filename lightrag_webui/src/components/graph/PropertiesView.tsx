@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useGraphStore, RawNodeType, RawEdgeType } from '@/stores/graph'
 import Text from '@/components/ui/Text'
 import Button from '@/components/ui/Button'
 import useLightragGraph from '@/hooks/useLightragGraph'
 import { useTranslation } from 'react-i18next'
-import { GitBranchPlus, Scissors } from 'lucide-react'
+import { GitBranchPlus, Scissors, X } from 'lucide-react'
 import EditablePropertyRow from './EditablePropertyRow'
+import { backendBaseUrl } from '@/lib/constants'
 
 /**
  * Component that view properties of elements in graph.
@@ -266,6 +267,7 @@ const PropertyRow = ({
 
 const NodePropertiesView = ({ node }: { node: NodeType }) => {
   const { t } = useTranslation()
+  const [imagePreview, setImagePreview] = useState<string | null>(null)
 
   const handleExpandNode = () => {
     useGraphStore.getState().triggerNodeExpand(node.id)
@@ -274,6 +276,20 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
   const handlePruneNode = () => {
     useGraphStore.getState().triggerNodePrune(node.id)
   }
+
+  const isImageType = useMemo(() => {
+    const entityType = node.properties?.entity_type || ''
+    return entityType.toLowerCase() === 'image'
+  }, [node.properties])
+
+  const imageUrl = useMemo(() => {
+    if (!isImageType) return null
+    const s3Url = node.properties?.s3_url || ''
+    if (s3Url) return s3Url
+    const filePath = node.properties?.file_path || ''
+    if (!filePath) return null
+    return `${backendBaseUrl}/documents/file?path=${encodeURIComponent(filePath)}`
+  }, [isImageType, node.properties])
 
   return (
     <div className="flex flex-col gap-2">
@@ -300,6 +316,19 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
           </Button>
         </div>
       </div>
+      {isImageType && imageUrl && (
+        <div
+          className="relative w-full rounded overflow-hidden border cursor-pointer hover:opacity-90 transition-opacity"
+          onClick={() => setImagePreview(imageUrl)}
+        >
+          <img
+            src={imageUrl}
+            alt={node.properties?.entity_id || 'Image'}
+            className="w-full h-auto max-h-48 object-contain bg-black/5"
+            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+          />
+        </div>
+      )}
       <div className="bg-primary/5 max-h-96 overflow-auto rounded p-1">
         <PropertyRow name={t('graphPanel.propertiesView.node.id')} value={String(node.id)} />
         <PropertyRow
@@ -316,7 +345,7 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
         {Object.keys(node.properties)
           .sort()
           .map((name) => {
-            if (name === 'created_at' || name === 'truncate') return null; // Hide created_at and truncate properties
+            if (name === 'created_at' || name === 'truncate' || name === 's3_url') return null;
             return (
               <PropertyRow
                 key={name}
@@ -351,6 +380,34 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
             })}
           </div>
         </>
+      )}
+      {imagePreview && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setImagePreview(null)}
+        >
+          <div
+            className="relative max-h-[90vh] max-w-[90vw] bg-background rounded-lg p-4 shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-lg font-medium">{node.properties?.entity_id || 'Image'}</h3>
+              <Button variant="ghost" size="icon" onClick={() => setImagePreview(null)}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="overflow-auto max-h-[80vh]">
+              <img
+                src={imagePreview}
+                alt={node.properties?.entity_id || 'Image'}
+                className="max-w-full h-auto"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><text x="50%" y="50%" text-anchor="middle" dominant-baseline="middle" fill="gray">Image not found</text></svg>'
+                }}
+              />
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

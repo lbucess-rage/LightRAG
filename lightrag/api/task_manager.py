@@ -26,6 +26,7 @@ from lightrag.utils import logger
 class TaskType(str, Enum):
     MULTIMODAL_PROCESS = "multimodal_process"
     URL_INGEST = "url_ingest"
+    BOARD_INGEST = "board_ingest"
 
 
 class TaskStatus(str, Enum):
@@ -58,6 +59,7 @@ class TaskProgressLog(BaseModel):
     progress: float
     message: str
     timestamp: float
+    detail: Optional[Dict[str, Any]] = None
 
 
 class Task(BaseModel):
@@ -155,9 +157,10 @@ class TaskRegistry:
 class TaskService:
     """Singleton service for task lifecycle management."""
 
-    def __init__(self, log_storage_path: Optional[Path] = None):
+    def __init__(self, log_storage_path: Optional[Path] = None, db=None):
         self._registry = TaskRegistry()
         self._log_storage_path = log_storage_path
+        self._db = db  # PostgreSQLDB instance (Optional)
         if self._log_storage_path:
             self._log_storage_path.mkdir(parents=True, exist_ok=True)
 
@@ -174,6 +177,7 @@ class TaskService:
             metadata=metadata or {},
         )
         self._registry.add_task(task)
+        self._fire_save_to_db(task)
         logger.info(f"Task created: {task.task_id} type={task_type} workspace={workspace}")
         return task
 
@@ -194,9 +198,10 @@ class TaskService:
         if task.status == TaskStatus.PENDING:
             task.status = TaskStatus.RUNNING
         task.progress_logs.append(
-            TaskProgressLog(progress=progress, message=message, timestamp=time.time())
+            TaskProgressLog(progress=progress, message=message, timestamp=time.time(), detail=detail)
         )
         self._registry.update_task(task)
+        asyncio.create_task(self._save_task_to_db(task))
 
         event = TaskProgressEvent(
             task_id=task_id,
@@ -220,6 +225,7 @@ class TaskService:
         task.message = "Completed"
         task.result = result
         self._registry.update_task(task)
+        asyncio.create_task(self._save_task_to_db(task))
 
         event = TaskProgressEvent(
             task_id=task_id,
@@ -242,6 +248,7 @@ class TaskService:
         task.error = error
         task.message = f"Failed: {error}"
         self._registry.update_task(task)
+        asyncio.create_task(self._save_task_to_db(task))
 
         event = TaskProgressEvent(
             task_id=task_id,
@@ -264,6 +271,7 @@ class TaskService:
         task.status = TaskStatus.CANCELLED
         task.message = "Cancelled by user"
         self._registry.update_task(task)
+        asyncio.create_task(self._save_task_to_db(task))
 
         event = TaskProgressEvent(
             task_id=task_id,
@@ -293,6 +301,7 @@ class TaskService:
         if task:
             task.status = TaskStatus.RUNNING
             self._registry.update_task(task)
+            asyncio.create_task(self._save_task_to_db(task))
 
         async def _wrapper():
             try:
@@ -380,6 +389,99 @@ class TaskService:
         except Exception as e:
             logger.warning(f"Failed to persist task logs for {task.task_id}: {e}")
 
+    async def _save_task_to_db(self, task: Task) -> None:
+        """Fire-and-forget: save task state to PostgreSQL."""
+        if not self._db:
+            return
+        try:
+            sql = """INSERT INTO LIGHTRAG_TASKS
+                (workspace, task_id, task_type, status, progress, message,
+                 result, error, metadata, created_at, updated_at)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,
+                        to_timestamp($10), to_timestamp($11))
+                ON CONFLICT (workspace, task_id) DO UPDATE SET
+                    status = EXCLUDED.status,
+                    progress = EXCLUDED.progress,
+                    message = EXCLUDED.message,
+                    result = EXCLUDED.result,
+                    error = EXCLUDED.error,
+                    metadata = EXCLUDED.metadata,
+                    updated_at = EXCLUDED.updated_at"""
+            params = [
+                task.workspace or "",
+                task.task_id,
+                task.task_type.value,
+                task.status.value,
+                task.progress,
+                task.message or "",
+                json.dumps(task.result) if task.result else None,
+                task.error,
+                json.dumps(task.metadata) if task.metadata else "{}",
+                task.created_at,
+                task.updated_at,
+            ]
+            await self._db.query(sql, params)
+        except Exception as e:
+            logger.warning(f"Failed to save task {task.task_id} to DB: {e}")
+
+    def _fire_save_to_db(self, task: Task) -> None:
+        """Schedule fire-and-forget DB save."""
+        if not self._db:
+            return
+        try:
+            asyncio.get_event_loop().create_task(self._save_task_to_db(task))
+        except RuntimeError:
+            pass  # No running event loop
+
+    async def load_tasks_from_db(self, max_age_hours: int = 72) -> int:
+        """Load recent tasks from DB into memory registry on startup."""
+        if not self._db:
+            return 0
+        try:
+            sql = f"""SELECT task_id, task_type, workspace, status, progress, message,
+                            result, error, metadata,
+                            EXTRACT(EPOCH FROM created_at) as created_at,
+                            EXTRACT(EPOCH FROM updated_at) as updated_at
+                     FROM LIGHTRAG_TASKS
+                     WHERE updated_at > NOW() - INTERVAL '{int(max_age_hours)} hours'
+                     ORDER BY created_at DESC"""
+            rows = await self._db.query(sql, multirows=True)
+            if not rows:
+                return 0
+            count = 0
+            for row in rows:
+                try:
+                    # asyncpg may return JSONB as str — parse if needed
+                    raw_result = row["result"]
+                    if isinstance(raw_result, str):
+                        raw_result = json.loads(raw_result)
+                    raw_metadata = row["metadata"]
+                    if isinstance(raw_metadata, str):
+                        raw_metadata = json.loads(raw_metadata)
+
+                    task = Task(
+                        task_id=row["task_id"],
+                        task_type=TaskType(row["task_type"]),
+                        workspace=row["workspace"] or "",
+                        status=TaskStatus(row["status"]),
+                        progress=row["progress"] or 0.0,
+                        message=row["message"] or "",
+                        created_at=row["created_at"],
+                        updated_at=row["updated_at"],
+                        result=raw_result,
+                        error=row["error"],
+                        metadata=raw_metadata or {},
+                    )
+                    self._registry.add_task(task)
+                    count += 1
+                except (ValueError, KeyError) as e:
+                    logger.warning(f"Skipping invalid task row: {e}")
+            logger.info(f"Loaded {count} tasks from DB")
+            return count
+        except Exception as e:
+            logger.warning(f"Failed to load tasks from DB: {e}")
+            return 0
+
 
 # ============================================================================
 # Module-level singleton
@@ -396,8 +498,8 @@ def get_task_service() -> TaskService:
     return _task_service
 
 
-def init_task_service(log_storage_path: Optional[Path] = None) -> TaskService:
+def init_task_service(log_storage_path: Optional[Path] = None, db=None) -> TaskService:
     """Initialize the global TaskService with configuration."""
     global _task_service
-    _task_service = TaskService(log_storage_path=log_storage_path)
+    _task_service = TaskService(log_storage_path=log_storage_path, db=db)
     return _task_service

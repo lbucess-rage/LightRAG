@@ -9,7 +9,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { useDebounce } from '@/hooks/useDebounce'
 import QuerySettings from '@/components/retrieval/QuerySettings'
 import { ChatMessage, MessageWithError } from '@/components/retrieval/ChatMessage'
-import { EraserIcon, SendIcon, CopyIcon } from 'lucide-react'
+import { EraserIcon, SendIcon, CopyIcon, SlidersHorizontalIcon, PanelRightCloseIcon, PanelRightOpenIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { copyToClipboard } from '@/utils/clipboard'
@@ -39,6 +39,19 @@ const detectLatexCompleteness = (content: string): boolean => {
 
   // LaTeX is complete if there are no unclosed formulas
   return !hasUnclosedBlock && !hasUnclosedInline
+}
+
+// Strip trailing References section from LLM output (safety net for streaming)
+function stripReferencesSection(text: string): string {
+  return text
+    .replace(/\n#{1,3}\s*References?\s*\n[\s\S]*$/i, '')
+    .replace(/\n\*{2}References?\*{2}\s*\n[\s\S]*$/i, '')
+    .trimEnd()
+}
+
+// Strip evidence map HTML comment block from LLM output
+function stripEvidenceMap(text: string): string {
+  return text.replace(/\s*<!--EVIDENCE_MAP\s*\n[\s\S]*?-->\s*/g, '').trimEnd()
 }
 
 // Robust COT parsing function to handle multiple think blocks and edge cases
@@ -106,6 +119,9 @@ export default function RetrievalTesting() {
   // Get current tab to determine if this tab is active (for performance optimization)
   const currentTab = useSettingsStore.use.currentTab()
   const isRetrievalTabActive = currentTab === 'retrieval'
+
+  const showQuerySettings = useSettingsStore.use.showQuerySettings()
+  const setShowQuerySettings = useSettingsStore.use.setShowQuerySettings()
 
   const [messages, setMessages] = useState<MessageWithError[]>(() => {
     try {
@@ -291,7 +307,8 @@ export default function RetrievalTesting() {
         if (cotResult.isThinking) {
           assistantMessage.displayContent = ''
         } else {
-          assistantMessage.displayContent = cotResult.displayContent || assistantMessage.content
+          const display = cotResult.displayContent || assistantMessage.content
+          assistantMessage.displayContent = stripEvidenceMap(stripReferencesSection(display))
         }
 
         // Detect if the assistant message contains a complete mermaid code block
@@ -402,6 +419,23 @@ export default function RetrievalTesting() {
                 }
                 return newMessages
               })
+            },
+            (evidenceMap: Record<string, string[]>) => {
+              if (assistantMessage.references) {
+                for (const ref of assistantMessage.references) {
+                  const snippets = evidenceMap[ref.reference_id]
+                  if (snippets) ref.evidence = snippets
+                }
+                // Trigger re-render with updated evidence
+                setMessages((prev) => {
+                  const newMessages = [...prev]
+                  const last = newMessages[newMessages.length - 1]
+                  if (last?.id === assistantMessage.id) {
+                    last.references = [...(assistantMessage.references || [])]
+                  }
+                  return newMessages
+                })
+              }
             }
           )
           if (errorMessage) {
@@ -449,7 +483,7 @@ export default function RetrievalTesting() {
 
           // Ensure display content is correctly set based on final parsing
           if (finalCotResult.displayContent !== undefined) {
-            assistantMessage.displayContent = finalCotResult.displayContent
+            assistantMessage.displayContent = stripEvidenceMap(stripReferencesSection(finalCotResult.displayContent))
           }
 
         } catch (error) {
@@ -870,9 +904,32 @@ export default function RetrievalTesting() {
             <SendIcon />
             {t('retrievePanel.retrieval.send')}
           </Button>
+          <Button
+            type="button"
+            variant={showQuerySettings ? 'secondary' : 'outline'}
+            size="sm"
+            onClick={() => setShowQuerySettings(!showQuerySettings)}
+            tooltip={showQuerySettings
+              ? t('retrievePanel.querySettings.hidePanel')
+              : t('retrievePanel.querySettings.showPanel')
+            }
+          >
+            {showQuerySettings
+              ? <PanelRightCloseIcon className="h-4 w-4" />
+              : <PanelRightOpenIcon className="h-4 w-4" />
+            }
+          </Button>
         </form>
       </div>
-      <QuerySettings />
+      <div
+        className={`shrink-0 transition-all duration-300 ease-in-out overflow-hidden ${
+          showQuerySettings ? 'w-[500px] opacity-100' : 'w-0 opacity-0'
+        }`}
+      >
+        <div className="w-[500px] h-full">
+          <QuerySettings />
+        </div>
+      </div>
     </div>
   )
 }

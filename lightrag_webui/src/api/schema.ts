@@ -392,8 +392,16 @@ export async function validateSchema(
 // Schema Application API
 // =============================================================================
 
+export interface SeedEntity {
+  keyword: string
+  variants: string[]
+  entity_type: string
+  description?: string
+}
+
 export interface CurrentSchema {
   entity_types: string[]
+  seed_entities?: SeedEntity[]
   source: string | null
   applied_at: string | null
   is_default: boolean
@@ -509,6 +517,52 @@ export async function mergeApply(
     )
     if (!response.data.success || !response.data.data) {
       throw new Error(response.data.error?.message || 'Failed to apply merge')
+    }
+    return response.data.data
+  } catch (error) {
+    throw new Error(errorMessage(error))
+  }
+}
+
+// =============================================================================
+// Seed Entities API
+// =============================================================================
+
+export async function getSeedEntities(): Promise<{ seed_entities: SeedEntity[]; count: number }> {
+  try {
+    const response = await schemaApi.get<ApiResponse<{ seed_entities: SeedEntity[]; count: number }>>(
+      '/seed-entities'
+    )
+    if (!response.data.success || !response.data.data) {
+      throw new Error(response.data.error?.message || 'Failed to get seed entities')
+    }
+    return response.data.data
+  } catch (error) {
+    throw new Error(errorMessage(error))
+  }
+}
+
+export async function saveSeedEntities(
+  seedEntities: SeedEntity[]
+): Promise<{ seed_entities: SeedEntity[]; count: number; persisted: boolean }> {
+  try {
+    const response = await schemaApi.post<
+      ApiResponse<{ seed_entities: SeedEntity[]; count: number; persisted: boolean }>
+    >('/seed-entities', { seed_entities: seedEntities })
+    if (!response.data.success || !response.data.data) {
+      throw new Error(response.data.error?.message || 'Failed to save seed entities')
+    }
+    return response.data.data
+  } catch (error) {
+    throw new Error(errorMessage(error))
+  }
+}
+
+export async function clearSeedEntities(): Promise<{ cleared: boolean }> {
+  try {
+    const response = await schemaApi.delete<ApiResponse<{ cleared: boolean }>>('/seed-entities')
+    if (!response.data.success || !response.data.data) {
+      throw new Error(response.data.error?.message || 'Failed to clear seed entities')
     }
     return response.data.data
   } catch (error) {

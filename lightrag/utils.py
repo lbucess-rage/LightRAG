@@ -36,6 +36,7 @@ from lightrag.constants import (
     DEFAULT_LOG_BACKUP_COUNT,
     DEFAULT_LOG_FILENAME,
     GRAPH_FIELD_SEP,
+    DEFAULT_KEYWORD_BOOST_WEIGHT,
     DEFAULT_MAX_TOTAL_TOKENS,
     DEFAULT_SOURCE_IDS_LIMIT_METHOD,
     VALID_SOURCE_IDS_LIMIT_METHODS,
@@ -2673,6 +2674,7 @@ async def process_chunks_unified(
     global_config: dict,
     source_type: str = "mixed",
     chunk_token_limit: int = None,  # Add parameter for dynamic token limit
+    query_keywords: list[str] = None,  # LLM-extracted keywords for exact-match boosting
 ) -> list[dict]:
     """
     Unified processing for text chunks: deduplication, chunk_top_k limiting, reranking, and token truncation.
@@ -2703,6 +2705,51 @@ async def process_chunks_unified(
             enable_rerank=query_param.enable_rerank,
             top_n=rerank_top_k,
         )
+
+    # 1.5 Apply keyword exact-match boosting
+    if query_keywords and unique_chunks:
+        boost_weight = float(
+            global_config.get(
+                "keyword_boost_weight",
+                os.getenv("KEYWORD_BOOST_WEIGHT", str(DEFAULT_KEYWORD_BOOST_WEIGHT)),
+            )
+        )
+        if boost_weight > 0:
+            boosted_count = 0
+            for chunk in unique_chunks:
+                content = chunk.get("content", "")
+                # Also search structured_content text when content is empty
+                if not content:
+                    sc = chunk.get("structured_content")
+                    if isinstance(sc, dict):
+                        content = " ".join(
+                            str(v) for v in [
+                                sc.get("description", ""),
+                                sc.get("table", {}).get("body_markdown", "") if isinstance(sc.get("table"), dict) else "",
+                                sc.get("caption", ""),
+                            ] if v
+                        )
+                match_count = sum(1 for kw in query_keywords if kw in content)
+                if match_count > 0:
+                    base_score = chunk.get(
+                        "rerank_score", chunk.get("cosine_score", 0.5)
+                    )
+                    # Boost proportional to matched keyword ratio
+                    match_ratio = match_count / len(query_keywords)
+                    chunk["rerank_score"] = min(
+                        1.0, base_score + boost_weight * match_ratio
+                    )
+                    chunk["keyword_matched"] = True
+                    boosted_count += 1
+            # Re-sort after boosting
+            if boosted_count > 0:
+                unique_chunks.sort(
+                    key=lambda x: x.get("rerank_score", 0), reverse=True
+                )
+                logger.info(
+                    f"Keyword boost: {boosted_count}/{len(unique_chunks)} chunks boosted "
+                    f"(keywords: {query_keywords}, weight: {boost_weight})"
+                )
 
     # 2. Filter by minimum rerank score if reranking is enabled
     if query_param.enable_rerank and unique_chunks:

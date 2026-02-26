@@ -96,6 +96,43 @@ async def _get_workspace_rag(workspace: str):
     return _rag_instance
 
 
+_schema_addon_loaded: set[str] = set()
+
+
+async def ensure_workspace_schema_loaded(workspace: str, rag: Any):
+    """Ensure workspace schema (entity_types, seed_entities) is loaded into RAG addon_params.
+
+    Called when a RAG instance is accessed for a workspace, so that
+    entity extraction uses the correct schema without requiring a prior
+    GET /current API call.
+    """
+    global _schema_addon_loaded
+
+    if rag is None or not hasattr(rag, "addon_params"):
+        return
+
+    # Already loaded into this workspace's addon_params
+    if workspace in _schema_addon_loaded:
+        return
+
+    try:
+        schema_meta = await _get_workspace_schema_meta(workspace)
+        if schema_meta.get("entity_types") is not None:
+            rag.addon_params["entity_types"] = list(schema_meta["entity_types"])
+        if schema_meta.get("entity_type_details"):
+            rag.addon_params["entity_type_details"] = schema_meta["entity_type_details"]
+        if schema_meta.get("seed_entities"):
+            rag.addon_params["seed_entities"] = schema_meta["seed_entities"]
+        _schema_addon_loaded.add(workspace)
+        logger.info(
+            f"Auto-loaded schema for workspace '{workspace}': "
+            f"{len(schema_meta.get('entity_types') or [])} entity types, "
+            f"{len(schema_meta.get('seed_entities') or [])} seed entities"
+        )
+    except Exception as e:
+        logger.warning(f"Failed to auto-load schema for workspace '{workspace}': {e}")
+
+
 def get_default_entity_types() -> list[str]:
     """기본 entity_types 반환"""
     global _default_entity_types
@@ -926,6 +963,21 @@ async def validate_schema(request: CreateTemplateRequest):
 # =============================================================================
 
 
+class SeedEntityItem(BaseModel):
+    """시드 엔티티 항목"""
+
+    keyword: str = Field(..., description="주요 키워드")
+    variants: list[str] = Field(default_factory=list, description="변형 표현 목록")
+    entity_type: str = Field(..., description="엔티티 타입")
+    description: Optional[str] = Field(None, description="LLM을 위한 컨텍스트 설명")
+
+
+class SeedEntitiesRequest(BaseModel):
+    """시드 엔티티 저장 요청"""
+
+    seed_entities: list[SeedEntityItem]
+
+
 class ApplySchemaRequest(BaseModel):
     """스키마 적용 요청"""
 
@@ -934,6 +986,9 @@ class ApplySchemaRequest(BaseModel):
     source: Optional[str] = Field(None, description="스키마 출처 (template:name, discovery, custom)")
     entity_type_details: Optional[list[dict]] = Field(
         None, description="엔티티 타입 상세정보 (description, examples, extraction_hints)"
+    )
+    seed_entities: Optional[list[dict]] = Field(
+        None, description="시드 엔티티 목록 (keyword, variants, entity_type, description)"
     )
 
 
@@ -1004,6 +1059,7 @@ async def _save_workspace_schema_to_db(
     source: str | None = None,
     applied_at: str | None = None,
     entity_type_details: list[dict] | None = None,
+    seed_entities: list[dict] | None = None,
 ) -> bool:
     """DB에 워크스페이스 스키마 저장"""
     storage = await _get_schema_storage()
@@ -1015,6 +1071,7 @@ async def _save_workspace_schema_to_db(
             source=source,
             applied_at=applied_at,
             entity_type_details=entity_type_details,
+            seed_entities=seed_entities,
         )
     return False
 
@@ -1044,6 +1101,7 @@ async def _get_workspace_schema_meta(workspace: str) -> dict[str, Any]:
             "entity_types": db_schema.get("entity_types"),
             "relation_types": db_schema.get("relation_types", []),
             "entity_type_details": db_schema.get("entity_type_details"),
+            "seed_entities": db_schema.get("seed_entities"),
         }
         _schema_cache_loaded.add(workspace)
         logger.debug(f"Loaded schema from DB for workspace '{workspace}'")
@@ -1057,6 +1115,7 @@ async def _get_workspace_schema_meta(workspace: str) -> dict[str, Any]:
             "entity_types": None,
             "relation_types": None,
             "entity_type_details": None,
+            "seed_entities": None,
         }
     _schema_cache_loaded.add(workspace)
     return _workspace_schema_cache[workspace]
@@ -1069,6 +1128,7 @@ def _update_schema_cache(
     source: str | None = None,
     applied_at: str | None = None,
     entity_type_details: list[dict] | None = None,
+    seed_entities: list[dict] | None = None,
 ):
     """스키마 캐시 업데이트 (메모리)"""
     global _workspace_schema_cache
@@ -1078,6 +1138,7 @@ def _update_schema_cache(
         "entity_types": entity_types,
         "relation_types": relation_types,
         "entity_type_details": entity_type_details,
+        "seed_entities": seed_entities,
     }
     _schema_cache_loaded.add(workspace)
 
@@ -1106,6 +1167,9 @@ async def get_current_schema(request: Request):
         # entity_type_details도 반환 (DB에서 로드된 것 포함)
         current_entity_type_details = schema_meta.get("entity_type_details")
 
+        # seed_entities도 반환
+        current_seed_entities = schema_meta.get("seed_entities")
+
         # DB에서 로드한 스키마가 있고 RAG addon_params에 아직 반영되지 않았으면 적용
         workspace_rag = await _get_workspace_rag(workspace)
         if (
@@ -1118,6 +1182,10 @@ async def get_current_schema(request: Request):
                 workspace_rag.addon_params["entity_type_details"] = current_entity_type_details
             else:
                 workspace_rag.addon_params.pop("entity_type_details", None)
+            if current_seed_entities:
+                workspace_rag.addon_params["seed_entities"] = current_seed_entities
+            else:
+                workspace_rag.addon_params.pop("seed_entities", None)
 
         return ApiResponse(
             success=True,
@@ -1125,6 +1193,7 @@ async def get_current_schema(request: Request):
                 "entity_types": list(current_entity_types),
                 "relation_types": current_relation_types,
                 "entity_type_details": current_entity_type_details,
+                "seed_entities": current_seed_entities,
                 "source": schema_meta.get("source"),
                 "applied_at": schema_meta.get("applied_at"),
                 "is_default": current_entity_types == get_default_entity_types(),
@@ -1198,6 +1267,11 @@ async def apply_schema(request: Request, schema_request: ApplySchemaRequest):
             schema_request, entity_types
         )
 
+        # seed_entities 처리 (요청에 있으면 사용, 없으면 기존 유지)
+        seed_entities = schema_request.seed_entities
+        if seed_entities is None:
+            seed_entities = schema_meta.get("seed_entities")
+
         # 이전 entity_types 저장
         old_entity_types = schema_meta.get("entity_types") or get_default_entity_types()
         old_relation_types = schema_meta.get("relation_types") or []
@@ -1214,6 +1288,7 @@ async def apply_schema(request: Request, schema_request: ApplySchemaRequest):
             source=schema_request.source,
             applied_at=applied_at,
             entity_type_details=entity_type_details,
+            seed_entities=seed_entities,
         )
 
         # 메모리 캐시 업데이트
@@ -1224,6 +1299,7 @@ async def apply_schema(request: Request, schema_request: ApplySchemaRequest):
             source=schema_request.source,
             applied_at=applied_at,
             entity_type_details=entity_type_details,
+            seed_entities=seed_entities,
         )
 
         # 워크스페이스별 RAG 인스턴스의 addon_params 업데이트
@@ -1233,6 +1309,10 @@ async def apply_schema(request: Request, schema_request: ApplySchemaRequest):
                 workspace_rag.addon_params["entity_type_details"] = entity_type_details
             else:
                 workspace_rag.addon_params.pop("entity_type_details", None)
+            if seed_entities:
+                workspace_rag.addon_params["seed_entities"] = seed_entities
+            else:
+                workspace_rag.addon_params.pop("seed_entities", None)
 
         logger.info(
             f"Schema applied for workspace '{workspace}': "
@@ -1296,6 +1376,7 @@ async def reset_schema(request: Request):
         if workspace_rag and hasattr(workspace_rag, "addon_params"):
             workspace_rag.addon_params["entity_types"] = list(default_types)
             workspace_rag.addon_params.pop("entity_type_details", None)
+            workspace_rag.addon_params.pop("seed_entities", None)
 
         logger.info(
             f"Schema reset for workspace '{workspace}': {len(default_types)} entity types "
@@ -1450,6 +1531,9 @@ async def merge_apply(request: Request, merge_request: MergeApplyRequest):
             # 중복 포함 (기존 것 유지, 새것 추가)
             merged_result = current_types + truly_new
 
+        # 기존 seed_entities 유지
+        current_seed_entities = schema_meta.get("seed_entities")
+
         # 타임스탬프
         from datetime import datetime
         applied_at = datetime.now().isoformat()
@@ -1462,6 +1546,7 @@ async def merge_apply(request: Request, merge_request: MergeApplyRequest):
             relation_types=current_relation_types,  # 기존 관계 타입 유지
             source=merge_source,
             applied_at=applied_at,
+            seed_entities=current_seed_entities,
         )
 
         # 메모리 캐시 업데이트
@@ -1471,6 +1556,7 @@ async def merge_apply(request: Request, merge_request: MergeApplyRequest):
             relation_types=current_relation_types,
             source=merge_source,
             applied_at=applied_at,
+            seed_entities=current_seed_entities,
         )
 
         # 워크스페이스별 RAG 인스턴스 업데이트
@@ -1503,4 +1589,170 @@ async def merge_apply(request: Request, merge_request: MergeApplyRequest):
         raise
     except Exception as e:
         logger.error(f"Failed to apply merge: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Seed Entities CRUD API
+# =============================================================================
+
+
+@router.get("/seed-entities", summary="시드 엔티티 조회")
+async def get_seed_entities(request: Request):
+    """현재 워크스페이스의 시드 엔티티를 조회합니다."""
+    try:
+        if get_rag_instance() is None:
+            raise HTTPException(status_code=503, detail="RAG instance not available")
+
+        workspace = _get_workspace_from_request(request)
+        schema_meta = await _get_workspace_schema_meta(workspace)
+
+        seed_entities = schema_meta.get("seed_entities") or []
+
+        return ApiResponse(
+            success=True,
+            data={
+                "seed_entities": seed_entities,
+                "count": len(seed_entities),
+                "workspace": workspace,
+            },
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get seed entities: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/seed-entities", summary="시드 엔티티 저장")
+async def save_seed_entities(request: Request, seed_request: SeedEntitiesRequest):
+    """시드 엔티티를 저장합니다 (전체 교체)."""
+    try:
+        if get_rag_instance() is None:
+            raise HTTPException(status_code=503, detail="RAG instance not available")
+
+        workspace = _get_workspace_from_request(request)
+        workspace_rag = await _get_workspace_rag(workspace)
+        schema_meta = await _get_workspace_schema_meta(workspace)
+
+        # Convert to dict list
+        seed_entities = [item.model_dump() for item in seed_request.seed_entities]
+
+        # 기존 스키마 필드 유지하면서 seed_entities만 업데이트
+        entity_types = schema_meta.get("entity_types") or get_default_entity_types()
+        relation_types = schema_meta.get("relation_types") or []
+        entity_type_details = schema_meta.get("entity_type_details")
+        source = schema_meta.get("source")
+        applied_at = schema_meta.get("applied_at")
+
+        # DB에 저장
+        db_saved = await _save_workspace_schema_to_db(
+            workspace=workspace,
+            entity_types=entity_types,
+            relation_types=relation_types,
+            source=source,
+            applied_at=applied_at,
+            entity_type_details=entity_type_details,
+            seed_entities=seed_entities,
+        )
+
+        # 캐시 업데이트
+        _update_schema_cache(
+            workspace=workspace,
+            entity_types=entity_types,
+            relation_types=relation_types,
+            source=source,
+            applied_at=applied_at,
+            entity_type_details=entity_type_details,
+            seed_entities=seed_entities,
+        )
+
+        # addon_params 업데이트
+        if workspace_rag and hasattr(workspace_rag, "addon_params"):
+            if seed_entities:
+                workspace_rag.addon_params["seed_entities"] = seed_entities
+            else:
+                workspace_rag.addon_params.pop("seed_entities", None)
+
+        logger.info(
+            f"Seed entities saved for workspace '{workspace}': {len(seed_entities)} entities"
+        )
+
+        return ApiResponse(
+            success=True,
+            data={
+                "seed_entities": seed_entities,
+                "count": len(seed_entities),
+                "workspace": workspace,
+                "persisted": db_saved,
+            },
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to save seed entities: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/seed-entities", summary="시드 엔티티 초기화")
+async def delete_seed_entities(request: Request):
+    """현재 워크스페이스의 시드 엔티티를 모두 삭제합니다."""
+    try:
+        if get_rag_instance() is None:
+            raise HTTPException(status_code=503, detail="RAG instance not available")
+
+        workspace = _get_workspace_from_request(request)
+        workspace_rag = await _get_workspace_rag(workspace)
+        schema_meta = await _get_workspace_schema_meta(workspace)
+
+        # 기존 스키마 필드 유지하면서 seed_entities만 초기화
+        entity_types = schema_meta.get("entity_types") or get_default_entity_types()
+        relation_types = schema_meta.get("relation_types") or []
+        entity_type_details = schema_meta.get("entity_type_details")
+        source = schema_meta.get("source")
+        applied_at = schema_meta.get("applied_at")
+
+        # DB에 저장 (seed_entities=None)
+        db_saved = await _save_workspace_schema_to_db(
+            workspace=workspace,
+            entity_types=entity_types,
+            relation_types=relation_types,
+            source=source,
+            applied_at=applied_at,
+            entity_type_details=entity_type_details,
+            seed_entities=None,
+        )
+
+        # 캐시 업데이트
+        _update_schema_cache(
+            workspace=workspace,
+            entity_types=entity_types,
+            relation_types=relation_types,
+            source=source,
+            applied_at=applied_at,
+            entity_type_details=entity_type_details,
+            seed_entities=None,
+        )
+
+        # addon_params에서 제거
+        if workspace_rag and hasattr(workspace_rag, "addon_params"):
+            workspace_rag.addon_params.pop("seed_entities", None)
+
+        logger.info(f"Seed entities cleared for workspace '{workspace}'")
+
+        return ApiResponse(
+            success=True,
+            data={
+                "cleared": True,
+                "workspace": workspace,
+                "persisted": db_saved,
+            },
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to clear seed entities: {e}")
         raise HTTPException(status_code=500, detail=str(e))

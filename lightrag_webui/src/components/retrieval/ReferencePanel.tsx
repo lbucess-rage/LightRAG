@@ -1,10 +1,12 @@
-import { useState, useMemo } from 'react'
-import { ReferenceItem, StructuredContentItem } from '@/api/lightrag'
-import { ChevronDownIcon, DownloadIcon, ExternalLinkIcon, ImageIcon, FileTextIcon, BookOpenIcon, XIcon } from 'lucide-react'
+import { useState, useMemo, useEffect, useRef } from 'react'
+import { ReferenceItem, StructuredContentItem, BoardViewResponse, viewBoardPost } from '@/api/lightrag'
+import { ChevronDownIcon, DownloadIcon, ExternalLinkIcon, ImageIcon, FileTextIcon, BookOpenIcon, XIcon, TableIcon, EyeIcon, Loader2Icon } from 'lucide-react'
 import Button from '@/components/ui/Button'
 import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { toast } from 'sonner'
+import { BoardPostDialog } from '@/components/board/BoardPostDialog'
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
 
@@ -40,10 +42,26 @@ function getImageCaption(item: StructuredContentItem): string {
     || ''
 }
 
+function getTableCaption(item: StructuredContentItem): string {
+  return item.table?.caption?.join(' ') || safeString(item.entity?.summary) || ''
+}
+
 function isViewableInBrowser(filePath: string): boolean {
   const ext = filePath.split('.').pop()?.toLowerCase() || ''
   return ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico'].includes(ext)
 }
+
+/** Board URL: starts with http(s):// and has no download_url (board ingestion doesn't create download links) */
+function isBoardUrl(reference: ReferenceItem): boolean {
+  return /^https?:\/\//.test(reference.file_path) && !reference.download_url
+}
+
+/** Check if file_path is an external URL */
+function isExternalUrl(filePath: string): boolean {
+  return /^https?:\/\//.test(filePath)
+}
+
+// formatBoardBody, formatDate are in @/components/board/BoardPostDialog
 
 function getScoreColor(score: number): string {
   if (score >= 0.5) return 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
@@ -57,52 +75,90 @@ function getContentText(item: StructuredContentItem): string {
   return safeString(item.analysis?.description) || safeString(item.entity?.summary) || ''
 }
 
+/** Resolve score: prefer item.score (embedded), fallback to parallel scores array */
+function resolveScore(
+  item: StructuredContentItem,
+  allItems: StructuredContentItem[],
+  scores?: (number | null)[]
+): number | null {
+  if (item.score !== undefined && item.score !== null) return item.score
+  if (!scores) return null
+  const idx = allItems.indexOf(item)
+  return idx >= 0 ? (scores[idx] ?? null) : null
+}
+
+/** Highlight evidence snippets within text by wrapping matches in <mark> */
+function highlightEvidence(text: string, snippets: string[]): React.ReactNode {
+  const escaped = snippets
+    .filter(s => s.length >= 10) // skip short snippets to avoid false positives
+    .map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  if (escaped.length === 0) return text
+
+  const pattern = new RegExp(`(${escaped.join('|')})`, 'gi')
+  const parts = text.split(pattern)
+  if (parts.length === 1) return text
+
+  return parts.map((part, i) => {
+    const isMatch = escaped.some(s => part.toLowerCase().includes(s.toLowerCase()))
+    return isMatch
+      ? <mark key={i} className="bg-yellow-200 dark:bg-yellow-800/60 rounded-sm px-0.5">{part}</mark>
+      : part
+  })
+}
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-type ScoredImage = {
+type ScoredVisualItem = {
   item: StructuredContentItem
   score: number | null
-  src: string
+  type: 'image' | 'table'
+  /** image src (only for images) */
+  src?: string
   caption: string
   pageInfo: string
 }
 
-// ─── Deduplication & Scoring ─────────────────────────────────────────────────
+// ─── Build Visual Items (images + tables, deduplicated, scored, sorted) ─────
 
-function buildScoredImages(
-  images: StructuredContentItem[],
+function buildVisualItems(
   allItems: StructuredContentItem[],
   scores?: (number | null)[],
   t?: (key: string, opts?: Record<string, unknown>) => string
-): ScoredImage[] {
-  const result: ScoredImage[] = []
-  const seenUrls = new Map<string, number>() // url -> index in result
+): ScoredVisualItem[] {
+  const result: ScoredVisualItem[] = []
+  const seenImageUrls = new Map<string, number>() // url -> index in result
 
-  for (const img of images) {
-    const src = getImageSrc(img.image)
-    if (!src) continue
+  for (const item of allItems) {
+    if (item.type === 'image') {
+      const src = getImageSrc(item.image)
+      if (!src) continue
 
-    // Find the score for this item from the parallel scores array
-    const idx = allItems.indexOf(img)
-    const score = scores && idx >= 0 ? (scores[idx] ?? null) : null
+      const score = resolveScore(item, allItems, scores)
+      const caption = getImageCaption(item)
+      const pageInfo = item.source?.page_idx !== undefined && t
+        ? `${t('retrievePanel.references.page')} ${item.source.page_idx + 1}`
+        : ''
 
-    const caption = getImageCaption(img)
-    const pageInfo = img.source?.page_idx !== undefined && t
-      ? `${t('retrievePanel.references.page')} ${img.source.page_idx + 1}`
-      : ''
-
-    // Dedup by URL: keep the one with higher score
-    const existingIdx = seenUrls.get(src)
-    if (existingIdx !== undefined) {
-      const existing = result[existingIdx]
-      if (score !== null && (existing.score === null || score > existing.score)) {
-        result[existingIdx] = { item: img, score, src, caption, pageInfo }
+      // Dedup by URL: keep the one with higher score
+      const existingIdx = seenImageUrls.get(src)
+      if (existingIdx !== undefined) {
+        const existing = result[existingIdx]
+        if (score !== null && (existing.score === null || score > existing.score)) {
+          result[existingIdx] = { item, score, type: 'image', src, caption, pageInfo }
+        }
+        continue
       }
-      continue
-    }
 
-    seenUrls.set(src, result.length)
-    result.push({ item: img, score, src, caption, pageInfo })
+      seenImageUrls.set(src, result.length)
+      result.push({ item, score, type: 'image', src, caption, pageInfo })
+    } else if (item.type === 'table') {
+      const score = resolveScore(item, allItems, scores)
+      const caption = getTableCaption(item)
+      const pageInfo = item.source?.page_idx !== undefined && t
+        ? `${t('retrievePanel.references.page')} ${item.source.page_idx + 1}`
+        : ''
+      result.push({ item, score, type: 'table', caption, pageInfo })
+    }
   }
 
   // Sort by score descending (nulls last)
@@ -146,113 +202,59 @@ function ImagePreviewModal({
   )
 }
 
-// ─── Best Image Section (top image shown prominently) ────────────────────────
+// ─── Content Card (unified image/table card for 2-column grid) ───────────────
 
-function BestImageSection({ image, onPreview }: { image: ScoredImage; onPreview: () => void }) {
-  const { t } = useTranslation()
+function ContentCard({ visual, onPreview }: {
+  visual: ScoredVisualItem
+  onPreview?: () => void
+}) {
+  const bodyMarkdown = visual.item.table?.body_markdown || safeString(visual.item.content) || ''
+
   return (
-    <div className="mt-2">
-      <div className="flex items-center gap-1.5 mb-1.5">
-        <span className="text-[10px] font-medium text-primary/80 bg-primary/10 px-1.5 py-0.5 rounded">
-          {t('retrievePanel.references.bestMatch')}
-        </span>
-        {image.score !== null && (
-          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono ${getScoreColor(image.score)}`}>
-            {image.score.toFixed(4)}
+    <div className="border rounded-md bg-muted/20 overflow-hidden flex flex-col">
+      {/* Card header: type icon + score + page */}
+      <div className="flex items-center gap-1.5 px-2 py-1.5 bg-muted/30 border-b">
+        {visual.type === 'image'
+          ? <ImageIcon className="h-3 w-3 shrink-0 text-muted-foreground" />
+          : <TableIcon className="h-3 w-3 shrink-0 text-muted-foreground" />
+        }
+        {visual.score !== null && (
+          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono ${getScoreColor(visual.score)}`}>
+            {visual.score.toFixed(4)}
           </span>
         )}
-        {image.pageInfo && (
-          <span className="text-[10px] text-muted-foreground">{image.pageInfo}</span>
+        {visual.pageInfo && (
+          <span className="text-[10px] text-muted-foreground">{visual.pageInfo}</span>
         )}
       </div>
-      <img
-        src={image.src}
-        alt={image.caption || 'Best match'}
-        className="max-h-64 w-full object-contain rounded border bg-white dark:bg-gray-900 cursor-pointer"
-        onClick={onPreview}
-        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
-      />
-      {image.caption && (
-        <div className="text-xs text-muted-foreground mt-1 line-clamp-2">{image.caption}</div>
-      )}
-    </div>
-  )
-}
 
-// ─── Other Images as clickable description tags ──────────────────────────────
+      {/* Card body */}
+      <div className="p-2 flex-1">
+        {visual.type === 'image' && visual.src && (
+          <>
+            <img
+              src={visual.src}
+              alt={visual.caption || 'Image'}
+              className="max-h-48 w-full object-contain rounded bg-white dark:bg-gray-900 cursor-pointer"
+              onClick={onPreview}
+              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+            />
+            {visual.caption && (
+              <div className="text-[11px] text-muted-foreground mt-1 line-clamp-2">{visual.caption}</div>
+            )}
+          </>
+        )}
 
-function ImageTagList({ images, onPreview }: {
-  images: ScoredImage[]
-  onPreview: (img: ScoredImage) => void
-}) {
-  const { t } = useTranslation()
-  const [expandedIdx, setExpandedIdx] = useState<number | null>(null)
-
-  if (images.length === 0) return null
-
-  return (
-    <div className="mt-2">
-      <span className="text-[10px] font-medium text-muted-foreground mb-1 block">
-        {t('retrievePanel.references.otherImages')} ({images.length})
-      </span>
-      <div className="flex flex-wrap gap-1.5">
-        {images.map((img, idx) => {
-          const label = img.caption
-            ? (img.caption.length > 40 ? img.caption.slice(0, 40) + '...' : img.caption)
-            : `${t('retrievePanel.references.imageLabel')} ${idx + 2}`
-          const isExpanded = expandedIdx === idx
-
-          return (
-            <div key={idx} className="flex flex-col">
-              <button
-                className={`inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border transition-colors ${
-                  isExpanded
-                    ? 'bg-primary/10 border-primary/30 text-primary'
-                    : 'bg-muted/40 border-border hover:bg-muted/60 text-muted-foreground hover:text-foreground'
-                }`}
-                onClick={() => setExpandedIdx(isExpanded ? null : idx)}
-                title={img.caption || undefined}
-              >
-                <ImageIcon className="h-3 w-3 shrink-0" />
-                <span className="truncate max-w-[200px]">{label}</span>
-                {img.score !== null && (
-                  <span className="text-[9px] font-mono opacity-60 ml-0.5">{img.score.toFixed(2)}</span>
-                )}
-              </button>
-              {isExpanded && (
-                <div className="mt-1.5 mb-1">
-                  <img
-                    src={img.src}
-                    alt={img.caption || `Image ${idx + 2}`}
-                    className="max-h-48 w-auto object-contain rounded border bg-white dark:bg-gray-900 cursor-pointer"
-                    onClick={() => onPreview(img)}
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
-                  />
-                  {img.pageInfo && (
-                    <span className="text-[10px] text-muted-foreground mt-0.5 block">{img.pageInfo}</span>
-                  )}
-                </div>
-              )}
+        {visual.type === 'table' && (
+          <>
+            {visual.caption && (
+              <div className="text-[11px] font-medium mb-1 text-muted-foreground line-clamp-2">{visual.caption}</div>
+            )}
+            <div className="text-xs prose dark:prose-invert max-w-none overflow-x-auto [&_table]:text-xs [&_th]:px-2 [&_th]:py-1 [&_td]:px-2 [&_td]:py-1">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{bodyMarkdown}</ReactMarkdown>
             </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-// ─── Table Renderer ──────────────────────────────────────────────────────────
-
-function TableRenderer({ item }: { item: StructuredContentItem }) {
-  const tableData = item.table
-  const bodyMarkdown = tableData?.body_markdown || safeString(item.content) || ''
-  const caption = tableData?.caption?.join(' ') || safeString(item.entity?.summary) || ''
-
-  return (
-    <div className="mt-2 border rounded p-2 bg-muted/30 overflow-x-auto">
-      {caption && <div className="text-xs font-medium mb-1 text-muted-foreground">{caption}</div>}
-      <div className="text-xs prose dark:prose-invert max-w-none [&_table]:text-xs [&_th]:px-2 [&_th]:py-1 [&_td]:px-2 [&_td]:py-1">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{bodyMarkdown}</ReactMarkdown>
+          </>
+        )}
       </div>
     </div>
   )
@@ -260,12 +262,19 @@ function TableRenderer({ item }: { item: StructuredContentItem }) {
 
 // ─── Collapsible Text Content ────────────────────────────────────────────────
 
-function CollapsibleTextContent({ items, plainContent }: {
+function CollapsibleTextContent({ items, plainContent, evidence, autoOpen }: {
   items: StructuredContentItem[]
   plainContent?: string[]
+  evidence?: string[]
+  autoOpen?: boolean
 }) {
   const { t } = useTranslation()
   const [isOpen, setIsOpen] = useState(false)
+
+  // Auto-open when evidence highlight is triggered
+  useEffect(() => {
+    if (autoOpen) setIsOpen(true)
+  }, [autoOpen])
 
   const textItems = items.filter(item => {
     const text = getContentText(item)
@@ -274,6 +283,9 @@ function CollapsibleTextContent({ items, plainContent }: {
 
   const totalCount = textItems.length + (plainContent?.length || 0)
   if (totalCount === 0) return null
+
+  const renderText = (text: string) =>
+    evidence && evidence.length > 0 ? highlightEvidence(text, evidence) : text
 
   return (
     <div className="mt-2">
@@ -292,13 +304,13 @@ function CollapsibleTextContent({ items, plainContent }: {
             return (
               <div key={idx} className="text-xs text-muted-foreground bg-muted/30 rounded p-2 whitespace-pre-wrap break-words max-h-40 overflow-y-auto">
                 {item.type === 'equation' && <span className="text-[10px] font-mono text-primary/60 mr-1">[eq]</span>}
-                {text}
+                {renderText(text)}
               </div>
             )
           })}
           {plainContent?.map((chunk, idx) => (
             <div key={`plain-${idx}`} className="text-xs text-muted-foreground bg-muted/30 rounded p-2 whitespace-pre-wrap break-words max-h-40 overflow-y-auto">
-              {typeof chunk === 'string' ? chunk : safeString(chunk)}
+              {renderText(typeof chunk === 'string' ? chunk : safeString(chunk))}
             </div>
           ))}
         </div>
@@ -307,28 +319,62 @@ function CollapsibleTextContent({ items, plainContent }: {
   )
 }
 
+// BoardPostDialog imported from @/components/board/BoardPostDialog
+
 // ─── Reference Card ──────────────────────────────────────────────────────────
 
-function ReferenceCard({ reference }: { reference: ReferenceItem }) {
+function ReferenceCard({ reference, isHighlighted }: {
+  reference: ReferenceItem
+  isHighlighted?: boolean
+}) {
   const { t } = useTranslation()
   const [isExpanded, setIsExpanded] = useState(false)
   const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null)
+  const [boardLoading, setBoardLoading] = useState(false)
+  const [boardData, setBoardData] = useState<BoardViewResponse | null>(null)
 
-  const fileName = reference.file_path.split('/').pop() || reference.file_path
+  // Auto-expand when highlighted and has evidence
+  useEffect(() => {
+    if (isHighlighted && reference.evidence?.length) {
+      setIsExpanded(true)
+    }
+  }, [isHighlighted, reference.evidence])
+
+  const isBoardRef = isBoardUrl(reference)
+
+  const handleViewBoardPost = async () => {
+    setBoardLoading(true)
+    try {
+      const data = await viewBoardPost(reference.file_path)
+      if (data.success) {
+        setBoardData(data)
+      } else {
+        toast.error(data.error || t('boardView.fetchError'))
+      }
+    } catch {
+      toast.error(t('boardView.fetchError'))
+    } finally {
+      setBoardLoading(false)
+    }
+  }
+
+  const isUrlRef = isExternalUrl(reference.file_path)
+  // Board refs: show full URL; others: show last path segment
+  const displayName = isBoardRef
+    ? reference.file_path
+    : (reference.file_path.split('/').pop() || reference.file_path)
 
   const allStructured = reference.structured_content || []
-  const images = allStructured.filter(sc => sc.type === 'image')
-  const tables = allStructured.filter(sc => sc.type === 'table')
   const others = allStructured.filter(sc => sc.type !== 'image' && sc.type !== 'table')
 
-  // Build deduplicated, scored, sorted image list
-  const scoredImages = useMemo(
-    () => buildScoredImages(images, allStructured, reference.scores, t),
-    [images, allStructured, reference.scores, t]
+  // Build deduplicated, scored, sorted visual items (images + tables merged)
+  const visualItems = useMemo(
+    () => buildVisualItems(allStructured, reference.scores, t),
+    [allStructured, reference.scores, t]
   )
 
-  const bestImage = scoredImages.length > 0 ? scoredImages[0] : null
-  const otherImages = scoredImages.slice(1)
+  const imageCount = visualItems.filter(v => v.type === 'image').length
+  const tableCount = visualItems.filter(v => v.type === 'table').length
 
   const hasContent = allStructured.length > 0 || (reference.content && reference.content.length > 0)
 
@@ -342,7 +388,30 @@ function ReferenceCard({ reference }: { reference: ReferenceItem }) {
         {hasContent && (
           <ChevronDownIcon className={`h-3 w-3 shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
         )}
-        <span className="text-xs font-medium truncate flex-1" title={reference.file_path}>{fileName}</span>
+
+        {/* File name / URL link */}
+        {isBoardRef ? (
+          <span
+            className="text-xs font-medium truncate flex-1 text-primary hover:underline cursor-pointer"
+            title={reference.file_path}
+            onClick={(e) => { e.stopPropagation(); handleViewBoardPost() }}
+          >
+            {boardLoading ? t('boardView.loading') : displayName}
+          </span>
+        ) : isUrlRef ? (
+          <a
+            href={reference.file_path}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs font-medium truncate flex-1 text-primary hover:underline"
+            title={reference.file_path}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {displayName}
+          </a>
+        ) : (
+          <span className="text-xs font-medium truncate flex-1" title={reference.file_path}>{displayName}</span>
+        )}
 
         {/* Score badge */}
         {reference.score !== undefined && reference.score !== null && (
@@ -352,14 +421,32 @@ function ReferenceCard({ reference }: { reference: ReferenceItem }) {
         )}
 
         {/* Content summary badges */}
-        {scoredImages.length > 0 && (
+        {imageCount > 0 && (
           <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
-            <ImageIcon className="h-2.5 w-2.5" />{scoredImages.length}
+            <ImageIcon className="h-2.5 w-2.5" />{imageCount}
+          </span>
+        )}
+        {tableCount > 0 && (
+          <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+            <TableIcon className="h-2.5 w-2.5" />{tableCount}
           </span>
         )}
 
-        {/* View/Download buttons */}
+        {/* Action buttons */}
         <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+          {isBoardRef && (
+            <button
+              onClick={handleViewBoardPost}
+              disabled={boardLoading}
+              className="p-1 rounded hover:bg-muted transition-colors"
+              title={t('boardView.viewPost')}
+            >
+              {boardLoading
+                ? <Loader2Icon className="h-3 w-3 text-muted-foreground animate-spin" />
+                : <EyeIcon className="h-3 w-3 text-muted-foreground" />
+              }
+            </button>
+          )}
           {reference.download_url && isViewableInBrowser(reference.file_path) && (
             <a href={reference.download_url} target="_blank" rel="noopener noreferrer"
               className="p-1 rounded hover:bg-muted transition-colors"
@@ -377,29 +464,21 @@ function ReferenceCard({ reference }: { reference: ReferenceItem }) {
         </div>
       </div>
 
-      {/* Content */}
+      {/* Content — 2-column grid for visual items */}
       {isExpanded && hasContent && (
         <div className="px-3 pb-3 border-t">
-          {/* Best matching image — shown prominently */}
-          {bestImage && (
-            <BestImageSection
-              image={bestImage}
-              onPreview={() => setPreviewImage({ url: bestImage.src, title: bestImage.caption || fileName })}
-            />
-          )}
-
-          {/* Other images — as clickable description tags */}
-          <ImageTagList
-            images={otherImages}
-            onPreview={(img) => setPreviewImage({ url: img.src, title: img.caption || fileName })}
-          />
-
-          {/* Tables */}
-          {tables.length > 0 && (
-            <div className="mt-2">
-              <span className="text-xs font-medium text-muted-foreground">{t('retrievePanel.references.tables')} ({tables.length})</span>
-              {tables.map((table, idx) => (
-                <TableRenderer key={idx} item={table} />
+          {/* Images + Tables in 2-column grid, sorted by score */}
+          {visualItems.length > 0 && (
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {visualItems.map((visual, idx) => (
+                <ContentCard
+                  key={idx}
+                  visual={visual}
+                  onPreview={visual.type === 'image' && visual.src
+                    ? () => setPreviewImage({ url: visual.src!, title: visual.caption || displayName })
+                    : undefined
+                  }
+                />
               ))}
             </div>
           )}
@@ -408,6 +487,8 @@ function ReferenceCard({ reference }: { reference: ReferenceItem }) {
           <CollapsibleTextContent
             items={others}
             plainContent={allStructured.length === 0 ? reference.content : undefined}
+            evidence={reference.evidence}
+            autoOpen={isHighlighted && (reference.evidence?.length ?? 0) > 0}
           />
         </div>
       )}
@@ -421,17 +502,58 @@ function ReferenceCard({ reference }: { reference: ReferenceItem }) {
           title={previewImage.title}
         />
       )}
+
+      {/* Board post dialog */}
+      {boardData && (
+        <BoardPostDialog
+          isOpen={true}
+          onClose={() => setBoardData(null)}
+          data={boardData}
+        />
+      )}
     </div>
   )
 }
 
 // ─── Main ReferencePanel ─────────────────────────────────────────────────────
 
-export default function ReferencePanel({ references }: { references: ReferenceItem[] }) {
+export default function ReferencePanel({
+  references,
+  highlightRefId
+}: {
+  references: ReferenceItem[]
+  highlightRefId?: string | null
+}) {
   const { t } = useTranslation()
   const [isExpanded, setIsExpanded] = useState(false)
+  const cardRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
-  if (!references || references.length === 0) return null
+  useEffect(() => {
+    if (highlightRefId) {
+      setIsExpanded(true)
+      setTimeout(() => {
+        const el = cardRefs.current[highlightRefId]
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+          el.classList.add('ring-2', 'ring-primary', 'ring-offset-1')
+          setTimeout(() => el.classList.remove('ring-2', 'ring-primary', 'ring-offset-1'), 2000)
+        }
+      }, 100)
+    }
+  }, [highlightRefId])
+
+  // Sort references by score descending (nulls last)
+  const sortedReferences = useMemo(() =>
+    [...references].sort((a, b) => {
+      if (a.score == null && b.score == null) return 0
+      if (a.score == null) return 1
+      if (b.score == null) return -1
+      return b.score - a.score
+    }),
+    [references]
+  )
+
+  if (!sortedReferences || sortedReferences.length === 0) return null
 
   return (
     <div className="mt-3 border-t pt-3">
@@ -444,14 +566,16 @@ export default function ReferencePanel({ references }: { references: ReferenceIt
         onClick={() => setIsExpanded(!isExpanded)}
       >
         <BookOpenIcon className="h-3.5 w-3.5 shrink-0" />
-        <span>{t('retrievePanel.references.title')} ({references.length})</span>
+        <span>{t('retrievePanel.references.title')} ({sortedReferences.length})</span>
         <ChevronDownIcon className={`h-3.5 w-3.5 shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
       </button>
 
       {isExpanded && (
         <div className="mt-2 space-y-2">
-          {references.map((ref, idx) => (
-            <ReferenceCard key={ref.reference_id || idx} reference={ref} />
+          {sortedReferences.map((ref, idx) => (
+            <div key={ref.reference_id || idx} ref={el => { cardRefs.current[ref.reference_id] = el }}>
+              <ReferenceCard reference={ref} isHighlighted={highlightRefId === ref.reference_id} />
+            </div>
           ))}
         </div>
       )}

@@ -2810,6 +2810,107 @@ def _build_entity_types_guide(
     return "\n".join(lines)
 
 
+def _build_seed_entities_guide(
+    seed_entities: list[dict] | None,
+) -> str:
+    """Build seed entities guide section for extraction prompt.
+
+    Generates a text block that instructs the LLM to forcefully extract
+    specific domain keywords (seed entities) when they appear in the text.
+    """
+    if not seed_entities:
+        return ""
+
+    lines = []
+    lines.append("")
+    lines.append("---Required Entities (Seed Entities)---")
+    lines.append(
+        "The following domain-specific terms are critical keywords. "
+        "If ANY of these terms (or their variants) appear in the text, "
+        "they MUST be extracted as entities with the specified type."
+    )
+    lines.append("")
+
+    for seed in seed_entities:
+        keyword = seed.get("keyword", "")
+        if not keyword:
+            continue
+
+        variants = seed.get("variants", [])
+        entity_type = seed.get("entity_type", "")
+        description = seed.get("description", "")
+
+        line = f"- **{keyword}**"
+        if variants:
+            line += f" (variants: {', '.join(variants)})"
+        if entity_type:
+            line += f" → type: {entity_type}"
+        lines.append(line)
+
+        if description:
+            lines.append(f"  {description}")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _find_missing_seed_entities(
+    seed_entities: list[dict],
+    extracted_nodes: dict,
+    chunk_text: str,
+) -> list[dict]:
+    """Find seed entities that appear in text but were not extracted.
+
+    Args:
+        seed_entities: List of seed entity definitions
+        extracted_nodes: Dict of already extracted entity nodes
+        chunk_text: The source text chunk
+
+    Returns:
+        List of missing seed entity dicts
+    """
+    missing = []
+    text_lower = chunk_text.lower()
+
+    # Build set of already extracted entity names (lowercased)
+    extracted_names_lower = set()
+    for name in extracted_nodes:
+        extracted_names_lower.add(name.lower())
+        # Also add without spaces for fuzzy matching
+        extracted_names_lower.add(name.lower().replace(" ", ""))
+
+    for seed in seed_entities:
+        keyword = seed.get("keyword", "")
+        if not keyword:
+            continue
+
+        # Check if keyword or any variant appears in text
+        all_forms = [keyword] + seed.get("variants", [])
+        found_in_text = False
+        for form in all_forms:
+            if form.lower() in text_lower:
+                found_in_text = True
+                break
+
+        if not found_in_text:
+            continue
+
+        # Check if already extracted (by keyword or any variant)
+        already_extracted = False
+        for form in all_forms:
+            if form.lower() in extracted_names_lower:
+                already_extracted = True
+                break
+            if form.lower().replace(" ", "") in extracted_names_lower:
+                already_extracted = True
+                break
+
+        if not already_extracted:
+            missing.append(seed)
+
+    return missing
+
+
 async def extract_entities(
     chunks: dict[str, TextChunkSchema],
     global_config: dict[str, str],
@@ -2838,9 +2939,20 @@ async def extract_entities(
     entity_type_details = global_config["addon_params"].get(
         "entity_type_details", None
     )
+    seed_entities = global_config["addon_params"].get("seed_entities", None)
+    logger.info(
+        f"Seed entities config: {len(seed_entities) if seed_entities else 0} entries"
+        + (f" — keywords: {[s.get('keyword') for s in seed_entities]}" if seed_entities else "")
+    )
 
     # Build entity types guide for system prompt
     entity_types_guide = _build_entity_types_guide(entity_types, entity_type_details)
+
+    # Append seed entities guide if available
+    seed_entities_guide = _build_seed_entities_guide(seed_entities)
+    if seed_entities_guide:
+        entity_types_guide = entity_types_guide + "\n" + seed_entities_guide
+        logger.info("Seed entities guide injected into extraction prompt")
 
     examples = "\n".join(PROMPTS["entity_extraction_examples"])
 
@@ -2972,6 +3084,25 @@ async def extract_entities(
                 else:
                     # New edge from gleaning stage
                     maybe_edges[edge_key] = list(glean_edges)
+
+        # Post-processing: inject missing seed entities (no additional LLM call)
+        if seed_entities:
+            missing = _find_missing_seed_entities(seed_entities, maybe_nodes, content)
+            for seed in missing:
+                entity_data = dict(
+                    entity_name=seed["keyword"],
+                    entity_type=seed["entity_type"].replace(" ", "").lower(),
+                    description=seed.get("description", f"Seed entity: {seed['keyword']}"),
+                    source_id=chunk_key,
+                    file_path=file_path,
+                    timestamp=timestamp,
+                )
+                maybe_nodes[seed["keyword"]] = [entity_data]
+            if missing:
+                logger.info(
+                    f"Injected {len(missing)} missing seed entities in chunk {chunk_key}: "
+                    f"{[s['keyword'] for s in missing]}"
+                )
 
         # Batch update chunk's llm_cache_list with all collected cache keys
         if cache_keys_collector and text_chunks_storage:
@@ -3974,6 +4105,16 @@ async def _merge_all_chunks(
     return merged_chunks
 
 
+def _make_keyword_list(ll_keywords: str, hl_keywords: str) -> list[str]:
+    """Combine keyword strings into deduplicated list for exact-match boosting."""
+    keywords = []
+    if ll_keywords:
+        keywords.extend(ll_keywords.split(", "))
+    if hl_keywords:
+        keywords.extend(hl_keywords.split(", "))
+    return list(dict.fromkeys(keywords))  # order-preserving dedup
+
+
 async def _build_context_str(
     entities_context: list[dict],
     relations_context: list[dict],
@@ -3984,6 +4125,7 @@ async def _build_context_str(
     chunk_tracking: dict = None,
     entity_id_to_original: dict = None,
     relation_id_to_original: dict = None,
+    query_keywords: list[str] = None,
 ) -> tuple[str, dict[str, Any]]:
     """
     Build the final LLM context string with token processing.
@@ -4067,6 +4209,7 @@ async def _build_context_str(
         global_config=global_config,
         source_type=query_param.mode,
         chunk_token_limit=available_chunk_tokens,  # Pass dynamic limit
+        query_keywords=query_keywords,
     )
 
     # Generate reference list from truncated chunks using the new common function
@@ -4239,6 +4382,7 @@ async def _build_query_context(
         chunk_tracking=search_result["chunk_tracking"],
         entity_id_to_original=truncation_result["entity_id_to_original"],
         relation_id_to_original=truncation_result["relation_id_to_original"],
+        query_keywords=_make_keyword_list(ll_keywords, hl_keywords),
     )
 
     # Convert keywords strings to lists and add complete metadata to raw_data

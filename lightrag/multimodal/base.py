@@ -71,22 +71,89 @@ class BaseModalProcessor:
         self.content_source = None
         self.content_format = "auto"
 
+        # Document-level custom instructions
+        self._document_prompt = ""
+        self._image_prompt = ""
+        self._table_prompt = ""
+
     def set_content_source(self, content_source: Any, content_format: str = "auto"):
         """Set content source for context extraction."""
         self.content_source = content_source
         self.content_format = content_format
 
+    def set_document_instructions(self, document_prompt="", image_prompt="", table_prompt=""):
+        """Set document-level custom instructions for processors."""
+        self._document_prompt = (document_prompt or "").strip()
+        self._image_prompt = (image_prompt or "").strip()
+        self._table_prompt = (table_prompt or "").strip()
+
+    def get_effective_instructions(self, content_type: str) -> str:
+        """Get effective custom instructions with fallback to document_prompt."""
+        if content_type == "image":
+            return self._image_prompt or self._document_prompt
+        elif content_type == "table":
+            return self._table_prompt or self._document_prompt
+        return self._document_prompt
+
+    def get_seed_entities_guide(self) -> str:
+        """Build seed entity naming guide for multimodal prompts."""
+        seed_entities = self.global_config.get("addon_params", {}).get("seed_entities", None)
+        if not seed_entities:
+            return ""
+
+        lines = ["[Seed Entity Naming Guide]",
+                 "When naming entities, use the following canonical names "
+                 "if the content relates to any of these domain terms:"]
+        for seed in seed_entities:
+            keyword = seed.get("keyword", "")
+            if not keyword:
+                continue
+            entity_type = seed.get("entity_type", "")
+            variants = seed.get("variants", [])
+            description = seed.get("description", "")
+            line = f"- {keyword}"
+            if entity_type:
+                line += f" (type: {entity_type})"
+            if variants:
+                line += f" [also known as: {', '.join(variants)}]"
+            lines.append(line)
+            if description:
+                lines.append(f"  {description}")
+        lines.append("Prefer these exact canonical names over generic or abbreviated alternatives.")
+        return "\n".join(lines)
+
     def _get_context_for_item(self, item_info: Dict[str, Any]) -> str:
-        """Get context for current processing item."""
-        if not self.content_source:
-            return ""
-        try:
-            return self.context_extractor.extract_context(
-                self.content_source, item_info, self.content_format
-            )
-        except Exception as e:
-            logger.error(f"Error getting context for item {item_info}: {e}")
-            return ""
+        """Get context for current processing item.
+
+        Combines text-based context from ContextExtractor with
+        sibling analysis results (already-processed items on the same page).
+        """
+        parts = []
+
+        # 1. Standard text context from surrounding pages
+        if self.content_source:
+            try:
+                text_ctx = self.context_extractor.extract_context(
+                    self.content_source, item_info, self.content_format
+                )
+                if text_ctx and text_ctx.strip():
+                    parts.append(text_ctx)
+            except Exception as e:
+                logger.error(f"Error getting context for item {item_info}: {e}")
+
+        # 2. Sibling analysis results (already-processed items on the same page)
+        sibling_analyses = item_info.get("sibling_analyses", [])
+        if sibling_analyses:
+            sibling_lines = ["[같은 페이지에서 이미 분석된 항목]"]
+            for sa in sibling_analyses:
+                entity_name = sa.get("entity_name", "")
+                desc = sa.get("description", "")
+                if entity_name and desc:
+                    sibling_lines.append(f"- {entity_name}: {desc}")
+            if len(sibling_lines) > 1:
+                parts.append("\n".join(sibling_lines))
+
+        return "\n\n".join(parts)
 
     async def process_multimodal_content(
         self,

@@ -62,7 +62,7 @@ export default function QuerySettings() {
   )
 
   return (
-    <Card className="flex shrink-0 flex-col w-[500px]">
+    <Card className="flex shrink-0 flex-col w-full h-full">
       <CardHeader className="px-4 pt-4 pb-2">
         <CardTitle>{t('retrievePanel.querySettings.parametersTitle')}</CardTitle>
         <CardDescription className="sr-only">{t('retrievePanel.querySettings.parametersDescription')}</CardDescription>

@@ -57,11 +57,19 @@ class EquationModalProcessor(BaseModalProcessor):
                     response_language=self.response_language,
                 )
 
+            system_prompt = PROMPTS["EQUATION_ANALYSIS_SYSTEM"].format(
+                response_language=self.response_language
+            )
+            effective_instructions = self.get_effective_instructions("equation")
+            if effective_instructions:
+                system_prompt += f"\n\n[Document-Specific Instructions]\n{effective_instructions}"
+            seed_guide = self.get_seed_entities_guide()
+            if seed_guide:
+                system_prompt += f"\n\n{seed_guide}"
+
             response = await self.modal_caption_func(
                 equation_prompt,
-                system_prompt=PROMPTS["EQUATION_ANALYSIS_SYSTEM"].format(
-                    response_language=self.response_language
-                ),
+                system_prompt=system_prompt,
             )
 
             return self._parse_equation_response(response, entity_name)

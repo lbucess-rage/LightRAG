@@ -4,9 +4,8 @@ LightRAG FastAPI Server
 
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.openapi.docs import (
-    get_swagger_ui_html,
     get_swagger_ui_oauth2_redirect_html,
 )
 import os
@@ -68,7 +67,7 @@ from lightrag.api.routers.entity_management_routes import (
 from lightrag.api.routers.workspace_routes import create_workspace_routes
 from lightrag.api.routers.ollama_api import OllamaAPI
 from lightrag.api.routers.ollama_api import set_rag_workspace_getter as set_ollama_rag_workspace_getter
-from lightrag.api.routers.schema_routes import router as schema_router, set_discovery_engine, set_rag_instance
+from lightrag.api.routers.schema_routes import router as schema_router, set_discovery_engine, set_rag_instance, ensure_workspace_schema_loaded
 from lightrag.api.routers.schema_routes import set_rag_workspace_getter as set_schema_rag_workspace_getter
 from lightrag.api.routers.multimodal_routes import (
     create_multimodal_routes,
@@ -87,7 +86,13 @@ from lightrag.api.routers.url_routes import (
     set_vlm_model_func as set_url_vlm_model_func,
     set_llm_model_func as set_url_llm_model_func,
 )
-from lightrag.api.task_manager import init_task_service
+from lightrag.api.routers.board_routes import (
+    create_board_routes,
+    set_rag_workspace_getter as set_board_rag_workspace_getter,
+    set_llm_model_func as set_board_llm_model_func,
+    set_vlm_model_func as set_board_vlm_model_func,
+)
+from lightrag.api.task_manager import get_task_service, init_task_service
 
 from lightrag.utils import logger, set_verbose_debug
 from lightrag.kg.shared_storage import (
@@ -144,7 +149,10 @@ async def get_rag_for_workspace(workspace: str) -> LightRAG:
 
     # Return cached instance if available
     if workspace in _rag_instance_cache:
-        return _rag_instance_cache[workspace]
+        rag = _rag_instance_cache[workspace]
+        # Ensure schema (entity_types, seed_entities) is loaded into addon_params
+        await ensure_workspace_schema_loaded(workspace, rag)
+        return rag
 
     # If no factory config, return default instance
     if not _rag_factory_config:
@@ -162,6 +170,9 @@ async def get_rag_for_workspace(workspace: str) -> LightRAG:
         # Initialize storages (critical for database connections)
         logger.info(f"Initializing storages for workspace: {workspace}")
         await new_rag.initialize_storages()
+
+        # Auto-load schema settings from DB into addon_params
+        await ensure_workspace_schema_loaded(workspace, new_rag)
 
         _rag_instance_cache[workspace] = new_rag
         logger.info(f"RAG instance created, initialized, and cached for workspace: {workspace}")
@@ -469,6 +480,16 @@ def create_app(args):
 
             # Data migration regardless of storage implementation
             await rag.check_and_migrate_data()
+
+            # Set DB reference for task persistence and load recent tasks
+            try:
+                task_svc = get_task_service()
+                task_db = getattr(getattr(rag, 'doc_status', None), 'db', None)
+                if task_db:
+                    task_svc._db = task_db
+                    await task_svc.load_tasks_from_db()
+            except Exception as e:
+                logger.warning(f"Failed to load tasks from DB on startup: {e}")
 
             ASCIIColors.green("\nServer is ready to accept connections! 🚀\n")
 
@@ -1249,6 +1270,7 @@ def create_app(args):
         set_multimodal_rag_workspace_getter(get_rag_for_workspace)
         set_task_rag_workspace_getter(get_rag_for_workspace)
         set_url_rag_workspace_getter(get_rag_for_workspace)
+        set_board_rag_workspace_getter(get_rag_for_workspace)
         logger.info(f"RAG factory config stored, default workspace: {args.workspace or 'base'}")
 
     except Exception as e:
@@ -1305,6 +1327,10 @@ def create_app(args):
     app.include_router(create_url_routes())
     logger.info("URL knowledge ingestion routes initialized")
 
+    # Add Board API Ingestion routes
+    app.include_router(create_board_routes())
+    logger.info("Board API ingestion routes initialized")
+
     # Initialize VLM model function for multimodal processing
     try:
         from lightrag.multimodal.config import MultimodalConfig
@@ -1318,6 +1344,7 @@ def create_app(args):
 
         set_multimodal_llm_func(multimodal_llm_func)
         set_url_llm_model_func(multimodal_llm_func)
+        set_board_llm_model_func(multimodal_llm_func)
 
         # Initialize VLM if configured
         if mm_config.vlm_api_base and mm_config.vlm_model:
@@ -1331,24 +1358,25 @@ def create_app(args):
 
                 async def vlm_model_func(
                     prompt: str,
-                    image_data: str = None,
+                    image_data: str | list[str] = None,
                     system_prompt: str = None,
                     **kwargs,
                 ) -> str:
-                    """Call VLM with optional image data."""
+                    """Call VLM with optional image data (single or multiple images)."""
                     messages = []
                     if system_prompt:
                         messages.append({"role": "system", "content": system_prompt})
 
                     if image_data:
-                        # Multimodal message with image
-                        content = [
-                            {
+                        # Multimodal message with image(s)
+                        content = []
+                        images = image_data if isinstance(image_data, list) else [image_data]
+                        for img in images:
+                            content.append({
                                 "type": "image_url",
-                                "image_url": {"url": f"data:image/png;base64,{image_data}"},
-                            },
-                            {"type": "text", "text": prompt},
-                        ]
+                                "image_url": {"url": f"data:image/png;base64,{img}"},
+                            })
+                        content.append({"type": "text", "text": prompt})
                         messages.append({"role": "user", "content": content})
                     else:
                         messages.append({"role": "user", "content": prompt})
@@ -1363,6 +1391,7 @@ def create_app(args):
 
                 set_vlm_model_func(vlm_model_func)
                 set_url_vlm_model_func(vlm_model_func)
+                set_board_vlm_model_func(vlm_model_func)
                 logger.info(
                     f"Multimodal VLM initialized: {mm_config.vlm_model} at {mm_config.vlm_api_base}"
                 )
@@ -1383,17 +1412,77 @@ def create_app(args):
 
     # Custom Swagger UI endpoint for offline support
     @app.get("/docs", include_in_schema=False)
-    async def custom_swagger_ui_html():
-        """Custom Swagger UI HTML with local static files"""
-        return get_swagger_ui_html(
-            openapi_url=app.openapi_url,
-            title=app.title + " - Swagger UI",
-            oauth2_redirect_url="/docs/oauth2-redirect",
-            swagger_js_url="/static/swagger-ui/swagger-ui-bundle.js",
-            swagger_css_url="/static/swagger-ui/swagger-ui.css",
-            swagger_favicon_url="/static/swagger-ui/favicon-32x32.png",
-            swagger_ui_parameters=app.swagger_ui_parameters,
+    async def custom_swagger_ui_html(workspace: str = ""):
+        """Custom Swagger UI with workspace header auto-injection"""
+        import html as html_mod, json as json_mod
+
+        workspace_safe = html_mod.escape(workspace, quote=True)
+
+        swagger_ui_params = {
+            "dom_id": "#swagger-ui",
+            "layout": "BaseLayout",
+            "deepLinking": True,
+            "showExtensions": True,
+            "showCommonExtensions": True,
+        }
+        if app.swagger_ui_parameters:
+            swagger_ui_params.update(app.swagger_ui_parameters)
+
+        params_js = "\n".join(
+            f"    {json_mod.dumps(k)}: {json_mod.dumps(v)},"
+            for k, v in swagger_ui_params.items()
         )
+
+        return HTMLResponse(f"""<!DOCTYPE html>
+<html><head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="/static/swagger-ui/swagger-ui.css">
+  <link rel="icon" href="/static/swagger-ui/favicon-32x32.png">
+  <title>{app.title} - Swagger UI</title>
+  <style>
+    body {{ margin: 0; }}
+    #ws-banner {{
+      background: #1b1b1b; color: #ccc; padding: 8px 16px;
+      font: 13px/1.4 sans-serif; border-bottom: 1px solid #333;
+      display: flex; align-items: center; gap: 12px;
+    }}
+    #ws-banner .ws-label {{ color: #61affe; font-weight: 600; }}
+    #ws-banner .ws-value {{ color: #49cc90; font-family: monospace; }}
+    #ws-banner .ws-info {{ color: #888; font-size: 12px; }}
+  </style>
+</head><body>
+  <div id="ws-banner">
+    <span class="ws-label">Workspace:</span>
+    <span class="ws-value" id="ws-display">{workspace_safe or 'default'}</span>
+    <span class="ws-info">
+      — WebUI에서 선택한 워크스페이스로 API가 호출됩니다.
+      모든 요청에 <code>LIGHTRAG-WORKSPACE</code> 헤더가 자동 추가됩니다.
+    </span>
+  </div>
+  <div id="swagger-ui"></div>
+  <script src="/static/swagger-ui/swagger-ui-bundle.js"></script>
+  <script>
+    let currentWorkspace = '{workspace_safe}';
+
+    window.addEventListener('message', function(e) {{
+      if (e.data?.type === 'LIGHTRAG_WORKSPACE_CHANGE') {{
+        currentWorkspace = e.data.workspace || '';
+        document.getElementById('ws-display').textContent = currentWorkspace || 'default';
+      }}
+    }});
+
+    SwaggerUIBundle({{
+      url: '{app.openapi_url}',
+{params_js}
+      oauth2RedirectUrl: window.location.origin + '/docs/oauth2-redirect',
+      presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+      requestInterceptor: function(req) {{
+        if (currentWorkspace) req.headers['LIGHTRAG-WORKSPACE'] = currentWorkspace;
+        return req;
+      }}
+    }});
+  </script>
+</body></html>""")
 
     @app.get("/docs/oauth2-redirect", include_in_schema=False)
     async def swagger_ui_redirect():

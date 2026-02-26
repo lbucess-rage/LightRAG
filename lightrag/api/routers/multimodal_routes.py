@@ -8,8 +8,10 @@ Provides endpoints for:
 """
 
 import asyncio
+import datetime
 import os
 import tempfile
+from datetime import timezone
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
@@ -268,6 +270,9 @@ async def process_multimodal_content(
     process_tables: bool = Form(default=True),
     process_equations: bool = Form(default=True),
     password: Optional[str] = Form(default=None),
+    document_prompt: Optional[str] = Form(default=None),
+    image_prompt: Optional[str] = Form(default=None),
+    table_prompt: Optional[str] = Form(default=None),
 ):
     """Parse document and process all multimodal content through VLM/LLM (async).
 
@@ -316,6 +321,9 @@ async def process_multimodal_content(
             "process_images": process_images,
             "process_tables": process_tables,
             "process_equations": process_equations,
+            "document_prompt": document_prompt or "",
+            "image_prompt": image_prompt or "",
+            "table_prompt": table_prompt or "",
         },
     )
 
@@ -333,6 +341,9 @@ async def process_multimodal_content(
         process_tables=process_tables,
         process_equations=process_equations,
         password=password,
+        document_prompt=document_prompt or "",
+        image_prompt=image_prompt or "",
+        table_prompt=table_prompt or "",
     )
 
     return ProcessAsyncResponse(
@@ -354,6 +365,9 @@ async def _process_multimodal_background(
     process_tables: bool,
     process_equations: bool,
     password: Optional[str],
+    document_prompt: str = "",
+    image_prompt: str = "",
+    table_prompt: str = "",
 ) -> None:
     """Background coroutine for multimodal document processing with progress reporting."""
     from lightrag.api.task_manager import TaskStatus, get_task_service
@@ -362,6 +376,9 @@ async def _process_multimodal_background(
     config = _get_config()
     suffix = Path(file_name).suffix.lower()
     tmp_path = None
+
+    text_was_inserted = False
+    multimodal_blocks = []
 
     try:
         # === Phase 1: Parse document (0% -> 20%) ===
@@ -403,6 +420,54 @@ async def _process_multimodal_background(
             detail={"text_blocks": len(text_blocks), "multimodal_blocks": len(multimodal_blocks)},
         )
 
+        # Garbled CJK text detection for text blocks → VLM OCR fallback
+        if (
+            config.enable_garbled_text_detection
+            and _vlm_model_func
+            and tmp_path
+        ):
+            from lightrag.multimodal.text_quality import is_garbled_cjk
+            from lightrag.multimodal.page_renderer import render_page_to_base64
+            from lightrag.multimodal.prompts import PROMPTS as MM_PROMPTS
+
+            vlm_fallback_count = 0
+            for block in text_blocks:
+                block_text = block.get("text", "")
+                if is_garbled_cjk(
+                    block_text,
+                    expected_language=config.vlm_response_language,
+                    cjk_ratio_threshold=config.garbled_cjk_threshold,
+                ):
+                    page_idx = block.get("page_idx", 0)
+                    image_b64 = render_page_to_base64(str(tmp_path), page_idx)
+                    if image_b64:
+                        try:
+                            extracted = await _vlm_model_func(
+                                MM_PROMPTS["text_vlm_fallback_prompt"].format(
+                                    response_language=config.vlm_response_language,
+                                ),
+                                image_data=image_b64,
+                            )
+                            if extracted and extracted.strip():
+                                block["text"] = extracted.strip()
+                                block["_vlm_fallback"] = True
+                                vlm_fallback_count += 1
+                                logger.info(
+                                    f"[Task {task_id}] VLM fallback OCR for text block "
+                                    f"on page {page_idx} (len: {len(extracted)})"
+                                )
+                        except Exception as e:
+                            logger.warning(
+                                f"[Task {task_id}] VLM text fallback failed "
+                                f"for page {page_idx}: {e}"
+                            )
+
+            if vlm_fallback_count > 0:
+                await service.update_progress(
+                    task_id, 22.0,
+                    f"VLM fallback OCR applied to {vlm_fallback_count} garbled text blocks",
+                )
+
         # Check cancellation
         task = service.get_task(task_id)
         if task and task.status == TaskStatus.CANCELLED:
@@ -423,10 +488,36 @@ async def _process_multimodal_background(
                 logger.info(f"[Task {task_id}] Inserted {len(text_blocks)} text blocks (doc_id={doc_id})")
 
         if not doc_id:
-            # No text content - generate doc_id from file name for processors
+            # No plain text blocks extracted - all content classified as multimodal
             doc_id = compute_mdhash_id(file_name, prefix="doc-")
 
+            # When parser classifies all content as multimodal (table/image/equation)
+            # with no plain text blocks, rag.ainsert() is not called,
+            # so we create doc_status record directly to ensure document visibility
+            try:
+                from lightrag.base import DocStatus
+                await rag.doc_status.upsert({doc_id: {
+                    "status": DocStatus.PROCESSING,
+                    "content_summary": f"[Multimodal] {file_name}",
+                    "content_length": 0,
+                    "created_at": datetime.datetime.now(timezone.utc).isoformat(),
+                    "updated_at": datetime.datetime.now(timezone.utc).isoformat(),
+                    "file_path": file_label,
+                }})
+                logger.info(f"[Task {task_id}] Created doc_status for text-less document: {doc_id}")
+            except Exception as e:
+                logger.warning(f"[Task {task_id}] Failed to create doc_status: {e}")
+
         await service.update_progress(task_id, 38.0, "Text content inserted")
+
+        # Store custom prompts in document metadata
+        if document_prompt or image_prompt or table_prompt:
+            await _update_doc_metadata_prompts(
+                rag, doc_id,
+                document_prompt=document_prompt,
+                image_prompt=image_prompt,
+                table_prompt=table_prompt,
+            )
 
         # Upload original document file to S3
         if tmp_path and tmp_path.exists():
@@ -454,9 +545,17 @@ async def _process_multimodal_background(
             return
 
         # === Phase 3: Process multimodal content (40% -> 95%) ===
+        # doc_status record exists either from rag.ainsert() or direct creation above
+        text_was_inserted = bool(doc_id and doc_id.startswith("doc-"))
+
         if not multimodal_blocks:
             await service.update_progress(task_id, 95.0, "No multimodal content to process")
         else:
+            # Revert doc status to PROCESSING while multimodal items are being handled
+            if text_was_inserted:
+                from lightrag.base import DocStatus
+                await _update_doc_status(rag, doc_id, DocStatus.PROCESSING)
+
             await service.update_progress(
                 task_id, 45.0,
                 f"Processing {len(multimodal_blocks)} multimodal items...",
@@ -481,19 +580,24 @@ async def _process_multimodal_background(
             llm_func = _llm_model_func or caption_func
 
             if process_images and config.enable_image_processing:
-                processors["image"] = ImageModalProcessor(
+                image_processor = ImageModalProcessor(
                     lightrag=rag,
                     modal_caption_func=caption_func,
                     context_extractor=context_extractor,
                     response_language=config.vlm_response_language,
                 )
+                image_processor.pdf_path = str(tmp_path)
+                processors["image"] = image_processor
             if process_tables and config.enable_table_processing:
-                processors["table"] = TableModalProcessor(
+                table_processor = TableModalProcessor(
                     lightrag=rag,
                     modal_caption_func=llm_func,
                     context_extractor=context_extractor,
                     response_language=config.vlm_response_language,
+                    vlm_caption_func=_vlm_model_func,
                 )
+                table_processor.pdf_path = str(tmp_path)
+                processors["table"] = table_processor
             if process_equations and config.enable_equation_processing:
                 processors["equation"] = EquationModalProcessor(
                     lightrag=rag,
@@ -505,11 +609,23 @@ async def _process_multimodal_background(
             for proc in processors.values():
                 proc.set_content_source(content_list, config.content_format)
 
+            # Set document-level custom prompts
+            if document_prompt or image_prompt or table_prompt:
+                for proc in processors.values():
+                    proc.set_document_instructions(
+                        document_prompt=document_prompt,
+                        image_prompt=image_prompt,
+                        table_prompt=table_prompt,
+                    )
+
             # Process items sequentially with per-item progress
             results = []
             errors = []
             total_items = len(multimodal_blocks)
             progress_range = 50.0  # 45% -> 95%
+
+            # Accumulate per-page analysis results for sibling context
+            page_analyses: dict[int, list[dict]] = {}
 
             for i, item in enumerate(multimodal_blocks):
                 # Check cancellation before each item
@@ -530,9 +646,11 @@ async def _process_multimodal_background(
                 )
 
                 try:
+                    current_page = item.get("page_idx", 0)
                     item_info = {
-                        "page_idx": item.get("page_idx", 0),
+                        "page_idx": current_page,
                         "index": item.get("_index", 0),
+                        "sibling_analyses": page_analyses.get(current_page, []),
                     }
                     result = await processor.process_multimodal_content(
                         modal_content=item,
@@ -542,12 +660,55 @@ async def _process_multimodal_background(
                         doc_id=doc_id,
                         chunk_order_index=item.get("_index", 0),
                     )
-                    results.append({
+
+                    # Handle skipped items (e.g., decorative image classified by VLM gate)
+                    if result is None:
+                        results.append({
+                            "type": content_type,
+                            "page_idx": item.get("page_idx", 0),
+                            "success": True,
+                            "skipped": True,
+                            "reason": "decorative",
+                        })
+                        await service.update_progress(
+                            task_id, item_progress,
+                            f"Skipped decorative {content_type} {i + 1}/{total_items} (page {item.get('page_idx', '?')})",
+                            detail={"event": "item_skipped", "type": content_type},
+                        )
+                        continue
+
+                    entity_info = result[1] if len(result) > 1 else {}
+                    description_text = result[0] if len(result) > 0 else ""
+
+                    item_result = {
                         "type": content_type,
                         "page_idx": item.get("page_idx", 0),
                         "success": True,
-                        "entity_name": result[1].get("entity_name") if len(result) > 1 else None,
-                    })
+                        "entity_name": entity_info.get("entity_name"),
+                        "entity_type": entity_info.get("entity_type"),
+                        "description": description_text or "",
+                        "chunk_id": entity_info.get("chunk_id"),
+                        "s3_url": entity_info.get("s3_url"),
+                    }
+                    results.append(item_result)
+
+                    # Accumulate analysis for sibling context
+                    if description_text and entity_info.get("entity_name"):
+                        page_analyses.setdefault(current_page, []).append({
+                            "type": content_type,
+                            "entity_name": entity_info.get("entity_name", ""),
+                            "description": description_text[:300],
+                        })
+
+                    # Per-item completion event
+                    await service.update_progress(
+                        task_id, item_progress,
+                        f"Completed {content_type} {i + 1}/{total_items}: {entity_info.get('entity_name', 'unknown')}",
+                        detail={
+                            "event": "item_completed",
+                            "item_result": item_result,
+                        },
+                    )
                 except Exception as e:
                     error_msg = f"Failed to process {content_type} at page {item.get('page_idx', '?')}: {str(e)}"
                     logger.error(f"[Task {task_id}] {error_msg}")
@@ -556,6 +717,11 @@ async def _process_multimodal_background(
 
         # === Phase 4: Complete (95% -> 100%) ===
         await service.update_progress(task_id, 98.0, "Finalizing...")
+
+        # Restore doc status to PROCESSED now that multimodal processing is done
+        if text_was_inserted and multimodal_blocks:
+            from lightrag.base import DocStatus
+            await _update_doc_status(rag, doc_id, DocStatus.PROCESSED)
 
         final_result = {
             "success": len(errors) == 0 if multimodal_blocks else True,
@@ -570,6 +736,10 @@ async def _process_multimodal_background(
 
     except Exception as e:
         logger.error(f"[Task {task_id}] Background processing failed: {e}", exc_info=True)
+        # Restore doc status to PROCESSED — text pipeline already completed successfully
+        if text_was_inserted and multimodal_blocks:
+            from lightrag.base import DocStatus
+            await _update_doc_status(rag, doc_id, DocStatus.PROCESSED)
         await service.fail_task(task_id, str(e))
     finally:
         # Clean up temp file
@@ -605,6 +775,62 @@ async def _update_doc_s3_url_by_id(
                 await asyncio.sleep(delay)
             else:
                 logger.warning(f"Failed to update s3_url for {doc_id} after {max_retries} attempts: {e}")
+
+
+async def _update_doc_metadata_prompts(
+    rag, doc_id: str,
+    document_prompt: str = "",
+    image_prompt: str = "",
+    table_prompt: str = "",
+    max_retries: int = 10,
+    delay: float = 2.0,
+):
+    """Store custom prompts in document metadata JSONB (with retry for pipeline timing)."""
+    custom_prompts = {
+        "document_prompt": document_prompt,
+        "image_prompt": image_prompt,
+        "table_prompt": table_prompt,
+    }
+    for attempt in range(max_retries):
+        try:
+            doc_data = await rag.doc_status.get_by_id(doc_id)
+            if doc_data:
+                metadata = doc_data.get("metadata") or {}
+                metadata["custom_prompts"] = custom_prompts
+                doc_data["metadata"] = metadata
+                await rag.doc_status.upsert({doc_id: doc_data})
+                logger.info(f"Stored custom prompts in doc metadata: {doc_id}")
+                return
+            if attempt < max_retries - 1:
+                await asyncio.sleep(delay)
+        except Exception as e:
+            if attempt < max_retries - 1:
+                await asyncio.sleep(delay)
+            else:
+                logger.warning(
+                    f"Failed to store custom prompts for {doc_id} after {max_retries} attempts: {e}"
+                )
+
+
+async def _update_doc_status(rag, doc_id: str, status: str, max_retries=5, delay=1.0):
+    """Update document status (with retry for pipeline timing)."""
+    for attempt in range(max_retries):
+        try:
+            doc_data = await rag.doc_status.get_by_id(doc_id)
+            if doc_data:
+                doc_data["status"] = status
+                doc_data["updated_at"] = datetime.datetime.now(timezone.utc).isoformat()
+                await rag.doc_status.upsert({doc_id: doc_data})
+                logger.info(f"Updated doc status for {doc_id}: {status}")
+                return True
+            if attempt < max_retries - 1:
+                await asyncio.sleep(delay)
+        except Exception as e:
+            if attempt < max_retries - 1:
+                await asyncio.sleep(delay)
+            else:
+                logger.warning(f"Failed to update doc status for {doc_id}: {e}")
+    return False
 
 
 def create_multimodal_routes() -> APIRouter:

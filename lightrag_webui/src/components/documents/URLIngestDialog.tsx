@@ -25,7 +25,7 @@ import {
 } from '@/api/lightrag'
 import { toast } from 'sonner'
 import { errorMessage } from '@/lib/utils'
-import { Link, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react'
+import { Link, CheckCircle2, AlertCircle, Loader2, MessageSquareText, ChevronUp, ChevronDown } from 'lucide-react'
 
 interface URLIngestDialogProps {
   onDocumentsUploaded?: () => Promise<void>
@@ -51,6 +51,12 @@ export default function URLIngestDialog({ onDocumentsUploaded }: URLIngestDialog
   const [followLinks, setFollowLinks] = useState(false)
   const [maxDepth, setMaxDepth] = useState(2)
 
+  // Custom prompts
+  const [showCustomPrompts, setShowCustomPrompts] = useState(false)
+  const [documentPrompt, setDocumentPrompt] = useState('')
+  const [imagePrompt, setImagePrompt] = useState('')
+  const [tablePrompt, setTablePrompt] = useState('')
+
   // Task state
   const [activeTaskIds, setActiveTaskIds] = useState<string[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -63,6 +69,10 @@ export default function URLIngestDialog({ onDocumentsUploaded }: URLIngestDialog
     setActiveTaskIds([])
     setIsSubmitting(false)
     setIsValidating(false)
+    setShowCustomPrompts(false)
+    setDocumentPrompt('')
+    setImagePrompt('')
+    setTablePrompt('')
   }, [])
 
   const handleValidate = useCallback(async () => {
@@ -90,6 +100,9 @@ export default function URLIngestDialog({ onDocumentsUploaded }: URLIngestDialog
         skip_duplicates: skipDuplicates,
         follow_links: followLinks,
         max_depth: maxDepth,
+        document_prompt: documentPrompt || undefined,
+        image_prompt: imagePrompt || undefined,
+        table_prompt: tablePrompt || undefined,
       })
       setActiveTaskIds([result.task_id])
       toast.success(result.message)
@@ -102,7 +115,7 @@ export default function URLIngestDialog({ onDocumentsUploaded }: URLIngestDialog
       }
       setIsSubmitting(false)
     }
-  }, [singleUrl, processImages, processTables, skipDuplicates, t])
+  }, [singleUrl, processImages, processTables, skipDuplicates, followLinks, maxDepth, documentPrompt, imagePrompt, tablePrompt, t])
 
   const handleBatchIngest = useCallback(async () => {
     const urls = batchUrls
@@ -122,6 +135,9 @@ export default function URLIngestDialog({ onDocumentsUploaded }: URLIngestDialog
         skip_duplicates: skipDuplicates,
         follow_links: followLinks,
         max_depth: maxDepth,
+        document_prompt: documentPrompt || undefined,
+        image_prompt: imagePrompt || undefined,
+        table_prompt: tablePrompt || undefined,
       })
 
       if (result.skipped.length > 0) {
@@ -144,7 +160,7 @@ export default function URLIngestDialog({ onDocumentsUploaded }: URLIngestDialog
       toast.error(errorMessage(err))
       setIsSubmitting(false)
     }
-  }, [batchUrls, processImages, processTables, skipDuplicates, t])
+  }, [batchUrls, processImages, processTables, skipDuplicates, followLinks, maxDepth, documentPrompt, imagePrompt, tablePrompt, t])
 
   const handleTaskComplete = useCallback(() => {
     onDocumentsUploaded?.()
@@ -261,6 +277,18 @@ export default function URLIngestDialog({ onDocumentsUploaded }: URLIngestDialog
                 onMaxDepthChange={setMaxDepth}
               />
 
+              {/* Custom Prompts */}
+              <CustomPromptsSection
+                show={showCustomPrompts}
+                onToggle={() => setShowCustomPrompts(!showCustomPrompts)}
+                documentPrompt={documentPrompt}
+                imagePrompt={imagePrompt}
+                tablePrompt={tablePrompt}
+                onDocumentPromptChange={setDocumentPrompt}
+                onImagePromptChange={setImagePrompt}
+                onTablePromptChange={setTablePrompt}
+              />
+
               {/* Submit */}
               <Button
                 className="w-full"
@@ -309,6 +337,18 @@ export default function URLIngestDialog({ onDocumentsUploaded }: URLIngestDialog
                 onSkipDuplicatesChange={setSkipDuplicates}
                 onFollowLinksChange={setFollowLinks}
                 onMaxDepthChange={setMaxDepth}
+              />
+
+              {/* Custom Prompts */}
+              <CustomPromptsSection
+                show={showCustomPrompts}
+                onToggle={() => setShowCustomPrompts(!showCustomPrompts)}
+                documentPrompt={documentPrompt}
+                imagePrompt={imagePrompt}
+                tablePrompt={tablePrompt}
+                onDocumentPromptChange={setDocumentPrompt}
+                onImagePromptChange={setImagePrompt}
+                onTablePromptChange={setTablePrompt}
               />
 
               {/* Submit */}
@@ -405,6 +445,79 @@ function OptionsSection({
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function CustomPromptsSection({
+  show,
+  onToggle,
+  documentPrompt,
+  imagePrompt,
+  tablePrompt,
+  onDocumentPromptChange,
+  onImagePromptChange,
+  onTablePromptChange,
+}: {
+  show: boolean
+  onToggle: () => void
+  documentPrompt: string
+  imagePrompt: string
+  tablePrompt: string
+  onDocumentPromptChange: (v: string) => void
+  onImagePromptChange: (v: string) => void
+  onTablePromptChange: (v: string) => void
+}) {
+  const { t } = useTranslation()
+
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors w-full"
+        onClick={onToggle}
+      >
+        <MessageSquareText className="h-4 w-4" />
+        <span>{t('documentPanel.multimodalUpload.customPrompts.title')}</span>
+        {show ? <ChevronUp className="h-4 w-4 ml-auto" /> : <ChevronDown className="h-4 w-4 ml-auto" />}
+      </button>
+      {show && (
+        <div className="space-y-3 pt-1">
+          <p className="text-xs text-muted-foreground">
+            {t('documentPanel.multimodalUpload.customPrompts.description')}
+          </p>
+          <div>
+            <Label className="text-xs text-muted-foreground">{t('documentPanel.multimodalUpload.customPrompts.documentPrompt')}</Label>
+            <Textarea
+              rows={2}
+              className="mt-1 min-h-[60px]"
+              placeholder={t('documentPanel.multimodalUpload.customPrompts.documentPromptPlaceholder')}
+              value={documentPrompt}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => onDocumentPromptChange(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label className="text-xs text-muted-foreground">{t('documentPanel.multimodalUpload.customPrompts.imagePrompt')}</Label>
+            <Textarea
+              rows={2}
+              className="mt-1 min-h-[60px]"
+              placeholder={t('documentPanel.multimodalUpload.customPrompts.imagePromptPlaceholder')}
+              value={imagePrompt}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => onImagePromptChange(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label className="text-xs text-muted-foreground">{t('documentPanel.multimodalUpload.customPrompts.tablePrompt')}</Label>
+            <Textarea
+              rows={2}
+              className="mt-1 min-h-[60px]"
+              placeholder={t('documentPanel.multimodalUpload.customPrompts.tablePromptPlaceholder')}
+              value={tablePrompt}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => onTablePromptChange(e.target.value)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }

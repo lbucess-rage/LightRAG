@@ -18,6 +18,10 @@ import {
   resetSchema,
   mergePreview,
   mergeApply,
+  SeedEntity,
+  getSeedEntities,
+  saveSeedEntities as apiSaveSeedEntities,
+  clearSeedEntities as apiClearSeedEntities,
   createTemplate as apiCreateTemplate,
   updateTemplate as apiUpdateTemplate,
   deleteTemplate as apiDeleteTemplate,
@@ -29,11 +33,14 @@ import {
 
 export interface CurrentSchemaInfo {
   entityTypes: string[]
+  seedEntities: SeedEntity[]
   source: string | null // 'template:domain_name' or 'custom' or 'discovery'
   appliedAt: string | null
   isApplying: boolean
   applyError: string | null
   isServerSynced: boolean // 서버와 동기화 여부
+  isSeedSaving: boolean
+  seedSaveError: string | null
 }
 
 export interface MergeState {
@@ -118,6 +125,14 @@ export interface SchemaState {
   applyMerge: (newEntityTypes: string[], source: string, excludeDuplicates?: boolean) => Promise<void>
   clearMergePreview: () => void
 
+  // Seed entity actions
+  loadSeedEntities: () => Promise<void>
+  saveSeedEntities: (seeds: SeedEntity[]) => Promise<void>
+  clearSeedEntities: () => Promise<void>
+  addSeedEntity: (seed: SeedEntity) => void
+  removeSeedEntity: (keyword: string) => void
+  updateSeedEntity: (keyword: string, updated: SeedEntity) => void
+
   // Local state actions (for optimistic updates)
   setCurrentSchema: (entityTypes: string[], source: string) => void
   resetCurrentSchema: () => void
@@ -160,11 +175,14 @@ const defaultEntityTypes = [
 
 const defaultCurrentSchema: CurrentSchemaInfo = {
   entityTypes: defaultEntityTypes,
+  seedEntities: [],
   source: null,
   appliedAt: null,
   isApplying: false,
   applyError: null,
   isServerSynced: false,
+  isSeedSaving: false,
+  seedSaveError: null,
 }
 
 const defaultMergeState: MergeState = {
@@ -285,7 +303,9 @@ export const useSchemaStore = create<SchemaState>()(
           const result = await getCurrentSchema()
           set({
             currentSchema: {
+              ...get().currentSchema,
               entityTypes: result.entity_types,
+              seedEntities: result.seed_entities ?? [],
               source: result.source,
               appliedAt: result.applied_at,
               isApplying: false,
@@ -313,6 +333,7 @@ export const useSchemaStore = create<SchemaState>()(
           const result = await applySchema(entityTypes, source)
           set({
             currentSchema: {
+              ...get().currentSchema,
               entityTypes: result.entity_types,
               source: result.source,
               appliedAt: result.applied_at,
@@ -347,6 +368,7 @@ export const useSchemaStore = create<SchemaState>()(
           const result = await resetSchema()
           set({
             currentSchema: {
+              ...get().currentSchema,
               entityTypes: result.entity_types,
               source: result.source,
               appliedAt: result.applied_at,
@@ -365,6 +387,114 @@ export const useSchemaStore = create<SchemaState>()(
           })
           throw error
         }
+      },
+
+      // Seed Entity Actions
+      loadSeedEntities: async () => {
+        try {
+          const result = await getSeedEntities()
+          set({
+            currentSchema: {
+              ...get().currentSchema,
+              seedEntities: result.seed_entities,
+            },
+          })
+        } catch (error) {
+          console.error('Failed to load seed entities:', error)
+        }
+      },
+
+      saveSeedEntities: async (seeds: SeedEntity[]) => {
+        set({
+          currentSchema: {
+            ...get().currentSchema,
+            isSeedSaving: true,
+            seedSaveError: null,
+          },
+        })
+        try {
+          const result = await apiSaveSeedEntities(seeds)
+          set({
+            currentSchema: {
+              ...get().currentSchema,
+              seedEntities: result.seed_entities,
+              isSeedSaving: false,
+              seedSaveError: null,
+            },
+          })
+        } catch (error) {
+          set({
+            currentSchema: {
+              ...get().currentSchema,
+              isSeedSaving: false,
+              seedSaveError: error instanceof Error ? error.message : 'Failed to save seed entities',
+            },
+          })
+          throw error
+        }
+      },
+
+      clearSeedEntities: async () => {
+        set({
+          currentSchema: {
+            ...get().currentSchema,
+            isSeedSaving: true,
+            seedSaveError: null,
+          },
+        })
+        try {
+          await apiClearSeedEntities()
+          set({
+            currentSchema: {
+              ...get().currentSchema,
+              seedEntities: [],
+              isSeedSaving: false,
+              seedSaveError: null,
+            },
+          })
+        } catch (error) {
+          set({
+            currentSchema: {
+              ...get().currentSchema,
+              isSeedSaving: false,
+              seedSaveError: error instanceof Error ? error.message : 'Failed to clear seed entities',
+            },
+          })
+          throw error
+        }
+      },
+
+      addSeedEntity: (seed: SeedEntity) => {
+        const { currentSchema } = get()
+        if (currentSchema.seedEntities.some((s) => s.keyword === seed.keyword)) return
+        set({
+          currentSchema: {
+            ...currentSchema,
+            seedEntities: [...currentSchema.seedEntities, seed],
+          },
+        })
+      },
+
+      removeSeedEntity: (keyword: string) => {
+        const { currentSchema } = get()
+        set({
+          currentSchema: {
+            ...currentSchema,
+            seedEntities: currentSchema.seedEntities.filter((s) => s.keyword !== keyword),
+          },
+        })
+      },
+
+      updateSeedEntity: (keyword: string, updated: SeedEntity) => {
+        const { currentSchema } = get()
+        set({
+          currentSchema: {
+            ...currentSchema,
+            seedEntities: currentSchema.seedEntities.map((s) =>
+              s.keyword === keyword ? updated : s
+            ),
+          },
+        })
       },
 
       // Merge Actions
@@ -412,6 +542,7 @@ export const useSchemaStore = create<SchemaState>()(
           const result = await mergeApply(newEntityTypes, source, excludeDuplicates)
           set({
             currentSchema: {
+              ...get().currentSchema,
               entityTypes: result.entity_types,
               source: result.source,
               appliedAt: result.applied_at,
@@ -443,6 +574,7 @@ export const useSchemaStore = create<SchemaState>()(
       setCurrentSchema: (entityTypes: string[], source: string) => {
         set({
           currentSchema: {
+            ...get().currentSchema,
             entityTypes,
             source,
             appliedAt: new Date().toISOString(),
@@ -605,9 +737,29 @@ export const useSchemaStore = create<SchemaState>()(
     }),
     {
       name: 'lightrag-schema-store',
+      version: 1,
       partialize: (state) => ({
         currentSchema: state.currentSchema,
       }),
+      merge: (persistedState: any, currentState: any) => {
+        // Deep merge currentSchema with defaults for missing fields
+        const persisted = (persistedState as any) || {}
+        return {
+          ...currentState,
+          ...persisted,
+          currentSchema: {
+            ...currentState.currentSchema,
+            ...(persisted.currentSchema || {}),
+            // Ensure new fields always have defaults
+            seedEntities: persisted.currentSchema?.seedEntities ?? [],
+            isSeedSaving: false,
+            seedSaveError: null,
+          },
+        }
+      },
+      migrate: (persistedState: any, version: number) => {
+        return persistedState
+      },
     }
   )
 )

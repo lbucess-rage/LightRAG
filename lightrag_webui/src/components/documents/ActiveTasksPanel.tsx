@@ -2,9 +2,10 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { listTasks, TaskStatusResponse } from '@/api/lightrag'
 import TaskProgressPanel from './TaskProgressPanel'
+import TaskResultDialog from './TaskResultDialog'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
-import { ChevronDown, ChevronUp, Activity, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, Activity, X, MessageSquareText, Eye } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface ActiveTasksPanelProps {
@@ -16,6 +17,7 @@ export default function ActiveTasksPanel({ onTaskComplete }: ActiveTasksPanelPro
   const [tasks, setTasks] = useState<TaskStatusResponse[]>([])
   const [expanded, setExpanded] = useState(true)
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set())
+  const [selectedTask, setSelectedTask] = useState<TaskStatusResponse | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const fetchTasks = useCallback(async () => {
@@ -86,9 +88,10 @@ export default function ActiveTasksPanel({ onTaskComplete }: ActiveTasksPanelPro
         <div className="px-3 pb-3 space-y-2 max-h-80 overflow-y-auto">
           {tasks.map((task) => {
             const isTerminal = task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled'
-            const taskUrl = task.metadata?.url || task.task_id.slice(0, 8)
+            const taskUrl = task.metadata?.url || task.metadata?.file_name || task.task_id.slice(0, 8)
             const taskType = task.task_type === 'url_ingest' ? 'URL' : task.task_type === 'multimodal_process' ? 'MM' : task.task_type
             const depth = task.metadata?.crawl_depth
+            const hasPrompts = !!(task.metadata?.document_prompt || task.metadata?.image_prompt || task.metadata?.table_prompt)
 
             return (
               <div key={task.task_id} className="border rounded-md p-2 bg-background">
@@ -100,6 +103,9 @@ export default function ActiveTasksPanel({ onTaskComplete }: ActiveTasksPanelPro
                       <Badge variant="secondary" className="text-[10px] shrink-0">
                         D{depth}
                       </Badge>
+                    )}
+                    {hasPrompts && (
+                      <MessageSquareText className="h-3 w-3 text-violet-500 shrink-0" />
                     )}
                     <span className="text-xs text-muted-foreground truncate" title={taskUrl}>
                       {taskUrl}
@@ -122,10 +128,24 @@ export default function ActiveTasksPanel({ onTaskComplete }: ActiveTasksPanelPro
                 {isTerminal ? (
                   <div className="text-xs text-muted-foreground">
                     {task.status === 'completed' && (
-                      <span className="text-green-600">{t('documentPanel.taskProgress.status.completed')}</span>
+                      <button
+                        className="inline-flex items-center gap-1 text-green-600 hover:text-green-700 hover:underline cursor-pointer"
+                        onClick={(e: React.MouseEvent) => { e.stopPropagation(); setSelectedTask(task) }}
+                        title={t('documentPanel.activeTasks.viewResult')}
+                      >
+                        <Eye className="h-3 w-3" />
+                        {t('documentPanel.taskProgress.status.completed')}
+                      </button>
                     )}
                     {task.status === 'failed' && (
-                      <span className="text-red-600">{t('documentPanel.taskProgress.status.failed')}: {task.error || task.message}</span>
+                      <button
+                        className="inline-flex items-center gap-1 text-red-600 hover:text-red-700 hover:underline cursor-pointer"
+                        onClick={(e: React.MouseEvent) => { e.stopPropagation(); setSelectedTask(task) }}
+                        title={t('documentPanel.activeTasks.viewResult')}
+                      >
+                        <Eye className="h-3 w-3" />
+                        {t('documentPanel.taskProgress.status.failed')}: {task.error || task.message}
+                      </button>
                     )}
                     {task.status === 'cancelled' && (
                       <span className="text-gray-500">{t('documentPanel.taskProgress.status.cancelled')}</span>
@@ -163,6 +183,8 @@ export default function ActiveTasksPanel({ onTaskComplete }: ActiveTasksPanelPro
           )}
         </div>
       )}
+
+      <TaskResultDialog task={selectedTask} onClose={() => setSelectedTask(null)} />
     </div>
   )
 }

@@ -58,6 +58,9 @@ DEFAULT_HISTORY_TURNS = 0
 DEFAULT_MIN_RERANK_SCORE = 0.0
 DEFAULT_RERANK_BINDING = "null"
 
+# Keyword exact-match boosting weight (env: KEYWORD_BOOST_WEIGHT)
+DEFAULT_KEYWORD_BOOST_WEIGHT = 0.3
+
 # Default source ids limit in meta data for entity and relation
 DEFAULT_MAX_SOURCE_IDS_PER_ENTITY = 300
 DEFAULT_MAX_SOURCE_IDS_PER_RELATION = 300

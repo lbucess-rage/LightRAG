@@ -1226,6 +1226,7 @@ class PostgreSQLDB:
             _SKIP_STANDARD_INDEX = {
                 "LIGHTRAG_WORKSPACES",       # PK: workspace_id (no 'workspace' or 'id' columns)
                 "LIGHTRAG_WORKSPACE_SCHEMA", # PK: workspace (no 'id' column)
+                "LIGHTRAG_TASKS",            # PK: workspace + task_id (no 'id' column)
             }
 
             # Create missing indexes
@@ -1399,6 +1400,14 @@ class PostgreSQLDB:
                 f"PostgreSQL, Failed to migrate workspace schema entity_type_details: {e}"
             )
 
+        # Migrate workspace schema to add seed_entities column if needed
+        try:
+            await self._migrate_workspace_schema_add_seed_entities()
+        except Exception as e:
+            logger.error(
+                f"PostgreSQL, Failed to migrate workspace schema seed_entities: {e}"
+            )
+
     async def _migrate_workspaces(self):
         """Ensure LIGHTRAG_WORKSPACES table exists and discover existing workspaces."""
         table_name = "LIGHTRAG_WORKSPACES"
@@ -1461,6 +1470,36 @@ class PostgreSQLDB:
         except Exception as e:
             logger.warning(
                 f"Failed to add entity_type_details column to LIGHTRAG_WORKSPACE_SCHEMA: {e}"
+            )
+
+    async def _migrate_workspace_schema_add_seed_entities(self):
+        """Add seed_entities column to LIGHTRAG_WORKSPACE_SCHEMA if it doesn't exist."""
+        try:
+            check_column_sql = """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'lightrag_workspace_schema'
+            AND column_name = 'seed_entities'
+            """
+
+            column_info = await self.query(check_column_sql)
+            if not column_info:
+                logger.info("Adding seed_entities column to LIGHTRAG_WORKSPACE_SCHEMA table")
+                add_column_sql = """
+                ALTER TABLE LIGHTRAG_WORKSPACE_SCHEMA
+                ADD COLUMN seed_entities JSONB DEFAULT NULL
+                """
+                await self.execute(add_column_sql)
+                logger.info(
+                    "Successfully added seed_entities column to LIGHTRAG_WORKSPACE_SCHEMA table"
+                )
+            else:
+                logger.debug(
+                    "seed_entities column already exists in LIGHTRAG_WORKSPACE_SCHEMA table"
+                )
+        except Exception as e:
+            logger.warning(
+                f"Failed to add seed_entities column to LIGHTRAG_WORKSPACE_SCHEMA: {e}"
             )
 
     async def _migrate_create_full_entities_relations_tables(self):
@@ -3377,6 +3416,7 @@ class PGDocStatusStorage(DocStatusStorage):
             updated_at = self._format_datetime_with_timezone(result[0]["updated_at"])
 
             return dict(
+                id=result[0]["id"],
                 content_length=result[0]["content_length"],
                 content_summary=result[0]["content_summary"],
                 status=result[0]["status"],
@@ -3390,6 +3430,14 @@ class PGDocStatusStorage(DocStatusStorage):
                 track_id=result[0].get("track_id"),
                 s3_url=result[0].get("s3_url"),
             )
+
+    async def get_all_doc_ids_by_file_path(self, file_path: str) -> list[str]:
+        """Get all document IDs matching a file path."""
+        sql = "SELECT id FROM LIGHTRAG_DOC_STATUS WHERE workspace=$1 AND file_path=$2"
+        result = await self.db.query(sql, [self.workspace, file_path], True)
+        if not result:
+            return []
+        return list(set(row["id"] for row in result))
 
     async def get_status_counts(self) -> dict[str, int]:
         """Get counts of documents in each status"""
@@ -5630,11 +5678,28 @@ TABLES = {
                     entity_types JSONB DEFAULT '[]'::jsonb,
                     relation_types JSONB DEFAULT '[]'::jsonb,
                     entity_type_details JSONB DEFAULT NULL,
+                    seed_entities JSONB DEFAULT NULL,
                     source VARCHAR(255),
                     applied_at TIMESTAMP(0),
                     create_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
                     update_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
                     CONSTRAINT LIGHTRAG_WORKSPACE_SCHEMA_PK PRIMARY KEY (workspace)
+                    )"""
+    },
+    "LIGHTRAG_TASKS": {
+        "ddl": """CREATE TABLE LIGHTRAG_TASKS (
+                    workspace VARCHAR(255) NOT NULL,
+                    task_id VARCHAR(255) NOT NULL,
+                    task_type VARCHAR(64) NOT NULL,
+                    status VARCHAR(32) NOT NULL DEFAULT 'pending',
+                    progress FLOAT8 DEFAULT 0.0,
+                    message TEXT DEFAULT '',
+                    result JSONB DEFAULT NULL,
+                    error TEXT DEFAULT NULL,
+                    metadata JSONB DEFAULT '{}'::jsonb,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT LIGHTRAG_TASKS_PK PRIMARY KEY (workspace, task_id)
                     )"""
     },
 }
@@ -5949,24 +6014,25 @@ SQL_TEMPLATES = {
                              """,
     # Workspace Schema SQL
     "upsert_workspace_schema": """INSERT INTO LIGHTRAG_WORKSPACE_SCHEMA
-                                  (workspace, entity_types, relation_types, entity_type_details, source, applied_at, create_time, update_time)
-                                  VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                                  (workspace, entity_types, relation_types, entity_type_details, seed_entities, source, applied_at, create_time, update_time)
+                                  VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                                   ON CONFLICT (workspace) DO UPDATE
                                   SET entity_types = EXCLUDED.entity_types,
                                       relation_types = EXCLUDED.relation_types,
                                       entity_type_details = EXCLUDED.entity_type_details,
+                                      seed_entities = EXCLUDED.seed_entities,
                                       source = EXCLUDED.source,
                                       applied_at = EXCLUDED.applied_at,
                                       update_time = CURRENT_TIMESTAMP
                                  """,
-    "get_workspace_schema": """SELECT workspace, entity_types, relation_types, entity_type_details, source,
+    "get_workspace_schema": """SELECT workspace, entity_types, relation_types, entity_type_details, seed_entities, source,
                                EXTRACT(EPOCH FROM applied_at)::BIGINT as applied_at,
                                EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
                                EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
                                FROM LIGHTRAG_WORKSPACE_SCHEMA WHERE workspace=$1
                               """,
     "delete_workspace_schema": """DELETE FROM LIGHTRAG_WORKSPACE_SCHEMA WHERE workspace=$1""",
-    "list_workspace_schemas": """SELECT workspace, entity_types, relation_types, entity_type_details, source,
+    "list_workspace_schemas": """SELECT workspace, entity_types, relation_types, entity_type_details, seed_entities, source,
                                  EXTRACT(EPOCH FROM applied_at)::BIGINT as applied_at,
                                  EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
                                  EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
@@ -5999,6 +6065,7 @@ class WorkspaceSchemaStorage:
         source: str | None = None,
         applied_at: str | None = None,
         entity_type_details: list[dict] | None = None,
+        seed_entities: list[dict] | None = None,
     ) -> bool:
         """Save workspace schema to database.
 
@@ -6009,6 +6076,7 @@ class WorkspaceSchemaStorage:
             source: Schema source (e.g., "template:domain", "discovery", "custom")
             applied_at: ISO format timestamp when schema was applied
             entity_type_details: List of entity type details (description, examples, extraction_hints)
+            seed_entities: List of seed entity definitions (keyword, variants, entity_type, description)
 
         Returns:
             True if successful
@@ -6036,6 +6104,7 @@ class WorkspaceSchemaStorage:
                 "entity_types": json.dumps(entity_types),
                 "relation_types": json.dumps(relation_types),
                 "entity_type_details": json.dumps(entity_type_details) if entity_type_details else None,
+                "seed_entities": json.dumps(seed_entities) if seed_entities else None,
                 "source": source,
                 "applied_at": applied_dt,
             }
@@ -6085,6 +6154,10 @@ class WorkspaceSchemaStorage:
                 if isinstance(entity_type_details, str):
                     entity_type_details = json.loads(entity_type_details)
 
+                seed_entities = result.get("seed_entities")
+                if isinstance(seed_entities, str):
+                    seed_entities = json.loads(seed_entities)
+
                 applied_at = result.get("applied_at")
                 if applied_at:
                     applied_at = datetime.fromtimestamp(applied_at).isoformat()
@@ -6094,6 +6167,7 @@ class WorkspaceSchemaStorage:
                     "entity_types": entity_types,
                     "relation_types": relation_types,
                     "entity_type_details": entity_type_details,
+                    "seed_entities": seed_entities,
                     "source": result.get("source"),
                     "applied_at": applied_at,
                 }
@@ -6154,6 +6228,10 @@ class WorkspaceSchemaStorage:
                     if isinstance(entity_type_details, str):
                         entity_type_details = json.loads(entity_type_details)
 
+                    seed_entities = row.get("seed_entities")
+                    if isinstance(seed_entities, str):
+                        seed_entities = json.loads(seed_entities)
+
                     applied_at = row.get("applied_at")
                     if applied_at:
                         applied_at = datetime.fromtimestamp(applied_at).isoformat()
@@ -6162,6 +6240,7 @@ class WorkspaceSchemaStorage:
                         "entity_types": entity_types,
                         "relation_types": relation_types,
                         "entity_type_details": entity_type_details,
+                        "seed_entities": seed_entities,
                         "source": row.get("source"),
                         "applied_at": applied_at,
                     }

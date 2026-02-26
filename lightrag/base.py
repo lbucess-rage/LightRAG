@@ -785,6 +785,13 @@ class DocStatusStorage(BaseKVStorage, ABC):
             Returns the same format as get_by_ids method
         """
 
+    async def get_all_doc_ids_by_file_path(self, file_path: str) -> list[str]:
+        """Get all document IDs with a specific file path."""
+        doc = await self.get_doc_by_file_path(file_path)
+        if doc and "id" in doc:
+            return [doc["id"]]
+        return []
+
 
 class StoragesStatus(str, Enum):
     """Storages status"""

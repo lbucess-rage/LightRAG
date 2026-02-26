@@ -10,13 +10,14 @@ import {
   DialogTrigger,
 } from '@/components/ui/Dialog'
 import Input from '@/components/ui/Input'
+import Textarea from '@/components/ui/Textarea'
 import Checkbox from '@/components/ui/Checkbox'
 import { Label } from '@/components/ui/Label'
 import TaskProgressPanel from './TaskProgressPanel'
 import { processMultimodal } from '@/api/lightrag'
 import { toast } from 'sonner'
 import { errorMessage } from '@/lib/utils'
-import { Layers, Upload, FileText, X, Loader2 } from 'lucide-react'
+import { Layers, Upload, FileText, X, Loader2, ChevronDown, ChevronUp, MessageSquareText } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface MultimodalUploadDialogProps {
@@ -51,6 +52,12 @@ export default function MultimodalUploadDialog({ onDocumentsUploaded }: Multimod
   const [filePathLabel, setFilePathLabel] = useState('')
   const [pdfPassword, setPdfPassword] = useState('')
 
+  // Custom prompts
+  const [showCustomPrompts, setShowCustomPrompts] = useState(false)
+  const [documentPrompt, setDocumentPrompt] = useState('')
+  const [imagePrompt, setImagePrompt] = useState('')
+  const [tablePrompt, setTablePrompt] = useState('')
+
   // Task state
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -64,6 +71,10 @@ export default function MultimodalUploadDialog({ onDocumentsUploaded }: Multimod
     setFilePathLabel('')
     setPdfPassword('')
     setIsDragOver(false)
+    setShowCustomPrompts(false)
+    setDocumentPrompt('')
+    setImagePrompt('')
+    setTablePrompt('')
   }, [])
 
   const isValidFile = useCallback((file: File) => {
@@ -118,6 +129,9 @@ export default function MultimodalUploadDialog({ onDocumentsUploaded }: Multimod
           process_equations: processEquations,
           file_path_label: filePathLabel || undefined,
           pdf_password: pdfPassword || undefined,
+          document_prompt: documentPrompt || undefined,
+          image_prompt: imagePrompt || undefined,
+          table_prompt: tablePrompt || undefined,
         },
         (percent) => setUploadProgress(percent)
       )
@@ -128,7 +142,7 @@ export default function MultimodalUploadDialog({ onDocumentsUploaded }: Multimod
       toast.error(errorMessage(err))
       setIsSubmitting(false)
     }
-  }, [selectedFile, parser, processImages, processTables, processEquations, filePathLabel, pdfPassword])
+  }, [selectedFile, parser, processImages, processTables, processEquations, filePathLabel, pdfPassword, documentPrompt, imagePrompt, tablePrompt])
 
   const handleTaskComplete = useCallback(() => {
     onDocumentsUploaded?.()
@@ -148,7 +162,7 @@ export default function MultimodalUploadDialog({ onDocumentsUploaded }: Multimod
           <Layers className="h-4 w-4" /> {t('documentPanel.multimodalUpload.button')}
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-lg" onCloseAutoFocus={(e) => e.preventDefault()}>
+      <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto" onCloseAutoFocus={(e) => e.preventDefault()}>
         <DialogHeader>
           <DialogTitle>{t('documentPanel.multimodalUpload.title')}</DialogTitle>
           <DialogDescription>{t('documentPanel.multimodalUpload.description')}</DialogDescription>
@@ -326,6 +340,56 @@ export default function MultimodalUploadDialog({ onDocumentsUploaded }: Multimod
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPdfPassword(e.target.value)}
                     className="mt-1"
                   />
+                </div>
+              )}
+            </div>
+
+            {/* Custom Prompts (collapsible) */}
+            <div className="space-y-2">
+              <button
+                type="button"
+                className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors w-full"
+                onClick={() => setShowCustomPrompts(!showCustomPrompts)}
+              >
+                <MessageSquareText className="h-4 w-4" />
+                <span>{t('documentPanel.multimodalUpload.customPrompts.title')}</span>
+                {showCustomPrompts ? <ChevronUp className="h-4 w-4 ml-auto" /> : <ChevronDown className="h-4 w-4 ml-auto" />}
+              </button>
+              {showCustomPrompts && (
+                <div className="space-y-3 pt-1">
+                  <p className="text-xs text-muted-foreground">
+                    {t('documentPanel.multimodalUpload.customPrompts.description')}
+                  </p>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">{t('documentPanel.multimodalUpload.customPrompts.documentPrompt')}</Label>
+                    <Textarea
+                      rows={2}
+                      className="mt-1 min-h-[60px]"
+                      placeholder={t('documentPanel.multimodalUpload.customPrompts.documentPromptPlaceholder')}
+                      value={documentPrompt}
+                      onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setDocumentPrompt(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">{t('documentPanel.multimodalUpload.customPrompts.imagePrompt')}</Label>
+                    <Textarea
+                      rows={2}
+                      className="mt-1 min-h-[60px]"
+                      placeholder={t('documentPanel.multimodalUpload.customPrompts.imagePromptPlaceholder')}
+                      value={imagePrompt}
+                      onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setImagePrompt(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">{t('documentPanel.multimodalUpload.customPrompts.tablePrompt')}</Label>
+                    <Textarea
+                      rows={2}
+                      className="mt-1 min-h-[60px]"
+                      placeholder={t('documentPanel.multimodalUpload.customPrompts.tablePromptPlaceholder')}
+                      value={tablePrompt}
+                      onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setTablePrompt(e.target.value)}
+                    />
+                  </div>
                 </div>
               )}
             </div>

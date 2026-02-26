@@ -9,6 +9,13 @@ from lightrag.base import QueryParam
 from lightrag.api.utils_api import get_combined_auth_dependency
 from lightrag.utils import logger
 from pydantic import BaseModel, Field, field_validator
+from lightrag.api.citation_utils import (
+    normalize_citations,
+    get_valid_reference_ids,
+    parse_evidence_map,
+    attach_evidence_to_references,
+    extract_evidence_from_chunks,
+)
 
 router = APIRouter(tags=["query"])
 
@@ -208,6 +215,10 @@ class ReferenceItem(BaseModel):
     scores: Optional[List[Optional[float]]] = Field(
         default=None,
         description="Per-chunk relevance scores, parallel to content/structured_content arrays (sorted by relevance, descending)",
+    )
+    evidence: Optional[List[str]] = Field(
+        default=None,
+        description="Evidence snippets — verbatim quotes from chunks used as citation evidence",
     )
 
 
@@ -526,16 +537,38 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                         contents = [c.get("content", "") for c in chunk_list]
                         # Empty list when all chunks have structured_content (no text content)
                         ref_copy["content"] = [] if all(not c for c in contents) else contents
-                        sc_list = [c["structured_content"] for c in chunk_list if c.get("structured_content")]
+                        # Build structured_content list with per-item score embedded
+                        sc_list = []
+                        for c in chunk_list:
+                            sc = c.get("structured_content")
+                            if sc:
+                                sc_with_score = {**sc}
+                                if c.get("score") is not None:
+                                    sc_with_score["score"] = c["score"]
+                                sc_list.append(sc_with_score)
                         if sc_list:
                             ref_copy["structured_content"] = sc_list
-                        # Per-chunk scores (parallel to structured_content/content)
+                        # Per-chunk scores — kept for backward compatibility
                         per_scores = [c.get("score") for c in chunk_list]
                         if any(s is not None for s in per_scores):
                             ref_copy["scores"] = per_scores
                             ref_copy["score"] = max(s for s in per_scores if s is not None)
                     enriched_references.append(ref_copy)
                 references = enriched_references
+
+            # Strip any legacy evidence map block (safety net)
+            response_content, evidence_map = parse_evidence_map(response_content)
+
+            # Normalize inline citations
+            if references:
+                valid_ids = get_valid_reference_ids(references)
+                response_content = normalize_citations(response_content, valid_ids)
+
+            # Attach evidence: prefer LLM-generated map, fallback to backend extraction
+            if evidence_map and references:
+                attach_evidence_to_references(references, evidence_map)
+            elif references and request.include_chunk_content:
+                extract_evidence_from_chunks(response_content, references)
 
             # Enrich references with S3 download URLs
             if request.include_references:
@@ -816,18 +849,44 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
 
                     response_stream = llm_response.get("response_iterator")
                     if response_stream:
+                        accumulated_response = ""
                         try:
                             async for chunk in response_stream:
-                                if chunk:  # Only send non-empty content
+                                if chunk:
+                                    accumulated_response += chunk
                                     yield f"{json.dumps({'response': chunk})}\n"
                         except Exception as e:
                             logger.error(f"Streaming error: {str(e)}")
                             yield f"{json.dumps({'error': str(e)})}\n"
+
+                        # Backend evidence extraction from accumulated response + chunk content
+                        if request.include_references and request.include_chunk_content and references:
+                            extract_evidence_from_chunks(accumulated_response, references)
+                            evidence_map = {
+                                str(r.get("reference_id", "")): r["evidence"]
+                                for r in references if r.get("evidence")
+                            }
+                            if evidence_map:
+                                yield f"{json.dumps({'evidence_map': evidence_map})}\n"
                 else:
                     # Non-streaming mode: send complete response in one message
                     response_content = llm_response.get("content", "")
                     if not response_content:
                         response_content = "No relevant context found for the query."
+
+                    # Strip any legacy evidence map block (safety net)
+                    response_content, evidence_map = parse_evidence_map(response_content)
+
+                    # Normalize inline citations
+                    if references:
+                        valid_ids = get_valid_reference_ids(references)
+                        response_content = normalize_citations(response_content, valid_ids)
+
+                    # Attach evidence: prefer LLM map, fallback to backend extraction
+                    if evidence_map and references:
+                        attach_evidence_to_references(references, evidence_map)
+                    elif references and request.include_chunk_content:
+                        extract_evidence_from_chunks(response_content, references)
 
                     # Create complete response object
                     complete_response = {"response": response_content}

@@ -14,6 +14,46 @@ PROMPTS: dict[str, Any] = {}
 # System Prompts
 # =============================================================================
 
+PROMPTS["IMAGE_CLASSIFICATION_SYSTEM"] = (
+    "You are an image classifier. Determine if an image contains meaningful "
+    "informational content or is merely a decorative/non-informational element. "
+    "Respond with ONLY one word: meaningful or decorative"
+)
+
+PROMPTS["image_classification_prompt"] = """Classify this image into one of two categories:
+
+**meaningful**: Technical diagrams, photographs, charts, graphs, schematics,
+annotated images, screenshots with content, warning signs, procedure illustrations,
+or any image that conveys substantive information.
+
+**decorative**: Bullet points, list markers, divider lines, header/footer bars,
+logos, brand icons, page numbers, version labels, location pin icons,
+arrows used as list markers, or any small decorative/navigational element.
+
+Respond with ONLY one word: meaningful or decorative"""
+
+PROMPTS["image_classification_with_page_prompt"] = """You are given two images:
+1. **First image**: The full document page where the element appears
+2. **Second image**: The extracted element itself
+
+Based on the element's role and context within the document page, classify it:
+
+**meaningful**: Technical diagrams, photographs, charts, graphs, schematics,
+annotated images, screenshots with content, procedure illustrations,
+or any image that conveys substantive information worth indexing.
+
+**decorative**: Bullet points, list markers, divider lines, header/footer bars,
+logos, brand icons, page numbers, version labels, small icons used as
+list markers or navigation aids, position indicator icons, arrows used
+as list markers, or any small decorative/layout element.
+
+Key judgment criteria:
+- Small icons repeated across pages in the same position → decorative
+- Tiny elements used alongside text as markers or indicators → decorative
+- Large images that illustrate procedures, components, or data → meaningful
+
+Respond with ONLY one word: meaningful or decorative"""
+
 PROMPTS["IMAGE_ANALYSIS_SYSTEM"] = (
     "당신은 문서 이미지에서 도메인 핵심 정보를 추출하는 전문가입니다. "
     "이미지에 포함된 기술적 내용, 장치명, 절차, 규격, 데이터 등 지식으로서 가치 있는 정보에 집중하세요. "
@@ -217,6 +257,82 @@ Context:
 
 Equation: {equation_text}
 Format: {equation_format}"""
+
+# =============================================================================
+# Generic Content Prompts
+# =============================================================================
+
+# =============================================================================
+# VLM Fallback Prompts (for garbled CJK text recovery)
+# =============================================================================
+
+PROMPTS["table_vlm_fallback_prompt"] = """**중요: 반드시 {response_language}로 응답하세요.**
+
+이 페이지 이미지에서 표(테이블)를 찾아 정확하게 읽고 분석하세요.
+
+[배경] PDF 텍스트 추출 과정에서 표의 텍스트가 깨져서 올바르게 읽을 수 없었습니다.
+이미지를 직접 보고 표의 내용을 정확하게 읽어주세요.
+
+아래 JSON 형식으로 응답하세요:
+{{
+    "detailed_description": "표에 대한 상세 분석 내용을 다음 항목을 포함하여 작성:
+    - 표의 구조 분석 (행/열 개수, 헤더 등)
+    - 표의 헤더(열 제목) 정확히 기록
+    - 각 행의 데이터를 순서대로 정확히 기록
+    - 데이터 간의 관계 및 패턴 분석
+    - 표가 전달하고자 하는 핵심 정보와 시사점
+    이미지에서 직접 읽은 구체적인 텍스트와 수치를 사용하세요.",
+    "entity_info": {{
+        "entity_name": "{entity_name}",
+        "entity_type": "table",
+        "summary": "표의 목적과 핵심 내용을 요약 (최대 100단어)"
+    }}
+}}"""
+
+PROMPTS["table_vlm_fallback_prompt_with_context"] = """**중요: 반드시 {response_language}로 응답하세요.**
+
+주변 문맥을 고려하여 이 페이지 이미지에서 표(테이블)를 찾아 정확하게 읽고 분석하세요.
+
+[배경] PDF 텍스트 추출 과정에서 표의 텍스트가 깨져서 올바르게 읽을 수 없었습니다.
+이미지를 직접 보고 표의 내용을 정확하게 읽어주세요.
+
+아래 JSON 형식으로 응답하세요:
+{{
+    "detailed_description": "표에 대한 상세 분석 내용을 다음 항목을 포함하여 작성:
+    - 표의 구조 분석 (행/열 개수, 헤더 등)
+    - 표의 헤더(열 제목) 정확히 기록
+    - 각 행의 데이터를 순서대로 정확히 기록
+    - 데이터 간의 관계 및 패턴 분석
+    - 주변 문맥과의 연관성 및 표가 설명하는 내용
+    - 표가 전달하고자 하는 핵심 정보와 시사점
+    이미지에서 직접 읽은 구체적인 텍스트와 수치를 사용하세요.",
+    "entity_info": {{
+        "entity_name": "{entity_name}",
+        "entity_type": "table",
+        "summary": "표의 목적, 핵심 내용, 그리고 주변 문맥과의 관계를 요약 (최대 100단어)"
+    }}
+}}
+
+주변 문맥 정보:
+{context}
+
+주변 문맥을 참고하여 표의 의미를 정확하게 파악하세요."""
+
+PROMPTS["text_vlm_fallback_prompt"] = """**중요: 반드시 {response_language}로 응답하세요.**
+
+이 페이지 이미지에서 모든 텍스트를 정확하게 읽어서 추출하세요.
+
+[배경] PDF 텍스트 추출 과정에서 텍스트가 깨져서 올바르게 읽을 수 없었습니다.
+이미지를 직접 보고 텍스트를 정확하게 읽어주세요.
+
+지침:
+- 페이지에 보이는 모든 텍스트를 위에서 아래로, 왼쪽에서 오른쪽으로 순서대로 추출
+- 제목, 본문, 캡션, 번호 등 모든 텍스트를 빠짐없이 기록
+- 원문 그대로 추출 (요약, 분석, 해석하지 않음)
+- 표가 있으면 마크다운 표 형식으로 변환
+- 줄바꿈과 단락 구조를 최대한 유지
+
+추출된 텍스트만 출력하세요. 다른 설명이나 주석은 포함하지 마세요."""
 
 # =============================================================================
 # Generic Content Prompts

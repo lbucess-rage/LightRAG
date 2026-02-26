@@ -96,3 +96,14 @@ class MultimodalConfig:
         default=get_env_value("CONTENT_FORMAT", "auto", str)
     )
     """Default content format for context extraction."""
+
+    # Garbled Text Detection
+    enable_garbled_text_detection: bool = field(
+        default=get_env_value("ENABLE_GARBLED_TEXT_DETECTION", True, bool)
+    )
+    """Enable garbled CJK text detection with VLM fallback."""
+
+    garbled_cjk_threshold: float = field(
+        default=get_env_value("GARBLED_CJK_THRESHOLD", 0.3, float)
+    )
+    """CJK ideograph ratio threshold for garbled text detection."""

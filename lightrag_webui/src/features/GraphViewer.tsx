@@ -181,6 +181,34 @@ const GraphViewer = () => {
     console.log('Initialized sigma settings for theme:', theme)
   }, [theme])
 
+  // Refresh sigma when tab becomes visible (fixes blank canvas after tab switch)
+  const containerRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = containerRef.current?.closest('[data-state]')
+    if (!el) return
+
+    const observer = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        if (m.attributeName === 'data-state' && el.getAttribute('data-state') === 'active') {
+          const sigma = useGraphStore.getState().sigmaInstance
+          if (sigma) {
+            // Small delay to ensure layout is complete after visibility change
+            requestAnimationFrame(() => {
+              try {
+                sigma.refresh()
+              } catch (e) {
+                console.warn('Sigma refresh failed after tab switch:', e)
+              }
+            })
+          }
+        }
+      }
+    })
+
+    observer.observe(el, { attributes: true, attributeFilter: ['data-state'] })
+    return () => observer.disconnect()
+  }, [])
+
   // Clean up sigma instance when component unmounts
   useEffect(() => {
     return () => {
@@ -225,7 +253,7 @@ const GraphViewer = () => {
 
   // Always render SigmaContainer but control its visibility with CSS
   return (
-    <div className="relative h-full w-full overflow-hidden">
+    <div ref={containerRef} className="relative h-full w-full overflow-hidden">
       <SigmaContainer
         settings={memoizedSigmaSettings}
         className="!bg-background !size-full overflow-hidden"

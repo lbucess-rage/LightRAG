@@ -7,8 +7,11 @@ Provides endpoints for:
 - Ingesting web content into the knowledge graph (async)
 """
 
+import asyncio
 import base64
+import datetime
 import hashlib
+from datetime import timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -108,6 +111,9 @@ class URLIngestRequest(BaseModel):
     force_reindex: bool = False
     follow_links: bool = False
     max_depth: int = 2
+    document_prompt: Optional[str] = None
+    image_prompt: Optional[str] = None
+    table_prompt: Optional[str] = None
 
 
 class URLIngestAsyncResponse(BaseModel):
@@ -124,6 +130,9 @@ class URLBatchIngestRequest(BaseModel):
     force_reindex: bool = False
     follow_links: bool = False
     max_depth: int = 2
+    document_prompt: Optional[str] = None
+    image_prompt: Optional[str] = None
+    table_prompt: Optional[str] = None
 
 
 class URLBatchTaskInfo(BaseModel):
@@ -290,6 +299,9 @@ async def ingest_url(body: URLIngestRequest, http_request: Request):
             "file_path_label": file_label,
             "process_images": body.process_images,
             "process_tables": body.process_tables,
+            "document_prompt": body.document_prompt or "",
+            "image_prompt": body.image_prompt or "",
+            "table_prompt": body.table_prompt or "",
         },
     )
 
@@ -308,6 +320,9 @@ async def ingest_url(body: URLIngestRequest, http_request: Request):
         follow_links=body.follow_links,
         max_depth=body.max_depth,
         current_depth=0,
+        document_prompt=body.document_prompt or "",
+        image_prompt=body.image_prompt or "",
+        table_prompt=body.table_prompt or "",
     )
 
     return URLIngestAsyncResponse(
@@ -374,6 +389,9 @@ async def ingest_url_batch(body: URLBatchIngestRequest, http_request: Request):
                 "file_path_label": file_label,
                 "process_images": body.process_images,
                 "process_tables": body.process_tables,
+                "document_prompt": body.document_prompt or "",
+                "image_prompt": body.image_prompt or "",
+                "table_prompt": body.table_prompt or "",
             },
         )
 
@@ -391,6 +409,9 @@ async def ingest_url_batch(body: URLBatchIngestRequest, http_request: Request):
             follow_links=body.follow_links,
             max_depth=body.max_depth,
             current_depth=0,
+            document_prompt=body.document_prompt or "",
+            image_prompt=body.image_prompt or "",
+            table_prompt=body.table_prompt or "",
         )
 
         tasks.append(URLBatchTaskInfo(
@@ -426,11 +447,16 @@ async def _ingest_url_background(
     follow_links: bool = False,
     max_depth: int = 2,
     current_depth: int = 0,
+    document_prompt: str = "",
+    image_prompt: str = "",
+    table_prompt: str = "",
 ) -> None:
     """Background coroutine for URL knowledge ingestion with progress reporting."""
     from lightrag.api.task_manager import TaskStatus, TaskType, get_task_service
 
     service = get_task_service()
+    doc_id_for_status = None
+    has_multimodal = False
 
     try:
         # === Phase 1: Validate (5%) ===
@@ -560,6 +586,17 @@ async def _ingest_url_background(
                 f"Skipping {len(multimodal_items)} multimodal items (no model configured)",
             )
         else:
+            has_multimodal = True
+
+            # Look up doc_id by file_label to sync doc status
+            try:
+                doc = await rag.doc_status.get_doc_by_file_path(file_label)
+                if doc and "id" in doc:
+                    doc_id_for_status = doc["id"]
+                    from lightrag.base import DocStatus
+                    await _update_doc_status(rag, doc_id_for_status, DocStatus.PROCESSING)
+            except Exception as e:
+                logger.warning(f"[Task {task_id}] Failed to look up doc for status sync: {e}")
             await service.update_progress(
                 task_id, 62.0,
                 f"Processing {len(multimodal_items)} multimodal items...",
@@ -605,33 +642,48 @@ async def _ingest_url_background(
                     modal_caption_func=llm_func,
                     context_extractor=context_extractor,
                     response_language=mm_config.vlm_response_language,
+                    vlm_caption_func=_vlm_model_func,
                 )
 
             # Build a minimal content_list for context
             content_list = [{"type": "text", "text": combined_text, "page_idx": 0}]
-            for idx, mm_item in enumerate(multimodal_items):
-                if mm_item["type"] == "image":
-                    content_list.append({
-                        "type": "image",
-                        "img_data": None,  # Placeholder, will be fetched
-                        "page_idx": 0,
-                        "_index": idx + 1,
-                    })
-                elif mm_item["type"] == "table":
-                    content_list.append({
-                        "type": "table",
-                        "text": mm_item["data"].markdown,
-                        "page_idx": 0,
-                        "_index": idx + 1,
-                    })
+            img_offset = 1
+            for img in parsed.images if process_images else []:
+                content_list.append({
+                    "type": "image",
+                    "image_caption": [img.alt] if img.alt else [],
+                    "page_idx": 0,
+                    "_index": img_offset,
+                })
+                img_offset += 1
+            for tbl_idx, tbl in enumerate(parsed.tables if process_tables else []):
+                content_list.append({
+                    "type": "table",
+                    "table_body": tbl.markdown or tbl.html,
+                    "table_caption": [tbl.caption] if tbl.caption else [],
+                    "page_idx": 0,
+                    "_index": img_offset + tbl_idx,
+                })
 
             if image_processor:
                 image_processor.set_content_source(content_list, mm_config.content_format)
             if table_processor:
                 table_processor.set_content_source(content_list, mm_config.content_format)
 
+            # Initialize document instructions with custom prompts
+            for proc in [image_processor, table_processor]:
+                if proc:
+                    proc.set_document_instructions(
+                        document_prompt=document_prompt,
+                        image_prompt=image_prompt,
+                        table_prompt=table_prompt,
+                    )
+
             total_items = len(multimodal_items)
             progress_range = 33.0  # 62% -> 95%
+
+            # Accumulate per-page analysis results for sibling context
+            page_analyses: dict[int, list[dict]] = {}
 
             for i, mm_item in enumerate(multimodal_items):
                 task = service.get_task(task_id)
@@ -675,45 +727,98 @@ async def _ingest_url_background(
                             "context": img_data.context,
                         }
 
+                        item_info = {
+                            "page_idx": 0,
+                            "index": i + 1,
+                            "source_url": img_data.src,
+                            "sibling_analyses": page_analyses.get(0, []),
+                        }
                         result = await image_processor.process_multimodal_content(
                             modal_content=modal_content,
                             content_type="image",
                             file_path=file_label,
-                            item_info={"page_idx": 0, "index": i + 1, "source_url": img_data.src},
+                            item_info=item_info,
                             doc_id=None,
                             chunk_order_index=i + 1,
                         )
+
+                        # Handle skipped items (e.g., decorative image)
+                        if result is None:
+                            results.append({"type": "image", "src": img_data.src, "success": True, "skipped": True})
+                            continue
+
+                        entity_info = result[1] if len(result) > 1 else {}
+                        description_text = result[0] if len(result) > 0 else ""
+                        description_summary = (
+                            (description_text[:200] + "...") if len(description_text) > 200 else description_text
+                        ) if description_text else ""
+
                         results.append({
                             "type": "image",
                             "src": img_data.src,
                             "success": True,
-                            "entity_name": result[1].get("entity_name") if len(result) > 1 else None,
+                            "entity_name": entity_info.get("entity_name"),
+                            "entity_type": entity_info.get("entity_type"),
+                            "description": description_summary,
+                            "chunk_id": entity_info.get("chunk_id"),
+                            "s3_url": entity_info.get("s3_url"),
                         })
+
+                        # Accumulate sibling analysis
+                        if description_text and entity_info.get("entity_name"):
+                            page_analyses.setdefault(0, []).append({
+                                "type": "image",
+                                "entity_name": entity_info.get("entity_name", ""),
+                                "description": description_text[:300],
+                            })
 
                     elif item_type == "table" and table_processor:
                         tbl_data = item_data  # ExtractedTable
                         modal_content = {
                             "type": "table",
-                            "text": tbl_data.markdown or tbl_data.html,
+                            "table_body": tbl_data.markdown or tbl_data.html,
+                            "table_caption": [tbl_data.caption] if tbl_data.caption else [],
+                            "table_footnote": [],
                             "page_idx": 0,
                             "_index": i + 1,
-                            "caption": tbl_data.caption,
                         }
 
+                        item_info = {
+                            "page_idx": 0,
+                            "index": i + 1,
+                            "sibling_analyses": page_analyses.get(0, []),
+                        }
                         result = await table_processor.process_multimodal_content(
                             modal_content=modal_content,
                             content_type="table",
                             file_path=file_label,
-                            item_info={"page_idx": 0, "index": i + 1},
+                            item_info=item_info,
                             doc_id=None,
                             chunk_order_index=i + 1,
                         )
+                        entity_info = result[1] if len(result) > 1 else {}
+                        description_text = result[0] if len(result) > 0 else ""
+                        description_summary = (
+                            (description_text[:200] + "...") if len(description_text) > 200 else description_text
+                        ) if description_text else ""
+
                         results.append({
                             "type": "table",
                             "caption": tbl_data.caption,
                             "success": True,
-                            "entity_name": result[1].get("entity_name") if len(result) > 1 else None,
+                            "entity_name": entity_info.get("entity_name"),
+                            "entity_type": entity_info.get("entity_type"),
+                            "description": description_summary,
+                            "chunk_id": entity_info.get("chunk_id"),
                         })
+
+                        # Accumulate sibling analysis
+                        if description_text and entity_info.get("entity_name"):
+                            page_analyses.setdefault(0, []).append({
+                                "type": "table",
+                                "entity_name": entity_info.get("entity_name", ""),
+                                "description": description_text[:300],
+                            })
 
                 except Exception as e:
                     error_msg = f"Failed to process {item_type}: {str(e)}"
@@ -779,6 +884,9 @@ async def _ingest_url_background(
                         follow_links=True,
                         max_depth=max_depth,
                         current_depth=current_depth + 1,
+                        document_prompt=document_prompt,
+                        image_prompt=image_prompt,
+                        table_prompt=table_prompt,
                     )
 
                     spawned_tasks.append({
@@ -794,6 +902,11 @@ async def _ingest_url_background(
 
         # === Phase 7: Complete (100%) ===
         await service.update_progress(task_id, 98.0, "Finalizing...")
+
+        # Restore doc status to PROCESSED now that multimodal processing is done
+        if doc_id_for_status and has_multimodal:
+            from lightrag.base import DocStatus
+            await _update_doc_status(rag, doc_id_for_status, DocStatus.PROCESSED)
 
         final_result = {
             "success": len(errors) == 0,
@@ -813,7 +926,32 @@ async def _ingest_url_background(
 
     except Exception as e:
         logger.error(f"[Task {task_id}] URL ingestion failed: {e}", exc_info=True)
+        # Restore doc status to PROCESSED — text pipeline already completed successfully
+        if doc_id_for_status and has_multimodal:
+            from lightrag.base import DocStatus
+            await _update_doc_status(rag, doc_id_for_status, DocStatus.PROCESSED)
         await service.fail_task(task_id, str(e))
+
+
+async def _update_doc_status(rag, doc_id: str, status: str, max_retries=5, delay=1.0):
+    """Update document status (with retry for pipeline timing)."""
+    for attempt in range(max_retries):
+        try:
+            doc_data = await rag.doc_status.get_by_id(doc_id)
+            if doc_data:
+                doc_data["status"] = status
+                doc_data["updated_at"] = datetime.datetime.now(timezone.utc).isoformat()
+                await rag.doc_status.upsert({doc_id: doc_data})
+                logger.info(f"Updated doc status for {doc_id}: {status}")
+                return True
+            if attempt < max_retries - 1:
+                await asyncio.sleep(delay)
+        except Exception as e:
+            if attempt < max_retries - 1:
+                await asyncio.sleep(delay)
+            else:
+                logger.warning(f"Failed to update doc status for {doc_id}: {e}")
+    return False
 
 
 def create_url_routes() -> APIRouter:

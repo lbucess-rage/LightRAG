@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/AlertDialog'
 import { useSchemaStore } from '@/stores/schema'
 import { useWorkspaceStore } from '@/stores/workspace'
+import type { SeedEntity } from '@/api/schema'
 import {
   Settings2,
   Plus,
@@ -31,12 +32,22 @@ import {
   CheckCircle,
   AlertCircle,
   RefreshCw,
+  Sprout,
+  Save,
 } from 'lucide-react'
+import { toast } from 'sonner'
 
 export function CurrentSchema() {
   const { t } = useTranslation()
   const [newEntityType, setNewEntityType] = useState('')
   const currentWorkspaceId = useWorkspaceStore.use.currentWorkspaceId()
+
+  // Seed entity form state
+  const [showSeedForm, setShowSeedForm] = useState(false)
+  const [seedKeyword, setSeedKeyword] = useState('')
+  const [seedVariants, setSeedVariants] = useState('')
+  const [seedEntityType, setSeedEntityType] = useState('')
+  const [seedDescription, setSeedDescription] = useState('')
 
   const {
     currentSchema,
@@ -45,7 +56,14 @@ export function CurrentSchema() {
     loadCurrentSchemaFromServer,
     applySchemaToServer,
     resetSchemaOnServer,
+    saveSeedEntities,
+    clearSeedEntities,
+    addSeedEntity,
+    removeSeedEntity,
   } = useSchemaStore()
+
+  // Defensive: ensure seedEntities is always an array (handles stale persisted state)
+  const seedEntities = currentSchema.seedEntities ?? []
 
   // 컴포넌트 마운트 시 및 워크스페이스 변경 시 서버에서 현재 스키마 로드
   useEffect(() => {
@@ -113,6 +131,45 @@ export function CurrentSchema() {
     if (source.startsWith('template:')) return 'default'
     if (source === 'discovery') return 'secondary'
     return 'outline'
+  }
+
+  // Seed entity handlers
+  const handleAddSeedEntity = () => {
+    if (!seedKeyword.trim() || !seedEntityType.trim()) return
+
+    const seed: SeedEntity = {
+      keyword: seedKeyword.trim(),
+      variants: seedVariants
+        .split(',')
+        .map((v) => v.trim())
+        .filter((v) => v.length > 0),
+      entity_type: seedEntityType.trim(),
+      description: seedDescription.trim() || undefined,
+    }
+
+    addSeedEntity(seed)
+    setSeedKeyword('')
+    setSeedVariants('')
+    setSeedEntityType('')
+    setSeedDescription('')
+    setShowSeedForm(false)
+  }
+
+  const handleSaveSeedEntities = async () => {
+    try {
+      await saveSeedEntities(seedEntities)
+      toast.success(t('schema.current.seedEntities.saveSuccess', 'Seed entities saved successfully'))
+    } catch (error) {
+      console.error('Failed to save seed entities:', error)
+    }
+  }
+
+  const handleClearSeedEntities = async () => {
+    try {
+      await clearSeedEntities()
+    } catch (error) {
+      console.error('Failed to clear seed entities:', error)
+    }
   }
 
   return (
@@ -212,6 +269,250 @@ export function CurrentSchema() {
           {currentSchema.entityTypes.length === 0 && (
             <div className="text-center py-8 text-muted-foreground">
               {t('schema.current.noEntityTypes', 'No entity types configured')}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Seed Entities */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Sprout className="w-5 h-5" />
+            {t('schema.current.seedEntities.title', 'Seed Entities')}
+            {seedEntities.length > 0 && (
+              <Badge variant="secondary" className="ml-2">
+                {t('schema.current.seedEntities.count', '{{count}} seed entities configured', {
+                  count: seedEntities.length,
+                })}
+              </Badge>
+            )}
+          </CardTitle>
+          <CardDescription>
+            {t(
+              'schema.current.seedEntities.description',
+              'Define domain-specific keywords that must always be extracted as entities'
+            )}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Seed Entities Table */}
+          {seedEntities.length > 0 ? (
+            <div className="border rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50">
+                  <tr>
+                    <th className="text-left p-3 font-medium">
+                      {t('schema.current.seedEntities.keyword', 'Keyword')}
+                    </th>
+                    <th className="text-left p-3 font-medium">
+                      {t('schema.current.seedEntities.variants', 'Variants')}
+                    </th>
+                    <th className="text-left p-3 font-medium">
+                      {t('schema.current.seedEntities.entityType', 'Entity Type')}
+                    </th>
+                    <th className="text-left p-3 font-medium">
+                      {t('schema.current.seedEntities.seedDescription', 'Description')}
+                    </th>
+                    <th className="w-10 p-3"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {seedEntities.map((seed) => (
+                    <tr key={seed.keyword} className="border-t hover:bg-accent/30 transition-colors">
+                      <td className="p-3 font-medium">{seed.keyword}</td>
+                      <td className="p-3 text-muted-foreground">
+                        {seed.variants.length > 0 ? seed.variants.join(', ') : '-'}
+                      </td>
+                      <td className="p-3">
+                        <Badge variant="outline">{seed.entity_type}</Badge>
+                      </td>
+                      <td className="p-3 text-muted-foreground max-w-[200px] truncate">
+                        {seed.description || '-'}
+                      </td>
+                      <td className="p-3">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 p-0"
+                          onClick={() => removeSeedEntity(seed.keyword)}
+                        >
+                          <X className="w-4 h-4" />
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground">
+              <Sprout className="w-8 h-8 mx-auto mb-2 opacity-50" />
+              <p>{t('schema.current.seedEntities.noSeedEntities', 'No seed entities defined')}</p>
+              <p className="text-xs mt-1">
+                {t(
+                  'schema.current.seedEntities.noSeedEntitiesHint',
+                  'Add domain-specific keywords that the LLM should always extract'
+                )}
+              </p>
+            </div>
+          )}
+
+          {/* Add Seed Entity Button / Form */}
+          {!showSeedForm ? (
+            <Button variant="outline" onClick={() => setShowSeedForm(true)}>
+              <Plus className="w-4 h-4 mr-2" />
+              {t('schema.current.seedEntities.add', 'Add Seed Entity')}
+            </Button>
+          ) : (
+            <div className="border rounded-lg p-4 space-y-3 bg-muted/30">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm font-medium mb-1 block">
+                    {t('schema.current.seedEntities.keyword', 'Keyword')} *
+                  </label>
+                  <Input
+                    placeholder={t('schema.current.seedEntities.keywordPlaceholder', 'Enter main keyword...')}
+                    value={seedKeyword}
+                    onChange={(e) => setSeedKeyword(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1 block">
+                    {t('schema.current.seedEntities.variants', 'Variants')}
+                  </label>
+                  <Input
+                    placeholder={t(
+                      'schema.current.seedEntities.variantsPlaceholder',
+                      'Alternative expressions (comma-separated)...'
+                    )}
+                    value={seedVariants}
+                    onChange={(e) => setSeedVariants(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1 block">
+                    {t('schema.current.seedEntities.entityType', 'Entity Type')} *
+                  </label>
+                  <select
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    value={seedEntityType}
+                    onChange={(e) => setSeedEntityType(e.target.value)}
+                  >
+                    <option value="">
+                      {t('schema.current.seedEntities.entityTypePlaceholder', 'Select entity type')}
+                    </option>
+                    {currentSchema.entityTypes.map((type) => (
+                      <option key={type} value={type}>
+                        {type}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1 block">
+                    {t('schema.current.seedEntities.seedDescription', 'Description')}
+                  </label>
+                  <Input
+                    placeholder={t(
+                      'schema.current.seedEntities.descriptionPlaceholder',
+                      'Optional context for LLM...'
+                    )}
+                    value={seedDescription}
+                    onChange={(e) => setSeedDescription(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setShowSeedForm(false)
+                    setSeedKeyword('')
+                    setSeedVariants('')
+                    setSeedEntityType('')
+                    setSeedDescription('')
+                  }}
+                >
+                  {t('schema.current.seedEntities.cancel', 'Cancel')}
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={handleAddSeedEntity}
+                  disabled={!seedKeyword.trim() || !seedEntityType.trim()}
+                >
+                  <Plus className="w-4 h-4 mr-2" />
+                  {t('schema.current.add', 'Add')}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Seed Entity Error */}
+          {currentSchema.seedSaveError && (
+            <Alert variant="destructive">
+              <AlertCircle className="w-4 h-4" />
+              <AlertDescription>{currentSchema.seedSaveError}</AlertDescription>
+            </Alert>
+          )}
+
+          {/* Save / Clear Buttons */}
+          {seedEntities.length > 0 && (
+            <div className="flex gap-2">
+              <Button
+                onClick={handleSaveSeedEntities}
+                disabled={currentSchema.isSeedSaving}
+              >
+                {currentSchema.isSeedSaving ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    {t('schema.current.seedEntities.saving', 'Saving...')}
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4 mr-2" />
+                    {t('schema.current.seedEntities.save', 'Save Seed Entities')}
+                  </>
+                )}
+              </Button>
+
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="text-destructive hover:text-destructive"
+                    disabled={currentSchema.isSeedSaving}
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    {t('schema.current.seedEntities.clearAll', 'Clear All')}
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>
+                      {t('schema.current.seedEntities.clearConfirmTitle', 'Clear all seed entities?')}
+                    </AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {t(
+                        'schema.current.seedEntities.clearConfirmDescription',
+                        'All seed entities will be removed.'
+                      )}
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>
+                      {t('schema.current.seedEntities.cancel', 'Cancel')}
+                    </AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={handleClearSeedEntities}
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    >
+                      {t('schema.current.seedEntities.clearAll', 'Clear All')}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
           )}
         </CardContent>

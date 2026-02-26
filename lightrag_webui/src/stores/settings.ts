@@ -59,6 +59,9 @@ interface SettingsState {
   retrievalHistory: Message[]
   setRetrievalHistory: (history: Message[]) => void
 
+  showQuerySettings: boolean
+  setShowQuerySettings: (show: boolean) => void
+
   querySettings: Omit<QueryRequest, 'query'>
   updateQuerySettings: (settings: Partial<QueryRequest>) => void
 
@@ -119,6 +122,7 @@ const useSettingsStoreBase = create<SettingsState>()(
       documentsPageSize: 10,
 
       retrievalHistory: [],
+      showQuerySettings: true,
       userPromptHistory: [],
 
       querySettings: {
@@ -201,6 +205,7 @@ const useSettingsStoreBase = create<SettingsState>()(
       },
 
       setShowFileName: (show: boolean) => set({ showFileName: show }),
+      setShowQuerySettings: (show: boolean) => set({ showQuerySettings: show }),
       setShowLegend: (show: boolean) => set({ showLegend: show }),
       setDocumentsPageSize: (size: number) => set({ documentsPageSize: size }),
 
@@ -241,7 +246,7 @@ const useSettingsStoreBase = create<SettingsState>()(
     {
       name: 'settings-storage',
       storage: createJSONStorage(() => localStorage),
-      version: 22,
+      version: 23,
       migrate: (state: any, version: number) => {
         if (version < 2) {
           state.showEdgeLabel = false
@@ -357,6 +362,9 @@ const useSettingsStoreBase = create<SettingsState>()(
             state.querySettings.include_references ??= true
             state.querySettings.include_chunk_content ??= false
           }
+        }
+        if (version < 23) {
+          state.showQuerySettings ??= true
         }
         return state
       }

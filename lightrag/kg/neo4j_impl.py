@@ -1900,12 +1900,13 @@ class Neo4JStorage(BaseGraphStorage):
                    n.source_id as source_id,
                    n.file_path as file_path,
                    n.created_at as created_at,
+                   n.s3_url as s3_url,
                    degree
             """
             result = await session.run(main_query, params)
             entities = []
             async for record in result:
-                entities.append({
+                entity = {
                     "entity_id": record["entity_id"],
                     "entity_type": record["entity_type"],
                     "description": record["description"],
@@ -1913,7 +1914,10 @@ class Neo4JStorage(BaseGraphStorage):
                     "file_path": record["file_path"],
                     "created_at": record["created_at"],
                     "degree": record["degree"],
-                })
+                }
+                if record["s3_url"]:
+                    entity["s3_url"] = record["s3_url"]
+                entities.append(entity)
             await result.consume()
 
             total_pages = (total_count + page_size - 1) // page_size if total_count > 0 else 0

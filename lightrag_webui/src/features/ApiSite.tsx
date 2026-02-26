@@ -1,30 +1,41 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useTabVisibility } from '@/contexts/useTabVisibility'
 import { backendBaseUrl } from '@/lib/constants'
 import { useTranslation } from 'react-i18next'
+import { useWorkspaceStore } from '@/stores/workspace'
 
 export default function ApiSite() {
   const { t } = useTranslation()
   const { isTabVisible } = useTabVisibility()
   const isApiTabVisible = isTabVisible('api')
   const [iframeLoaded, setIframeLoaded] = useState(false)
+  const iframeRef = useRef<HTMLIFrameElement>(null)
+  const currentWorkspaceId = useWorkspaceStore.use.currentWorkspaceId()
 
-  // Load the iframe once on component mount
+  const [docsUrl] = useState(() => {
+    const ws = useWorkspaceStore.getState().currentWorkspaceId
+    return backendBaseUrl + '/docs' + (ws ? '?workspace=' + encodeURIComponent(ws) : '')
+  })
+
   useEffect(() => {
-    if (!iframeLoaded) {
-      setIframeLoaded(true)
-    }
+    if (!iframeLoaded) setIframeLoaded(true)
   }, [iframeLoaded])
 
-  // Use CSS to hide content when tab is not visible
+  useEffect(() => {
+    iframeRef.current?.contentWindow?.postMessage(
+      { type: 'LIGHTRAG_WORKSPACE_CHANGE', workspace: currentWorkspaceId },
+      '*'
+    )
+  }, [currentWorkspaceId])
+
   return (
     <div className={`size-full ${isApiTabVisible ? '' : 'hidden'}`}>
       {iframeLoaded ? (
         <iframe
-          src={backendBaseUrl + '/docs'}
+          ref={iframeRef}
+          src={docsUrl}
           className="size-full w-full h-full"
           style={{ width: '100%', height: '100%', border: 'none' }}
-          // Use key to ensure iframe doesn't reload
           key="api-docs-iframe"
         />
       ) : (

@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useMemo, useRef, memo, useState } from 'react' // Import useMemo
+import { ReactNode, useCallback, useEffect, useMemo, useRef, memo, useState } from 'react'
 import { Message, ReferenceItem } from '@/api/lightrag'
 import useTheme from '@/hooks/useTheme'
 import { cn } from '@/lib/utils'
@@ -10,6 +10,7 @@ import rehypeRaw from 'rehype-raw'
 import remarkMath from 'remark-math'
 import mermaid from 'mermaid'
 import { remarkFootnotes } from '@/utils/remarkFootnotes'
+import { remarkCitations } from '@/utils/remarkCitations'
 
 
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
@@ -79,6 +80,19 @@ export const ChatMessage = ({
   const [isThinkingExpanded, setIsThinkingExpanded] = useState<boolean>(false)
   const [isUserPromptExpanded, setIsUserPromptExpanded] = useState<boolean>(false)
   const [isQueryParamsExpanded, setIsQueryParamsExpanded] = useState<boolean>(false)
+  const [highlightRefId, setHighlightRefId] = useState<string | null>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+
+  const handleCitationClick = useCallback((e: React.MouseEvent) => {
+    const target = e.target as HTMLElement
+    if (target.classList.contains('citation-badge')) {
+      const refId = target.getAttribute('data-ref')
+      if (refId) {
+        setHighlightRefId(refId)
+        setTimeout(() => setHighlightRefId(null), 3000)
+      }
+    }
+  }, [])
 
   // Directly use props passed from the parent.
   const { thinkingContent, displayContent, thinkingTime, isThinking } = message
@@ -98,6 +112,25 @@ export const ChatMessage = ({
   const finalDisplayContent = message.role === 'user'
     ? message.content
     : (displayContent !== undefined ? displayContent : (message.content || ''))
+
+  // Mark citation badges that have evidence with a special CSS class
+  useEffect(() => {
+    if (!contentRef.current || !message.references) return
+    const evidenceRefIds = new Set(
+      message.references
+        .filter(r => r.evidence && r.evidence.length > 0)
+        .map(r => r.reference_id)
+    )
+    const badges = contentRef.current.querySelectorAll('.citation-badge')
+    badges.forEach(badge => {
+      const refId = badge.getAttribute('data-ref')
+      if (refId && evidenceRefIds.has(refId)) {
+        badge.classList.add('has-evidence')
+      } else {
+        badge.classList.remove('has-evidence')
+      }
+    })
+  }, [message.references, finalDisplayContent])
 
   // Load KaTeX rehype plugin dynamically
   // Note: KaTeX extensions (mhchem, copy-tex) are imported statically in main.tsx
@@ -159,7 +192,19 @@ export const ChatMessage = ({
     h4: ({ children }: { children?: ReactNode }) => <h4 className="text-base font-semibold mt-3 mb-2">{children}</h4>,
     ul: ({ children }: { children?: ReactNode }) => <ul className="list-disc pl-5 my-2">{children}</ul>,
     ol: ({ children }: { children?: ReactNode }) => <ol className="list-decimal pl-5 my-2">{children}</ol>,
-    li: ({ children }: { children?: ReactNode }) => <li className="my-1">{children}</li>
+    li: ({ children }: { children?: ReactNode }) => <li className="my-1">{children}</li>,
+    a: ({ href, children, ...props }: { href?: string; children?: ReactNode; [key: string]: any }) => {
+      const isExternal = href && /^https?:\/\//.test(href)
+      return (
+        <a
+          href={href}
+          {...(isExternal ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+          {...props}
+        >
+          {children}
+        </a>
+      )
+    }
   }), [message.mermaidRendered, message.role]);
 
   const thinkingMarkdownComponents = useMemo(() => ({
@@ -286,16 +331,16 @@ export const ChatMessage = ({
       )}
       {/* Main content display */}
       {finalDisplayContent && (
-        <div className="relative">
+        <div ref={contentRef} className="relative" onClick={handleCitationClick}>
           <ReactMarkdown
-            className={`prose dark:prose-invert max-w-none text-sm break-words prose-headings:mt-4 prose-headings:mb-2 prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-1 [&_.katex]:text-current [&_.katex-display]:my-4 [&_.katex-display]:max-w-full [&_.katex-display_>.base]:overflow-x-auto [&_sup]:text-[0.75em] [&_sup]:align-[0.1em] [&_sup]:leading-[0] [&_sub]:text-[0.75em] [&_sub]:align-[-0.2em] [&_sub]:leading-[0] [&_mark]:bg-yellow-200 [&_mark]:dark:bg-yellow-800 [&_u]:underline [&_del]:line-through [&_ins]:underline [&_ins]:decoration-green-500 [&_.footnotes]:mt-8 [&_.footnotes]:pt-4 [&_.footnotes]:border-t [&_.footnotes_ol]:text-sm [&_.footnotes_li]:my-1 ${
+            className={`prose dark:prose-invert max-w-none text-sm break-words prose-headings:mt-4 prose-headings:mb-2 prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-1 [&_.katex]:text-current [&_.katex-display]:my-4 [&_.katex-display]:max-w-full [&_.katex-display_>.base]:overflow-x-auto [&_sup]:text-[0.75em] [&_sup]:align-[0.1em] [&_sup]:leading-[0] [&_sub]:text-[0.75em] [&_sub]:align-[-0.2em] [&_sub]:leading-[0] [&_mark]:bg-yellow-200 [&_mark]:dark:bg-yellow-800 [&_u]:underline [&_del]:line-through [&_ins]:underline [&_ins]:decoration-green-500 [&_.footnotes]:mt-8 [&_.footnotes]:pt-4 [&_.footnotes]:border-t [&_.footnotes_ol]:text-sm [&_.footnotes_li]:my-1 [&_.citation-badge]:inline-flex [&_.citation-badge]:items-center [&_.citation-badge]:text-[10px] [&_.citation-badge]:font-semibold [&_.citation-badge]:bg-primary/15 [&_.citation-badge]:text-primary [&_.citation-badge]:rounded [&_.citation-badge]:px-1 [&_.citation-badge]:py-0 [&_.citation-badge]:mx-0.5 [&_.citation-badge]:cursor-pointer [&_.citation-badge]:hover:bg-primary/25 [&_.citation-badge]:transition-colors [&_.citation-badge]:not-italic [&_.citation-badge.has-evidence]:bg-amber-300/50 [&_.citation-badge.has-evidence]:text-amber-800 [&_.citation-badge.has-evidence]:font-bold [&_.citation-badge.has-evidence]:hover:bg-amber-400/60 [&_.citation-badge.has-evidence]:dark:bg-amber-600/40 [&_.citation-badge.has-evidence]:dark:text-amber-200 [&_.citation-badge.has-evidence]:dark:hover:bg-amber-500/50 ${
               message.role === 'user' ? 'text-primary-foreground' : 'text-foreground'
             } ${
               message.role === 'user'
                 ? '[&_.footnotes]:border-primary-foreground/30 [&_a[href^="#fn"]]:text-primary-foreground [&_a[href^="#fn"]]:no-underline [&_a[href^="#fn"]]:hover:underline [&_a[href^="#fnref"]]:text-primary-foreground [&_a[href^="#fnref"]]:no-underline [&_a[href^="#fnref"]]:hover:underline'
                 : '[&_.footnotes]:border-border [&_a[href^="#fn"]]:text-primary [&_a[href^="#fn"]]:no-underline [&_a[href^="#fn"]]:hover:underline [&_a[href^="#fnref"]]:text-primary [&_a[href^="#fnref"]]:no-underline [&_a[href^="#fnref"]]:hover:underline'
             }`}
-            remarkPlugins={[remarkGfm, remarkFootnotes, remarkMath]}
+            remarkPlugins={[remarkGfm, remarkFootnotes, remarkCitations, remarkMath]}
             rehypePlugins={[
               rehypeRaw,
               ...((katexPlugin && (message.latexRendered ?? true)) ? [[
@@ -326,7 +371,7 @@ export const ChatMessage = ({
       )}
       {/* Reference panel - only for assistant messages with references */}
       {message.role === 'assistant' && message.references && message.references.length > 0 && (
-        <ReferencePanel references={message.references} />
+        <ReferencePanel references={message.references} highlightRefId={highlightRefId} />
       )}
       {/* Loading indicator - only show in active tab */}
       {isTabActive && (() => {

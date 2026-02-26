@@ -154,6 +154,7 @@ export type StructuredContentItem = {
   source?: { doc_id?: string; page_idx?: number; file_path?: string; chunk_order_index?: number }
   analysis?: { description?: string }
   version?: string
+  score?: number
 }
 
 export type ReferenceItem = {
@@ -165,6 +166,7 @@ export type ReferenceItem = {
   structured_content?: StructuredContentItem[]
   score?: number
   scores?: (number | null)[]
+  evidence?: string[]
 }
 
 export type QueryResponse = {
@@ -428,7 +430,8 @@ export const queryTextStream = async (
   request: QueryRequest,
   onChunk: (chunk: string) => void,
   onError?: (error: string) => void,
-  onReferences?: (references: ReferenceItem[]) => void
+  onReferences?: (references: ReferenceItem[]) => void,
+  onEvidenceMap?: (evidenceMap: Record<string, string[]>) => void
 ) => {
   const apiKey = useSettingsStore.getState().apiKey;
   const token = localStorage.getItem('LIGHTRAG-API-TOKEN');
@@ -512,6 +515,9 @@ export const queryTextStream = async (
             if (parsed.response) {
               onChunk(parsed.response);
             }
+            if (parsed.evidence_map && onEvidenceMap) {
+              onEvidenceMap(parsed.evidence_map);
+            }
             if (parsed.error && onError) {
               onError(parsed.error);
             }
@@ -532,6 +538,9 @@ export const queryTextStream = async (
         }
         if (parsed.response) {
           onChunk(parsed.response);
+        }
+        if (parsed.evidence_map && onEvidenceMap) {
+          onEvidenceMap(parsed.evidence_map);
         }
         if (parsed.error && onError) {
           onError(parsed.error);
@@ -1069,6 +1078,7 @@ export type EntityResponse = {
   source_id?: string
   file_path?: string
   created_at?: string
+  s3_url?: string
   degree: number
 }
 
@@ -1412,6 +1422,9 @@ export type URLIngestRequest = {
   force_reindex?: boolean
   follow_links?: boolean
   max_depth?: number
+  document_prompt?: string
+  image_prompt?: string
+  table_prompt?: string
 }
 
 export type URLIngestResponse = {
@@ -1428,6 +1441,9 @@ export type URLBatchIngestRequest = {
   force_reindex?: boolean
   follow_links?: boolean
   max_depth?: number
+  document_prompt?: string
+  image_prompt?: string
+  table_prompt?: string
 }
 
 export type URLBatchTaskInfo = {
@@ -1461,6 +1477,102 @@ export const ingestUrl = async (request: URLIngestRequest): Promise<URLIngestRes
 
 export const ingestUrlBatch = async (request: URLBatchIngestRequest): Promise<URLBatchIngestResponse> => {
   const response = await axiosInstance.post('/api/url/ingest-batch', request)
+  return response.data
+}
+
+// =====================================================
+// Board API Ingestion Types and API
+// =====================================================
+
+export type BoardFieldMapping = {
+  items_path: string
+  title_field: string
+  body_field: string
+  id_field?: string
+  date_field?: string
+  author_field?: string
+  attachments_field?: string
+  detail_url_template?: string
+  pagination_type?: 'page_param' | 'offset_limit' | 'cursor' | 'none'
+  page_param?: string
+  page_size_param?: string
+  total_field?: string
+  cursor_field?: string
+}
+
+export type BoardExploreRequest = {
+  api_url: string
+  method?: string
+  headers?: Record<string, string>
+  params?: Record<string, string>
+  body?: Record<string, any>
+  base_url?: string
+  user_mapping?: BoardFieldMapping
+}
+
+export type BoardExploreResponse = {
+  success: boolean
+  sample_data?: Record<string, any>
+  detected_mapping?: BoardFieldMapping
+  detected_items_count: number
+  sample_item?: Record<string, any>
+  alternative_mappings?: BoardFieldMapping[]
+  detection_method?: 'llm' | 'heuristic' | 'manual'
+  llm_confidence?: 'high' | 'medium' | 'low'
+  llm_notes?: string
+  error?: string
+}
+
+export type BoardIngestRequest = {
+  api_url: string
+  method?: string
+  headers?: Record<string, string>
+  params?: Record<string, string>
+  body?: Record<string, any>
+  field_mapping: BoardFieldMapping
+  max_pages?: number
+  page_size?: number
+  process_images?: boolean
+  process_tables?: boolean
+  skip_duplicates?: boolean
+  update_existing?: boolean
+  fetch_detail?: boolean
+  date_filter_from?: string
+  base_url?: string
+  document_prompt?: string
+  image_prompt?: string
+  table_prompt?: string
+}
+
+export type BoardIngestResponse = {
+  task_id: string
+  stream_url: string
+  message: string
+}
+
+export const exploreBoard = async (req: BoardExploreRequest): Promise<BoardExploreResponse> => {
+  const response = await axiosInstance.post('/api/board/explore', req)
+  return response.data
+}
+
+export const ingestBoard = async (req: BoardIngestRequest): Promise<BoardIngestResponse> => {
+  const response = await axiosInstance.post('/api/board/ingest', req)
+  return response.data
+}
+
+export type BoardViewResponse = {
+  success: boolean
+  title: string
+  body: string
+  date: string
+  author: string
+  attachments: any[]
+  raw_data: Record<string, any>
+  error: string
+}
+
+export const viewBoardPost = async (filePath: string): Promise<BoardViewResponse> => {
+  const response = await axiosInstance.post('/api/board/view', { file_path: filePath })
   return response.data
 }
 
@@ -1631,6 +1743,9 @@ export const processMultimodal = async (
     process_equations?: boolean
     file_path_label?: string
     pdf_password?: string
+    document_prompt?: string
+    image_prompt?: string
+    table_prompt?: string
   },
   onUploadProgress?: (percentCompleted: number) => void
 ): Promise<MultimodalProcessResponse> => {
@@ -1642,6 +1757,9 @@ export const processMultimodal = async (
   if (options.process_equations !== undefined) formData.append('process_equations', String(options.process_equations))
   if (options.file_path_label) formData.append('file_path_label', options.file_path_label)
   if (options.pdf_password) formData.append('pdf_password', options.pdf_password)
+  if (options.document_prompt) formData.append('document_prompt', options.document_prompt)
+  if (options.image_prompt) formData.append('image_prompt', options.image_prompt)
+  if (options.table_prompt) formData.append('table_prompt', options.table_prompt)
 
   const response = await axiosInstance.post('/api/multimodal/process', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
