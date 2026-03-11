@@ -6,12 +6,16 @@ Allows managing prompts stored in PostgreSQL for customization.
 import json
 from typing import Optional, List, Any
 from collections import OrderedDict
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from lightrag.utils import logger
 from lightrag.prompt import PROMPTS
+from lightrag.kg.shared_storage import get_default_workspace
 from ..utils_api import get_combined_auth_dependency
+
+# Capture default prompt values at import time (before load_custom_prompts_from_db overwrites them)
+_DEFAULT_PROMPTS = dict(PROMPTS)
 
 router = APIRouter(
     prefix="/prompts",
@@ -84,21 +88,22 @@ def create_prompt_routes(rag, api_key: Optional[str] = None):
             return rag.text_chunks.db
         return None
 
-    async def get_workspace():
-        """Get current workspace from rag."""
-        if hasattr(rag, 'llm_response_cache') and hasattr(rag.llm_response_cache, 'workspace'):
-            return rag.llm_response_cache.workspace or "base"
-        return "base"
+    def _get_workspace_from_request(request: Request) -> str:
+        """Extract workspace from request header, fall back to server default."""
+        workspace = request.headers.get("LIGHTRAG-WORKSPACE", "").strip()
+        if workspace:
+            return workspace
+        return get_default_workspace() or "base"
 
     @router.get("", dependencies=[Depends(combined_auth)])
-    async def get_all_prompts() -> dict:
+    async def get_all_prompts(http_request: Request) -> dict:
         """
         Get all available prompts with their current values.
         Returns both database-stored prompts and defaults.
         """
         try:
             db = await get_db()
-            workspace = await get_workspace()
+            workspace = _get_workspace_from_request(http_request)
 
             result = []
             db_prompts = {}
@@ -159,7 +164,7 @@ def create_prompt_routes(rag, api_key: Optional[str] = None):
             raise HTTPException(status_code=500, detail=str(e))
 
     @router.get("/{prompt_key}", dependencies=[Depends(combined_auth)])
-    async def get_prompt(prompt_key: str) -> dict:
+    async def get_prompt(prompt_key: str, http_request: Request) -> dict:
         """
         Get a specific prompt by key.
         """
@@ -168,7 +173,7 @@ def create_prompt_routes(rag, api_key: Optional[str] = None):
 
         try:
             db = await get_db()
-            workspace = await get_workspace()
+            workspace = _get_workspace_from_request(http_request)
 
             # Try to fetch from database
             if db is not None and db.pool is not None:
@@ -218,7 +223,7 @@ def create_prompt_routes(rag, api_key: Optional[str] = None):
             raise HTTPException(status_code=500, detail=str(e))
 
     @router.put("/{prompt_key}", dependencies=[Depends(combined_auth)])
-    async def update_prompt(prompt_key: str, request: PromptUpdateRequest) -> dict:
+    async def update_prompt(prompt_key: str, request: PromptUpdateRequest, http_request: Request) -> dict:
         """
         Update a specific prompt.
         """
@@ -227,7 +232,7 @@ def create_prompt_routes(rag, api_key: Optional[str] = None):
 
         try:
             db = await get_db()
-            workspace = await get_workspace()
+            workspace = _get_workspace_from_request(http_request)
 
             if db is None or db.pool is None:
                 raise HTTPException(status_code=503, detail="Database not available")
@@ -256,13 +261,15 @@ def create_prompt_routes(rag, api_key: Optional[str] = None):
             async with db.pool.acquire() as conn:
                 await conn.execute(sql, workspace, prompt_key, value, request.prompt_type, description)
 
-            # Return updated value
+            # Update in-memory PROMPTS dict immediately (no restart needed)
             return_value = request.prompt_value
             if request.prompt_type == 'json' and isinstance(request.prompt_value, str):
                 try:
                     return_value = json.loads(request.prompt_value)
                 except json.JSONDecodeError:
                     pass
+            PROMPTS[prompt_key] = return_value
+            logger.info(f"Prompt '{prompt_key}' updated in memory (immediate effect)")
 
             return {
                 "status": "success",
@@ -283,7 +290,7 @@ def create_prompt_routes(rag, api_key: Optional[str] = None):
             raise HTTPException(status_code=500, detail=str(e))
 
     @router.delete("/{prompt_key}", dependencies=[Depends(combined_auth)])
-    async def reset_prompt(prompt_key: str) -> dict:
+    async def reset_prompt(prompt_key: str, http_request: Request) -> dict:
         """
         Reset a prompt to its default value by deleting from database.
         """
@@ -292,15 +299,17 @@ def create_prompt_routes(rag, api_key: Optional[str] = None):
 
         try:
             db = await get_db()
-            workspace = await get_workspace()
+            workspace = _get_workspace_from_request(http_request)
 
             if db is not None and db.pool is not None:
                 sql = """DELETE FROM LIGHTRAG_PROMPTS WHERE workspace=$1 AND prompt_key=$2"""
                 async with db.pool.acquire() as conn:
                     await conn.execute(sql, workspace, prompt_key)
 
-            # Return default value
-            default_value = PROMPTS.get(prompt_key, "")
+            # Restore default value in memory immediately
+            default_value = _DEFAULT_PROMPTS.get(prompt_key, "")
+            PROMPTS[prompt_key] = default_value
+            logger.info(f"Prompt '{prompt_key}' reset to default in memory (immediate effect)")
             prompt_type = "json" if isinstance(default_value, list) else "text"
 
             return {
@@ -322,18 +331,24 @@ def create_prompt_routes(rag, api_key: Optional[str] = None):
             raise HTTPException(status_code=500, detail=str(e))
 
     @router.post("/reset-all", dependencies=[Depends(combined_auth)])
-    async def reset_all_prompts() -> dict:
+    async def reset_all_prompts(http_request: Request) -> dict:
         """
         Reset all prompts to their default values.
         """
         try:
             db = await get_db()
-            workspace = await get_workspace()
+            workspace = _get_workspace_from_request(http_request)
 
             if db is not None and db.pool is not None:
                 sql = """DELETE FROM LIGHTRAG_PROMPTS WHERE workspace=$1"""
                 async with db.pool.acquire() as conn:
                     await conn.execute(sql, workspace)
+
+            # Restore all editable prompts to defaults in memory
+            for key in EDITABLE_PROMPTS:
+                if key in _DEFAULT_PROMPTS:
+                    PROMPTS[key] = _DEFAULT_PROMPTS[key]
+            logger.info("All prompts reset to defaults in memory (immediate effect)")
 
             return {
                 "status": "success",

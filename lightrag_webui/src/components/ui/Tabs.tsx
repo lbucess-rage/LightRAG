@@ -43,7 +43,8 @@ const TabsContent = React.forwardRef<
     ref={ref}
     className={cn(
       'ring-offset-background focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none',
-      'data-[state=inactive]:invisible data-[state=active]:visible',
+      'data-[state=inactive]:invisible data-[state=inactive]:pointer-events-none data-[state=inactive]:opacity-0',
+      'data-[state=active]:visible data-[state=active]:pointer-events-auto data-[state=active]:opacity-100',
       'h-full w-full',
       className
     )}

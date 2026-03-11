@@ -19,13 +19,14 @@ from lightrag.utils import logger
 
 
 class S3Client:
-    """S3 client for document upload, delete, and URL generation."""
+    """S3 client for document and image upload, delete, and URL generation."""
 
     def __init__(self):
         self.enabled = os.getenv("ENABLE_S3_UPLOAD", "false").lower() == "true"
         self.bucket = os.getenv("AWS_S3_BUCKET", "")
         self.region = os.getenv("AWS_S3_REGION", "ap-northeast-2")
         self.prefix = os.getenv("S3_DOCUMENT_PREFIX", "lightrag/documents")
+        self.image_prefix = os.getenv("S3_IMAGE_PREFIX", "lightrag/images")
 
         self._client = None
 
@@ -179,6 +180,78 @@ class S3Client:
             logger.error(f"Unexpected error during S3 delete: {e}")
             return False
 
+    def _get_image_s3_key(
+        self, filename: str, workspace: str = "", doc_id: str = ""
+    ) -> str:
+        """Generate S3 key for an image file.
+
+        Args:
+            filename: The image filename
+            workspace: Optional workspace name
+            doc_id: Optional document ID
+
+        Returns:
+            S3 key string (under image_prefix)
+        """
+        parts = [self.image_prefix]
+        if workspace:
+            parts.append(workspace)
+        if doc_id:
+            parts.append(doc_id)
+        parts.append(filename)
+        return "/".join(parts)
+
+    def get_image_public_url(
+        self, filename: str, workspace: str = "", doc_id: str = ""
+    ) -> str:
+        """Generate public URL for an image in S3."""
+        s3_key = self._get_image_s3_key(filename, workspace, doc_id)
+        encoded_key = quote(s3_key, safe="/")
+        return f"https://{self.bucket}.s3.{self.region}.amazonaws.com/{encoded_key}"
+
+    async def upload_image(
+        self, file_path: Path, filename: str, workspace: str = "", doc_id: str = ""
+    ) -> Optional[str]:
+        """Upload an image file to S3.
+
+        Args:
+            file_path: Local image file path
+            filename: Filename to use in S3
+            workspace: Optional workspace name
+            doc_id: Optional document ID
+
+        Returns:
+            S3 URL if successful, None otherwise
+        """
+        if not self.enabled or not self._client:
+            return None
+
+        s3_key = self._get_image_s3_key(filename, workspace, doc_id)
+
+        try:
+            content_type = self._get_content_type(filename)
+
+            self._client.upload_file(
+                str(file_path),
+                self.bucket,
+                s3_key,
+                ExtraArgs={
+                    "ContentType": content_type,
+                    "ContentDisposition": "inline",
+                },
+            )
+
+            url = self.get_image_public_url(filename, workspace, doc_id)
+            logger.info(f"Successfully uploaded image to S3: {s3_key}")
+            return url
+
+        except ClientError as e:
+            logger.error(f"Failed to upload image to S3: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error during image S3 upload: {e}")
+            return None
+
     def _get_content_type(self, filename: str) -> str:
         """Get content type based on file extension."""
         ext = Path(filename).suffix.lower()
@@ -200,6 +273,15 @@ class S3Client:
             ".rtf": "application/rtf",
             ".odt": "application/vnd.oasis.opendocument.text",
             ".epub": "application/epub+zip",
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".gif": "image/gif",
+            ".webp": "image/webp",
+            ".bmp": "image/bmp",
+            ".tiff": "image/tiff",
+            ".tif": "image/tiff",
+            ".svg": "image/svg+xml",
         }
         return content_types.get(ext, "application/octet-stream")
 

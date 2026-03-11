@@ -1,6 +1,7 @@
 import Button from '@/components/ui/Button'
 import { SiteInfo, webuiPrefix } from '@/lib/constants'
 import AppSettings from '@/components/AppSettings'
+import WorkspaceSelector from '@/components/workspace/WorkspaceSelector'
 import { TabsList, TabsTrigger } from '@/components/ui/Tabs'
 import { useSettingsStore } from '@/stores/settings'
 import { useAuthStore } from '@/stores/state'
@@ -43,6 +44,12 @@ function TabsNavigation() {
         <NavigationTab value="knowledge-graph" currentTab={currentTab}>
           {t('header.knowledgeGraph')}
         </NavigationTab>
+        <NavigationTab value="entity-management" currentTab={currentTab}>
+          {t('header.entityManagement')}
+        </NavigationTab>
+        <NavigationTab value="schema" currentTab={currentTab}>
+          {t('header.schema')}
+        </NavigationTab>
         <NavigationTab value="retrieval" currentTab={currentTab}>
           {t('header.retrieval')}
         </NavigationTab>
@@ -51,6 +58,9 @@ function TabsNavigation() {
         </NavigationTab>
         <NavigationTab value="prompts" currentTab={currentTab}>
           {t('header.prompts')}
+        </NavigationTab>
+        <NavigationTab value="workspaces" currentTab={currentTab}>
+          {t('header.workspaces')}
         </NavigationTab>
       </TabsList>
     </div>
@@ -134,6 +144,7 @@ export default function SiteHeader() {
             </a>
           </Button>
           <AppSettings />
+          <WorkspaceSelector />
           {!isGuestMode && (
             <Button
               variant="ghost"

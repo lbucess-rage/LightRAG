@@ -4,9 +4,8 @@ LightRAG FastAPI Server
 
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.openapi.docs import (
-    get_swagger_ui_html,
     get_swagger_ui_oauth2_redirect_html,
 )
 import os
@@ -49,12 +48,51 @@ from lightrag.constants import (
 from lightrag.api.routers.document_routes import (
     DocumentManager,
     create_document_routes,
+    set_rag_workspace_getter as set_document_rag_workspace_getter,
 )
-from lightrag.api.routers.query_routes import create_query_routes
-from lightrag.api.routers.graph_routes import create_graph_routes
+from lightrag.api.routers.query_routes import (
+    create_query_routes,
+    set_rag_workspace_getter as set_query_rag_workspace_getter,
+)
+from lightrag.api.routers.graph_routes import (
+    create_graph_routes,
+    set_rag_workspace_getter as set_graph_rag_workspace_getter,
+)
 from lightrag.api.routers.prompt_routes import create_prompt_routes
 from lightrag.api.routers.user_prompt_template_routes import create_user_prompt_template_routes
+from lightrag.api.routers.entity_management_routes import (
+    create_entity_management_routes,
+    set_rag_workspace_getter as set_entity_mgmt_rag_workspace_getter,
+)
+from lightrag.api.routers.workspace_routes import create_workspace_routes
 from lightrag.api.routers.ollama_api import OllamaAPI
+from lightrag.api.routers.ollama_api import set_rag_workspace_getter as set_ollama_rag_workspace_getter
+from lightrag.api.routers.schema_routes import router as schema_router, set_discovery_engine, set_rag_instance, ensure_workspace_schema_loaded
+from lightrag.api.routers.schema_routes import set_rag_workspace_getter as set_schema_rag_workspace_getter
+from lightrag.api.routers.multimodal_routes import (
+    create_multimodal_routes,
+    set_rag_workspace_getter as set_multimodal_rag_workspace_getter,
+    set_multimodal_config,
+    set_vlm_model_func,
+    set_llm_model_func as set_multimodal_llm_func,
+)
+from lightrag.api.routers.task_routes import (
+    create_task_routes,
+    set_rag_workspace_getter as set_task_rag_workspace_getter,
+)
+from lightrag.api.routers.url_routes import (
+    create_url_routes,
+    set_rag_workspace_getter as set_url_rag_workspace_getter,
+    set_vlm_model_func as set_url_vlm_model_func,
+    set_llm_model_func as set_url_llm_model_func,
+)
+from lightrag.api.routers.board_routes import (
+    create_board_routes,
+    set_rag_workspace_getter as set_board_rag_workspace_getter,
+    set_llm_model_func as set_board_llm_model_func,
+    set_vlm_model_func as set_board_vlm_model_func,
+)
+from lightrag.api.task_manager import get_task_service, init_task_service
 
 from lightrag.utils import logger, set_verbose_debug
 from lightrag.kg.shared_storage import (
@@ -66,11 +104,88 @@ from lightrag.kg.shared_storage import (
 )
 from fastapi.security import OAuth2PasswordRequestForm
 from lightrag.api.auth import auth_handler
+from lightrag.exceptions import PipelineNotInitializedError
 
 # use the .env that is inside the current folder
 # allows to use different .env file for each lightrag instance
 # the OS environment variables take precedence over the .env file
 load_dotenv(dotenv_path=".env", override=False)
+
+
+# =============================================================================
+# Workspace-specific RAG Instance Cache
+# =============================================================================
+# Global cache for RAG instances keyed by workspace
+_rag_instance_cache: dict[str, LightRAG] = {}
+_rag_factory_config: dict = {}  # Stores configuration for creating new RAG instances
+_default_rag_instance: LightRAG | None = None
+
+
+def set_rag_factory_config(config: dict):
+    """Store configuration for creating new RAG instances."""
+    global _rag_factory_config
+    _rag_factory_config = config
+
+
+def set_default_rag_instance(rag: LightRAG):
+    """Set the default RAG instance (created at server startup)."""
+    global _default_rag_instance
+    _default_rag_instance = rag
+    # Also cache it under its workspace
+    if rag.workspace:
+        _rag_instance_cache[rag.workspace] = rag
+
+
+async def get_rag_for_workspace(workspace: str) -> LightRAG:
+    """Get or create a RAG instance for the specified workspace.
+
+    Args:
+        workspace: The workspace identifier
+
+    Returns:
+        LightRAG instance for the workspace (initialized)
+    """
+    global _rag_instance_cache, _rag_factory_config, _default_rag_instance
+
+    # Return cached instance if available
+    if workspace in _rag_instance_cache:
+        rag = _rag_instance_cache[workspace]
+        # Ensure schema (entity_types, seed_entities) is loaded into addon_params
+        await ensure_workspace_schema_loaded(workspace, rag)
+        return rag
+
+    # If no factory config, return default instance
+    if not _rag_factory_config:
+        logger.warning(f"No RAG factory config, using default instance for workspace: {workspace}")
+        return _default_rag_instance
+
+    # Create new RAG instance for this workspace
+    try:
+        logger.info(f"Creating new RAG instance for workspace: {workspace}")
+        config = _rag_factory_config.copy()
+        config["workspace"] = workspace
+
+        new_rag = LightRAG(**config)
+
+        # Initialize storages (critical for database connections)
+        logger.info(f"Initializing storages for workspace: {workspace}")
+        await new_rag.initialize_storages()
+
+        # Auto-load schema settings from DB into addon_params
+        await ensure_workspace_schema_loaded(workspace, new_rag)
+
+        _rag_instance_cache[workspace] = new_rag
+        logger.info(f"RAG instance created, initialized, and cached for workspace: {workspace}")
+        return new_rag
+    except Exception as e:
+        logger.error(f"Failed to create RAG instance for workspace {workspace}: {e}")
+        # Fall back to default instance
+        return _default_rag_instance
+
+
+def get_default_rag() -> LightRAG | None:
+    """Get the default RAG instance."""
+    return _default_rag_instance
 
 
 webui_title = os.getenv("WEBUI_TITLE")
@@ -366,6 +481,24 @@ def create_app(args):
             # Data migration regardless of storage implementation
             await rag.check_and_migrate_data()
 
+            # Set DB reference for task persistence and load recent tasks
+            try:
+                task_svc = get_task_service()
+                doc_status = getattr(rag, 'doc_status', None)
+                task_db = getattr(doc_status, 'db', None) if doc_status else None
+                logger.info(
+                    f"Task DB setup: doc_status={type(doc_status).__name__ if doc_status else 'None'}, "
+                    f"db={'available' if task_db else 'None'}"
+                )
+                if task_db:
+                    task_svc._db = task_db
+                    loaded = await task_svc.load_tasks_from_db()
+                    logger.info(f"Loaded {loaded} tasks from DB on startup")
+                else:
+                    logger.warning("No DB reference available for task persistence")
+            except Exception as e:
+                logger.warning(f"Failed to load tasks from DB on startup: {e}")
+
             ASCIIColors.green("\nServer is ready to accept connections! 🚀\n")
 
             yield
@@ -462,27 +595,48 @@ def create_app(args):
     # Create combined auth dependency for all endpoints
     combined_auth = get_combined_auth_dependency(api_key)
 
-    def get_workspace_from_request(request: Request) -> str | None:
+    def get_workspace_from_request(
+        request: Request,
+        query_workspace: str | None = None,
+        body_workspace: str | None = None,
+    ) -> str | None:
         """
-        Extract workspace from HTTP request header or use default.
+        Extract workspace from multiple sources with priority.
 
-        This enables multi-workspace API support by checking the custom
-        'LIGHTRAG-WORKSPACE' header. If not present, falls back to the
-        server's default workspace configuration.
+        Priority order (highest to lowest):
+        1. Body parameter (if provided)
+        2. Query parameter (if provided)
+        3. HTTP header 'LIGHTRAG-WORKSPACE'
+        4. None (will use server default)
+
+        This enables flexible multi-workspace API support:
+        - Header: For SDK/client-level workspace configuration
+        - Query param: For URL-based workspace selection
+        - Body: For per-request workspace override
 
         Args:
             request: FastAPI Request object
+            query_workspace: Workspace from query parameter
+            body_workspace: Workspace from request body
 
         Returns:
-            Workspace identifier (may be empty string for global namespace)
+            Workspace identifier or None for default
         """
-        # Check custom header first
-        workspace = request.headers.get("LIGHTRAG-WORKSPACE", "").strip()
+        # Priority 1: Body parameter
+        if body_workspace and body_workspace.strip():
+            return body_workspace.strip()
 
-        if not workspace:
-            workspace = None
+        # Priority 2: Query parameter
+        if query_workspace and query_workspace.strip():
+            return query_workspace.strip()
 
-        return workspace
+        # Priority 3: HTTP header
+        header_workspace = request.headers.get("LIGHTRAG-WORKSPACE", "").strip()
+        if header_workspace:
+            return header_workspace
+
+        # Priority 4: Return None (caller will use default)
+        return None
 
     # Create working directory if it doesn't exist
     Path(args.working_dir).mkdir(parents=True, exist_ok=True)
@@ -1084,6 +1238,49 @@ def create_app(args):
             },
             ollama_server_infos=ollama_server_infos,
         )
+
+        # Store factory config for creating workspace-specific RAG instances
+        rag_factory_config = {
+            "working_dir": args.working_dir,
+            "llm_model_func": create_llm_model_func(args.llm_binding),
+            "llm_model_name": args.llm_model,
+            "llm_model_max_async": args.max_async,
+            "summary_max_tokens": args.summary_max_tokens,
+            "summary_context_size": args.summary_context_size,
+            "chunk_token_size": int(args.chunk_size),
+            "chunk_overlap_token_size": int(args.chunk_overlap_size),
+            "llm_model_kwargs": create_llm_model_kwargs(args.llm_binding, args, llm_timeout),
+            "embedding_func": embedding_func,
+            "default_llm_timeout": llm_timeout,
+            "default_embedding_timeout": embedding_timeout,
+            "kv_storage": args.kv_storage,
+            "graph_storage": args.graph_storage,
+            "vector_storage": args.vector_storage,
+            "doc_status_storage": args.doc_status_storage,
+            "vector_db_storage_cls_kwargs": {"cosine_better_than_threshold": args.cosine_threshold},
+            "enable_llm_cache_for_entity_extract": args.enable_llm_cache_for_extract,
+            "enable_llm_cache": args.enable_llm_cache,
+            "rerank_model_func": rerank_model_func,
+            "max_parallel_insert": args.max_parallel_insert,
+            "max_graph_nodes": args.max_graph_nodes,
+            "addon_params": {"language": args.summary_language, "entity_types": args.entity_types},
+            "ollama_server_infos": ollama_server_infos,
+        }
+        set_rag_factory_config(rag_factory_config)
+        set_default_rag_instance(rag)
+        # Set workspace getter for all route modules
+        set_document_rag_workspace_getter(get_rag_for_workspace)
+        set_graph_rag_workspace_getter(get_rag_for_workspace)
+        set_query_rag_workspace_getter(get_rag_for_workspace, get_default_workspace)
+        set_entity_mgmt_rag_workspace_getter(get_rag_for_workspace)
+        set_schema_rag_workspace_getter(get_rag_for_workspace)
+        set_ollama_rag_workspace_getter(get_rag_for_workspace)
+        set_multimodal_rag_workspace_getter(get_rag_for_workspace)
+        set_task_rag_workspace_getter(get_rag_for_workspace)
+        set_url_rag_workspace_getter(get_rag_for_workspace)
+        set_board_rag_workspace_getter(get_rag_for_workspace)
+        logger.info(f"RAG factory config stored, default workspace: {args.workspace or 'base'}")
+
     except Exception as e:
         logger.error(f"Failed to initialize LightRAG: {e}")
         raise
@@ -1100,6 +1297,122 @@ def create_app(args):
     app.include_router(create_graph_routes(rag, api_key))
     app.include_router(create_prompt_routes(rag, api_key))
     app.include_router(create_user_prompt_template_routes(rag, api_key))
+    app.include_router(create_entity_management_routes(rag, api_key))
+    app.include_router(create_workspace_routes(rag, api_key))
+
+    # Add Schema API routes
+    app.include_router(schema_router, prefix="/api/schema")
+
+    # Initialize Schema Discovery Engine with LLM
+    try:
+        from lightrag.schema.discovery import SchemaDiscoveryEngine
+
+        async def schema_llm_func(prompt: str, system_prompt: str = None) -> str:
+            """LLM wrapper for schema discovery"""
+            return await rag.llm_model_func(
+                prompt,
+                system_prompt=system_prompt,
+            )
+
+        discovery_engine = SchemaDiscoveryEngine(llm_func=schema_llm_func)
+        set_discovery_engine(discovery_engine)
+        set_rag_instance(rag)
+        logger.info("Schema Discovery Engine initialized with RAG instance")
+    except Exception as e:
+        logger.warning(f"Failed to initialize Schema Discovery Engine: {e}")
+        # RAG 인스턴스는 Discovery 없이도 설정
+        set_rag_instance(rag)
+
+    # Add Multimodal Processing routes
+    app.include_router(create_multimodal_routes())
+
+    # Add Task Management routes and initialize TaskService
+    app.include_router(create_task_routes())
+    init_task_service(log_storage_path=Path(args.working_dir) / "task_logs")
+    logger.info("Task management routes initialized")
+
+    # Add URL Knowledge Ingestion routes
+    app.include_router(create_url_routes())
+    logger.info("URL knowledge ingestion routes initialized")
+
+    # Add Board API Ingestion routes
+    app.include_router(create_board_routes())
+    logger.info("Board API ingestion routes initialized")
+
+    # Initialize VLM model function for multimodal processing
+    try:
+        from lightrag.multimodal.config import MultimodalConfig
+
+        mm_config = MultimodalConfig()
+        set_multimodal_config(mm_config)
+
+        # Set LLM function for table/equation processing (reuse RAG's LLM)
+        async def multimodal_llm_func(prompt: str, system_prompt: str = None, **kwargs) -> str:
+            return await rag.llm_model_func(prompt, system_prompt=system_prompt)
+
+        set_multimodal_llm_func(multimodal_llm_func)
+        set_url_llm_model_func(multimodal_llm_func)
+        set_board_llm_model_func(multimodal_llm_func)
+
+        # Initialize VLM if configured
+        if mm_config.vlm_api_base and mm_config.vlm_model:
+            try:
+                from openai import AsyncOpenAI
+
+                vlm_client = AsyncOpenAI(
+                    base_url=mm_config.vlm_api_base,
+                    api_key=mm_config.vlm_api_key,
+                )
+
+                async def vlm_model_func(
+                    prompt: str,
+                    image_data: str | list[str] = None,
+                    system_prompt: str = None,
+                    **kwargs,
+                ) -> str:
+                    """Call VLM with optional image data (single or multiple images)."""
+                    messages = []
+                    if system_prompt:
+                        messages.append({"role": "system", "content": system_prompt})
+
+                    if image_data:
+                        # Multimodal message with image(s)
+                        content = []
+                        images = image_data if isinstance(image_data, list) else [image_data]
+                        for img in images:
+                            content.append({
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/png;base64,{img}"},
+                            })
+                        content.append({"type": "text", "text": prompt})
+                        messages.append({"role": "user", "content": content})
+                    else:
+                        messages.append({"role": "user", "content": prompt})
+
+                    response = await vlm_client.chat.completions.create(
+                        model=mm_config.vlm_model,
+                        messages=messages,
+                        max_tokens=4096,
+                        temperature=0.1,
+                    )
+                    return response.choices[0].message.content
+
+                set_vlm_model_func(vlm_model_func)
+                set_url_vlm_model_func(vlm_model_func)
+                set_board_vlm_model_func(vlm_model_func)
+                logger.info(
+                    f"Multimodal VLM initialized: {mm_config.vlm_model} at {mm_config.vlm_api_base}"
+                )
+            except ImportError:
+                logger.warning("openai package not installed, VLM model not available")
+            except Exception as e:
+                logger.warning(f"Failed to initialize VLM: {e}")
+        else:
+            logger.info("VLM not configured (set VLM_API_BASE and VLM_MODEL env vars)")
+
+        logger.info("Multimodal processing routes initialized")
+    except Exception as e:
+        logger.warning(f"Failed to initialize multimodal processing: {e}")
 
     # Add Ollama API routes
     ollama_api = OllamaAPI(rag, top_k=args.top_k, api_key=api_key)
@@ -1107,17 +1420,77 @@ def create_app(args):
 
     # Custom Swagger UI endpoint for offline support
     @app.get("/docs", include_in_schema=False)
-    async def custom_swagger_ui_html():
-        """Custom Swagger UI HTML with local static files"""
-        return get_swagger_ui_html(
-            openapi_url=app.openapi_url,
-            title=app.title + " - Swagger UI",
-            oauth2_redirect_url="/docs/oauth2-redirect",
-            swagger_js_url="/static/swagger-ui/swagger-ui-bundle.js",
-            swagger_css_url="/static/swagger-ui/swagger-ui.css",
-            swagger_favicon_url="/static/swagger-ui/favicon-32x32.png",
-            swagger_ui_parameters=app.swagger_ui_parameters,
+    async def custom_swagger_ui_html(workspace: str = ""):
+        """Custom Swagger UI with workspace header auto-injection"""
+        import html as html_mod, json as json_mod
+
+        workspace_safe = html_mod.escape(workspace, quote=True)
+
+        swagger_ui_params = {
+            "dom_id": "#swagger-ui",
+            "layout": "BaseLayout",
+            "deepLinking": True,
+            "showExtensions": True,
+            "showCommonExtensions": True,
+        }
+        if app.swagger_ui_parameters:
+            swagger_ui_params.update(app.swagger_ui_parameters)
+
+        params_js = "\n".join(
+            f"    {json_mod.dumps(k)}: {json_mod.dumps(v)},"
+            for k, v in swagger_ui_params.items()
         )
+
+        return HTMLResponse(f"""<!DOCTYPE html>
+<html><head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="/static/swagger-ui/swagger-ui.css">
+  <link rel="icon" href="/static/swagger-ui/favicon-32x32.png">
+  <title>{app.title} - Swagger UI</title>
+  <style>
+    body {{ margin: 0; }}
+    #ws-banner {{
+      background: #1b1b1b; color: #ccc; padding: 8px 16px;
+      font: 13px/1.4 sans-serif; border-bottom: 1px solid #333;
+      display: flex; align-items: center; gap: 12px;
+    }}
+    #ws-banner .ws-label {{ color: #61affe; font-weight: 600; }}
+    #ws-banner .ws-value {{ color: #49cc90; font-family: monospace; }}
+    #ws-banner .ws-info {{ color: #888; font-size: 12px; }}
+  </style>
+</head><body>
+  <div id="ws-banner">
+    <span class="ws-label">Workspace:</span>
+    <span class="ws-value" id="ws-display">{workspace_safe or 'default'}</span>
+    <span class="ws-info">
+      — WebUI에서 선택한 워크스페이스로 API가 호출됩니다.
+      모든 요청에 <code>LIGHTRAG-WORKSPACE</code> 헤더가 자동 추가됩니다.
+    </span>
+  </div>
+  <div id="swagger-ui"></div>
+  <script src="/static/swagger-ui/swagger-ui-bundle.js"></script>
+  <script>
+    let currentWorkspace = '{workspace_safe}';
+
+    window.addEventListener('message', function(e) {{
+      if (e.data?.type === 'LIGHTRAG_WORKSPACE_CHANGE') {{
+        currentWorkspace = e.data.workspace || '';
+        document.getElementById('ws-display').textContent = currentWorkspace || 'default';
+      }}
+    }});
+
+    SwaggerUIBundle({{
+      url: '{app.openapi_url}',
+{params_js}
+      oauth2RedirectUrl: window.location.origin + '/docs/oauth2-redirect',
+      presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+      requestInterceptor: function(req) {{
+        if (currentWorkspace) req.headers['LIGHTRAG-WORKSPACE'] = currentWorkspace;
+        return req;
+      }}
+    }});
+  </script>
+</body></html>""")
 
     @app.get("/docs/oauth2-redirect", include_in_schema=False)
     async def swagger_ui_redirect():
@@ -1237,9 +1610,22 @@ def create_app(args):
             default_workspace = get_default_workspace()
             if workspace is None:
                 workspace = default_workspace
-            pipeline_status = await get_namespace_data(
-                "pipeline_status", workspace=workspace
-            )
+
+            # Try to get pipeline status, fallback to default workspace or empty dict
+            pipeline_status = {}
+            try:
+                pipeline_status = await get_namespace_data(
+                    "pipeline_status", workspace=workspace
+                )
+            except PipelineNotInitializedError:
+                # If the requested workspace isn't initialized, try default workspace
+                if workspace != default_workspace:
+                    try:
+                        pipeline_status = await get_namespace_data(
+                            "pipeline_status", workspace=default_workspace
+                        )
+                    except PipelineNotInitializedError:
+                        pass  # Use empty dict as fallback
 
             if not auth_configured:
                 auth_mode = "disabled"

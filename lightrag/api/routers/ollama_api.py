@@ -11,7 +11,35 @@ import asyncio
 from lightrag import LightRAG, QueryParam
 from lightrag.utils import TiktokenTokenizer
 from lightrag.api.utils_api import get_combined_auth_dependency
+from lightrag.kg.shared_storage import get_default_workspace
 from fastapi import Depends
+
+
+# Workspace RAG resolution for Ollama API
+_get_rag_for_workspace = None
+
+
+def set_rag_workspace_getter(getter_func):
+    """Set the function to get RAG instance by workspace."""
+    global _get_rag_for_workspace
+    _get_rag_for_workspace = getter_func
+
+
+def _get_workspace_from_request(request: Request) -> str:
+    """Extract workspace from request header, fall back to server default."""
+    workspace = request.headers.get("LIGHTRAG-WORKSPACE", "").strip()
+    if workspace:
+        return workspace
+    return get_default_workspace() or "base"
+
+
+async def _get_workspace_rag(workspace: str, default_rag: LightRAG) -> LightRAG:
+    """Get workspace-specific RAG instance, fall back to default."""
+    if _get_rag_for_workspace is not None:
+        rag = await _get_rag_for_workspace(workspace)
+        if rag is not None:
+            return rag
+    return default_rag
 
 
 # query mode according to query prefix (bypass is not LightRAG quer mode)
@@ -292,6 +320,10 @@ class OllamaAPI:
             Supports both application/json and application/octet-stream Content-Types.
             """
             try:
+                # Resolve workspace-specific RAG instance
+                workspace = _get_workspace_from_request(raw_request)
+                target_rag = await _get_workspace_rag(workspace, self.rag)
+
                 # Parse the request body manually
                 request = await parse_request_body(raw_request, OllamaGenerateRequest)
 
@@ -300,11 +332,11 @@ class OllamaAPI:
                 prompt_tokens = estimate_tokens(query)
 
                 if request.system:
-                    self.rag.llm_model_kwargs["system_prompt"] = request.system
+                    target_rag.llm_model_kwargs["system_prompt"] = request.system
 
                 if request.stream:
-                    response = await self.rag.llm_model_func(
-                        query, stream=True, **self.rag.llm_model_kwargs
+                    response = await target_rag.llm_model_func(
+                        query, stream=True, **target_rag.llm_model_kwargs
                     )
 
                     async def stream_generator():
@@ -428,8 +460,8 @@ class OllamaAPI:
                     )
                 else:
                     first_chunk_time = time.time_ns()
-                    response_text = await self.rag.llm_model_func(
-                        query, stream=False, **self.rag.llm_model_kwargs
+                    response_text = await target_rag.llm_model_func(
+                        query, stream=False, **target_rag.llm_model_kwargs
                     )
                     last_chunk_time = time.time_ns()
 
@@ -469,6 +501,10 @@ class OllamaAPI:
             Supports both application/json and application/octet-stream Content-Types.
             """
             try:
+                # Resolve workspace-specific RAG instance
+                workspace = _get_workspace_from_request(raw_request)
+                target_rag = await _get_workspace_rag(workspace, self.rag)
+
                 # Parse the request body manually
                 request = await parse_request_body(raw_request, OllamaChatRequest)
 
@@ -516,15 +552,15 @@ class OllamaAPI:
                     # Determine if the request is prefix with "/bypass"
                     if mode == SearchMode.bypass:
                         if request.system:
-                            self.rag.llm_model_kwargs["system_prompt"] = request.system
-                        response = await self.rag.llm_model_func(
+                            target_rag.llm_model_kwargs["system_prompt"] = request.system
+                        response = await target_rag.llm_model_func(
                             cleaned_query,
                             stream=True,
                             history_messages=conversation_history,
-                            **self.rag.llm_model_kwargs,
+                            **target_rag.llm_model_kwargs,
                         )
                     else:
-                        response = await self.rag.aquery(
+                        response = await target_rag.aquery(
                             cleaned_query, param=query_param
                         )
 
@@ -678,16 +714,16 @@ class OllamaAPI:
                     )
                     if match_result or mode == SearchMode.bypass:
                         if request.system:
-                            self.rag.llm_model_kwargs["system_prompt"] = request.system
+                            target_rag.llm_model_kwargs["system_prompt"] = request.system
 
-                        response_text = await self.rag.llm_model_func(
+                        response_text = await target_rag.llm_model_func(
                             cleaned_query,
                             stream=False,
                             history_messages=conversation_history,
-                            **self.rag.llm_model_kwargs,
+                            **target_rag.llm_model_kwargs,
                         )
                     else:
-                        response_text = await self.rag.aquery(
+                        response_text = await target_rag.aquery(
                             cleaned_query, param=query_param
                         )
 

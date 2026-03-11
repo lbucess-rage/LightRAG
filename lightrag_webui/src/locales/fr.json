@@ -414,7 +414,14 @@
       "responseFormatOptions": {
         "multipleParagraphs": "Plusieurs paragraphes",
         "singleParagraph": "Paragraphe unique",
-        "bulletPoints": "Points à puces"
+        "bulletPoints": "Points à puces",
+        "numberedList": "Liste numérotée",
+        "table": "Tableau",
+        "executiveSummary": "Résumé exécutif",
+        "faq": "FAQ",
+        "structuredSections": "Sections structurées",
+        "threeLineSummary": "Résumé en trois lignes",
+        "briefAnswer": "Réponse brève"
       },
       "topK": "KG Top K",
       "topKTooltip": "Nombre d'entités et de relations à récupérer. Applicable pour les modes non-naïfs.",

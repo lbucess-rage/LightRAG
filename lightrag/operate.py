@@ -2765,6 +2765,152 @@ async def merge_nodes_and_edges(
         pipeline_status["history_messages"].append(log_message)
 
 
+def _build_entity_types_guide(
+    entity_types: list[str],
+    entity_type_details: list[dict] | None = None,
+) -> str:
+    """Build entity types guide for extraction prompt.
+
+    If entity_type_details is provided (from schema), builds a rich guide
+    with descriptions, examples, and hints.
+    Otherwise falls back to simple comma-separated list.
+    """
+    if not entity_type_details:
+        return f"Entity_types: [{','.join(entity_types)}]"
+
+    lines = [f"Entity_types: [{', '.join(entity_types)}]"]
+    lines.append("")
+    lines.append("---Entity Type Guide---")
+    lines.append(
+        "Below are detailed descriptions for each entity type. "
+        "Use these to correctly classify and distinguish entities:"
+    )
+    lines.append("")
+
+    for detail in entity_type_details:
+        name = detail.get("name", "")
+        desc = detail.get("description", "")
+        examples = detail.get("examples", [])
+        hints = detail.get("extraction_hints", [])
+
+        if not name:
+            continue
+
+        line = f"**{name}**"
+        if desc:
+            line += f" — {desc}"
+        lines.append(line)
+
+        if examples:
+            lines.append(f"  Examples: {', '.join(examples)}")
+        if hints:
+            lines.append(f"  Hints: {'; '.join(hints)}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def _build_seed_entities_guide(
+    seed_entities: list[dict] | None,
+) -> str:
+    """Build seed entities guide section for extraction prompt.
+
+    Generates a text block that instructs the LLM to forcefully extract
+    specific domain keywords (seed entities) when they appear in the text.
+    """
+    if not seed_entities:
+        return ""
+
+    lines = []
+    lines.append("")
+    lines.append("---Required Entities (Seed Entities)---")
+    lines.append(
+        "The following domain-specific terms are critical keywords. "
+        "If ANY of these terms (or their variants) appear in the text, "
+        "they MUST be extracted as entities with the specified type."
+    )
+    lines.append("")
+
+    for seed in seed_entities:
+        keyword = seed.get("keyword", "")
+        if not keyword:
+            continue
+
+        variants = seed.get("variants", [])
+        entity_type = seed.get("entity_type", "")
+        description = seed.get("description", "")
+
+        line = f"- **{keyword}**"
+        if variants:
+            line += f" (variants: {', '.join(variants)})"
+        if entity_type:
+            line += f" → type: {entity_type}"
+        lines.append(line)
+
+        if description:
+            lines.append(f"  {description}")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _find_missing_seed_entities(
+    seed_entities: list[dict],
+    extracted_nodes: dict,
+    chunk_text: str,
+) -> list[dict]:
+    """Find seed entities that appear in text but were not extracted.
+
+    Args:
+        seed_entities: List of seed entity definitions
+        extracted_nodes: Dict of already extracted entity nodes
+        chunk_text: The source text chunk
+
+    Returns:
+        List of missing seed entity dicts
+    """
+    missing = []
+    text_lower = chunk_text.lower()
+
+    # Build set of already extracted entity names (lowercased)
+    extracted_names_lower = set()
+    for name in extracted_nodes:
+        extracted_names_lower.add(name.lower())
+        # Also add without spaces for fuzzy matching
+        extracted_names_lower.add(name.lower().replace(" ", ""))
+
+    for seed in seed_entities:
+        keyword = seed.get("keyword", "")
+        if not keyword:
+            continue
+
+        # Check if keyword or any variant appears in text
+        all_forms = [keyword] + seed.get("variants", [])
+        found_in_text = False
+        for form in all_forms:
+            if form.lower() in text_lower:
+                found_in_text = True
+                break
+
+        if not found_in_text:
+            continue
+
+        # Check if already extracted (by keyword or any variant)
+        already_extracted = False
+        for form in all_forms:
+            if form.lower() in extracted_names_lower:
+                already_extracted = True
+                break
+            if form.lower().replace(" ", "") in extracted_names_lower:
+                already_extracted = True
+                break
+
+        if not already_extracted:
+            missing.append(seed)
+
+    return missing
+
+
 async def extract_entities(
     chunks: dict[str, TextChunkSchema],
     global_config: dict[str, str],
@@ -2790,6 +2936,23 @@ async def extract_entities(
     entity_types = global_config["addon_params"].get(
         "entity_types", DEFAULT_ENTITY_TYPES
     )
+    entity_type_details = global_config["addon_params"].get(
+        "entity_type_details", None
+    )
+    seed_entities = global_config["addon_params"].get("seed_entities", None)
+    logger.info(
+        f"Seed entities config: {len(seed_entities) if seed_entities else 0} entries"
+        + (f" — keywords: {[s.get('keyword') for s in seed_entities]}" if seed_entities else "")
+    )
+
+    # Build entity types guide for system prompt
+    entity_types_guide = _build_entity_types_guide(entity_types, entity_type_details)
+
+    # Append seed entities guide if available
+    seed_entities_guide = _build_seed_entities_guide(seed_entities)
+    if seed_entities_guide:
+        entity_types_guide = entity_types_guide + "\n" + seed_entities_guide
+        logger.info("Seed entities guide injected into extraction prompt")
 
     examples = "\n".join(PROMPTS["entity_extraction_examples"])
 
@@ -2797,6 +2960,7 @@ async def extract_entities(
         tuple_delimiter=PROMPTS["DEFAULT_TUPLE_DELIMITER"],
         completion_delimiter=PROMPTS["DEFAULT_COMPLETION_DELIMITER"],
         entity_types=", ".join(entity_types),
+        entity_types_guide=f"Entity_types: [{', '.join(entity_types)}]",
         language=language,
     )
     # add example's format
@@ -2806,6 +2970,7 @@ async def extract_entities(
         tuple_delimiter=PROMPTS["DEFAULT_TUPLE_DELIMITER"],
         completion_delimiter=PROMPTS["DEFAULT_COMPLETION_DELIMITER"],
         entity_types=",".join(entity_types),
+        entity_types_guide=entity_types_guide,
         examples=examples,
         language=language,
     )
@@ -2919,6 +3084,25 @@ async def extract_entities(
                 else:
                     # New edge from gleaning stage
                     maybe_edges[edge_key] = list(glean_edges)
+
+        # Post-processing: inject missing seed entities (no additional LLM call)
+        if seed_entities:
+            missing = _find_missing_seed_entities(seed_entities, maybe_nodes, content)
+            for seed in missing:
+                entity_data = dict(
+                    entity_name=seed["keyword"],
+                    entity_type=seed["entity_type"].replace(" ", "").lower(),
+                    description=seed.get("description", f"Seed entity: {seed['keyword']}"),
+                    source_id=chunk_key,
+                    file_path=file_path,
+                    timestamp=timestamp,
+                )
+                maybe_nodes[seed["keyword"]] = [entity_data]
+            if missing:
+                logger.info(
+                    f"Injected {len(missing)} missing seed entities in chunk {chunk_key}: "
+                    f"{[s['keyword'] for s in missing]}"
+                )
 
         # Batch update chunk's llm_cache_list with all collected cache keys
         if cache_keys_collector and text_chunks_storage:
@@ -3113,11 +3297,18 @@ async def kg_query(
         if query_param.response_type
         else "Multiple Paragraphs"
     )
+    highlight_instruction = (
+        "\n  - When mentioning entity names from the Knowledge Graph, format them in **bold**."
+        "\n  - When mentioning relationship keywords, format them in *italics*."
+        if query_param.highlight_entities
+        else ""
+    )
 
     # Build system prompt
     sys_prompt_temp = system_prompt if system_prompt else PROMPTS["rag_response"]
     sys_prompt = sys_prompt_temp.format(
         response_type=response_type,
+        highlight_instruction=highlight_instruction,
         user_prompt=user_prompt,
         context_data=context_result.context,
     )
@@ -3407,6 +3598,12 @@ async def _get_vector_context(
                     "source_type": "vector",  # Mark the source type
                     "chunk_id": result.get("id"),  # Add chunk_id for deduplication
                 }
+                # Include structured_content if available
+                if result.get("structured_content"):
+                    chunk_with_metadata["structured_content"] = result["structured_content"]
+                # Add cosine similarity score (1 - distance) if available
+                if result.get("distance") is not None:
+                    chunk_with_metadata["score"] = round(1.0 - float(result["distance"]), 4)
                 valid_chunks.append(chunk_with_metadata)
 
         logger.info(
@@ -3507,6 +3704,31 @@ async def _perform_kg_search(
                 query_param,
                 query_embedding,
             )
+            # Enrich vector chunks missing structured_content from KV store
+            chunks_needing_sc = [
+                c.get("chunk_id") or c.get("id")
+                for c in vector_chunks
+                if not c.get("structured_content")
+            ]
+            if chunks_needing_sc and text_chunks_db:
+                try:
+                    kv_results = await text_chunks_db.get_by_ids(chunks_needing_sc)
+                    sc_map = {}
+                    for kv_chunk in kv_results:
+                        if kv_chunk and kv_chunk.get("structured_content"):
+                            sc_map[kv_chunk["id"]] = kv_chunk["structured_content"]
+                    if sc_map:
+                        for chunk in vector_chunks:
+                            cid = chunk.get("chunk_id") or chunk.get("id")
+                            if cid in sc_map:
+                                chunk["structured_content"] = sc_map[cid]
+                        logger.info(
+                            f"Enriched {len(sc_map)}/{len(chunks_needing_sc)} "
+                            f"vector chunks with structured_content from KV store"
+                        )
+                except Exception as e:
+                    logger.warning(f"Failed to enrich vector chunks with structured_content: {e}")
+
             # Track vector chunks with source metadata
             for i, chunk in enumerate(vector_chunks):
                 chunk_id = chunk.get("chunk_id") or chunk.get("id")
@@ -3811,6 +4033,20 @@ async def _merge_all_chunks(
     max_len = max(len(vector_chunks), len(entity_chunks), len(relation_chunks))
     origin_len = len(vector_chunks) + len(entity_chunks) + len(relation_chunks)
 
+    # Helper function to safely parse structured_content
+    def parse_structured_content(sc):
+        if sc is None:
+            return None
+        if isinstance(sc, dict):
+            return sc
+        if isinstance(sc, str):
+            try:
+                import json
+                return json.loads(sc)
+            except (json.JSONDecodeError, TypeError):
+                return None
+        return sc
+
     for i in range(max_len):
         # Add from vector chunks first (Naive mode)
         if i < len(vector_chunks):
@@ -3818,14 +4054,18 @@ async def _merge_all_chunks(
             chunk_id = chunk.get("chunk_id") or chunk.get("id")
             if chunk_id and chunk_id not in seen_chunk_ids:
                 seen_chunk_ids.add(chunk_id)
-                merged_chunks.append(
-                    {
-                        "content": chunk["content"],
-                        "file_path": chunk.get("file_path", "unknown_source"),
-                        "full_doc_id": chunk.get("full_doc_id"),
-                        "chunk_id": chunk_id,
-                    }
-                )
+                chunk_data = {
+                    "content": chunk["content"],
+                    "file_path": chunk.get("file_path", "unknown_source"),
+                    "full_doc_id": chunk.get("full_doc_id"),
+                    "chunk_id": chunk_id,
+                }
+                sc = parse_structured_content(chunk.get("structured_content"))
+                if sc:
+                    chunk_data["structured_content"] = sc
+                if chunk.get("score") is not None:
+                    chunk_data["score"] = chunk["score"]
+                merged_chunks.append(chunk_data)
 
         # Add from entity chunks (Local mode)
         if i < len(entity_chunks):
@@ -3833,14 +4073,18 @@ async def _merge_all_chunks(
             chunk_id = chunk.get("chunk_id") or chunk.get("id")
             if chunk_id and chunk_id not in seen_chunk_ids:
                 seen_chunk_ids.add(chunk_id)
-                merged_chunks.append(
-                    {
-                        "content": chunk["content"],
-                        "file_path": chunk.get("file_path", "unknown_source"),
-                        "full_doc_id": chunk.get("full_doc_id"),
-                        "chunk_id": chunk_id,
-                    }
-                )
+                chunk_data = {
+                    "content": chunk["content"],
+                    "file_path": chunk.get("file_path", "unknown_source"),
+                    "full_doc_id": chunk.get("full_doc_id"),
+                    "chunk_id": chunk_id,
+                }
+                sc = parse_structured_content(chunk.get("structured_content"))
+                if sc:
+                    chunk_data["structured_content"] = sc
+                if chunk.get("score") is not None:
+                    chunk_data["score"] = chunk["score"]
+                merged_chunks.append(chunk_data)
 
         # Add from relation chunks (Global mode)
         if i < len(relation_chunks):
@@ -3848,20 +4092,34 @@ async def _merge_all_chunks(
             chunk_id = chunk.get("chunk_id") or chunk.get("id")
             if chunk_id and chunk_id not in seen_chunk_ids:
                 seen_chunk_ids.add(chunk_id)
-                merged_chunks.append(
-                    {
-                        "content": chunk["content"],
-                        "file_path": chunk.get("file_path", "unknown_source"),
-                        "full_doc_id": chunk.get("full_doc_id"),
-                        "chunk_id": chunk_id,
-                    }
-                )
+                chunk_data = {
+                    "content": chunk["content"],
+                    "file_path": chunk.get("file_path", "unknown_source"),
+                    "full_doc_id": chunk.get("full_doc_id"),
+                    "chunk_id": chunk_id,
+                }
+                sc = parse_structured_content(chunk.get("structured_content"))
+                if sc:
+                    chunk_data["structured_content"] = sc
+                if chunk.get("score") is not None:
+                    chunk_data["score"] = chunk["score"]
+                merged_chunks.append(chunk_data)
 
     logger.info(
         f"Round-robin merged chunks: {origin_len} -> {len(merged_chunks)} (deduplicated {origin_len - len(merged_chunks)})"
     )
 
     return merged_chunks
+
+
+def _make_keyword_list(ll_keywords: str, hl_keywords: str) -> list[str]:
+    """Combine keyword strings into deduplicated list for exact-match boosting."""
+    keywords = []
+    if ll_keywords:
+        keywords.extend(ll_keywords.split(", "))
+    if hl_keywords:
+        keywords.extend(hl_keywords.split(", "))
+    return list(dict.fromkeys(keywords))  # order-preserving dedup
 
 
 async def _build_context_str(
@@ -3874,6 +4132,7 @@ async def _build_context_str(
     chunk_tracking: dict = None,
     entity_id_to_original: dict = None,
     relation_id_to_original: dict = None,
+    query_keywords: list[str] = None,
 ) -> tuple[str, dict[str, Any]]:
     """
     Build the final LLM context string with token processing.
@@ -3913,6 +4172,12 @@ async def _build_context_str(
         if query_param.response_type
         else "Multiple Paragraphs"
     )
+    highlight_instruction = (
+        "\n  - When mentioning entity names from the Knowledge Graph, format them in **bold**."
+        "\n  - When mentioning relationship keywords, format them in *italics*."
+        if query_param.highlight_entities
+        else ""
+    )
 
     entities_str = "\n".join(
         json.dumps(entity, ensure_ascii=False) for entity in entities_context
@@ -3934,6 +4199,7 @@ async def _build_context_str(
     pre_sys_prompt = sys_prompt_template.format(
         context_data="",  # Empty for overhead calculation
         response_type=response_type,
+        highlight_instruction=highlight_instruction,
         user_prompt=user_prompt,
     )
     sys_prompt_tokens = len(tokenizer.encode(pre_sys_prompt))
@@ -3957,6 +4223,7 @@ async def _build_context_str(
         global_config=global_config,
         source_type=query_param.mode,
         chunk_token_limit=available_chunk_tokens,  # Pass dynamic limit
+        query_keywords=query_keywords,
     )
 
     # Generate reference list from truncated chunks using the new common function
@@ -4129,6 +4396,7 @@ async def _build_query_context(
         chunk_tracking=search_result["chunk_tracking"],
         entity_id_to_original=truncation_result["entity_id_to_original"],
         relation_id_to_original=truncation_result["relation_id_to_original"],
+        query_keywords=_make_keyword_list(ll_keywords, hl_keywords),
     )
 
     # Convert keywords strings to lists and add complete metadata to raw_data
@@ -4822,6 +5090,12 @@ async def naive_query(
         if query_param.response_type
         else "Multiple Paragraphs"
     )
+    highlight_instruction = (
+        "\n  - When mentioning entity names from the Knowledge Graph, format them in **bold**."
+        "\n  - When mentioning relationship keywords, format them in *italics*."
+        if query_param.highlight_entities
+        else ""
+    )
 
     # Use the provided system prompt or default
     sys_prompt_template = (
@@ -4831,6 +5105,7 @@ async def naive_query(
     # Create a preliminary system prompt with empty content_data to calculate overhead
     pre_sys_prompt = sys_prompt_template.format(
         response_type=response_type,
+        highlight_instruction=highlight_instruction,
         user_prompt=user_prompt,
         content_data="",  # Empty for overhead calculation
     )
@@ -4915,6 +5190,7 @@ async def naive_query(
 
     sys_prompt = sys_prompt_template.format(
         response_type=query_param.response_type,
+        highlight_instruction=highlight_instruction,
         user_prompt=user_prompt,
         content_data=context_content,
     )

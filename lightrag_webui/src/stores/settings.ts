@@ -6,7 +6,7 @@ import { Message, QueryRequest } from '@/api/lightrag'
 
 type Theme = 'dark' | 'light' | 'system'
 type Language = 'en' | 'zh' | 'fr' | 'ar' | 'zh_TW'
-type Tab = 'documents' | 'knowledge-graph' | 'retrieval' | 'api' | 'prompts'
+type Tab = 'documents' | 'knowledge-graph' | 'entity-management' | 'schema' | 'retrieval' | 'api' | 'prompts' | 'workspaces'
 
 interface SettingsState {
   // Document manager settings
@@ -58,6 +58,9 @@ interface SettingsState {
 
   retrievalHistory: Message[]
   setRetrievalHistory: (history: Message[]) => void
+
+  showQuerySettings: boolean
+  setShowQuerySettings: (show: boolean) => void
 
   querySettings: Omit<QueryRequest, 'query'>
   updateQuerySettings: (settings: Partial<QueryRequest>) => void
@@ -115,10 +118,11 @@ const useSettingsStoreBase = create<SettingsState>()(
       apiKey: null,
 
       currentTab: 'documents',
-      showFileName: false,
+      showFileName: true,
       documentsPageSize: 10,
 
       retrievalHistory: [],
+      showQuerySettings: true,
       userPromptHistory: [],
 
       querySettings: {
@@ -134,7 +138,10 @@ const useSettingsStoreBase = create<SettingsState>()(
         stream: true,
         history_turns: 0,
         user_prompt: '',
-        enable_rerank: true
+        enable_rerank: true,
+        include_references: true,
+        include_chunk_content: false,
+        highlight_entities: false
       },
 
       setTheme: (theme: Theme) => set({ theme }),
@@ -199,6 +206,7 @@ const useSettingsStoreBase = create<SettingsState>()(
       },
 
       setShowFileName: (show: boolean) => set({ showFileName: show }),
+      setShowQuerySettings: (show: boolean) => set({ showQuerySettings: show }),
       setShowLegend: (show: boolean) => set({ showLegend: show }),
       setDocumentsPageSize: (size: number) => set({ documentsPageSize: size }),
 
@@ -239,7 +247,7 @@ const useSettingsStoreBase = create<SettingsState>()(
     {
       name: 'settings-storage',
       storage: createJSONStorage(() => localStorage),
-      version: 20,
+      version: 24,
       migrate: (state: any, version: number) => {
         if (version < 2) {
           state.showEdgeLabel = false
@@ -343,6 +351,26 @@ const useSettingsStoreBase = create<SettingsState>()(
           // Restore response_type parameter
           if (state.querySettings) {
             state.querySettings.response_type = 'Multiple Paragraphs'
+          }
+        }
+        if (version < 21) {
+          // Show filename by default in document list
+          state.showFileName = true
+        }
+        if (version < 22) {
+          // Add include_references and include_chunk_content fields
+          if (state.querySettings) {
+            state.querySettings.include_references ??= true
+            state.querySettings.include_chunk_content ??= false
+          }
+        }
+        if (version < 23) {
+          state.showQuerySettings ??= true
+        }
+        if (version < 24) {
+          // Add highlight_entities field
+          if (state.querySettings) {
+            state.querySettings.highlight_entities ??= false
           }
         }
         return state

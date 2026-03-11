@@ -56,12 +56,26 @@ You are a Knowledge Graph Specialist responsible for extracting entities and rel
 
 8.  **Completion Signal:** Output the literal string `{completion_delimiter}` only after all entities and relationships, following all criteria, have been completely extracted and outputted.
 
+9.  **Specificity Preservation:**
+    *   Always use the **most specific name** as it appears in the text. Never collapse a specific entity name into a broader or shorter form.
+    *   Preserve all model numbers, version identifiers, edition names, and numeric suffixes as part of the entity name.
+    *   Example: "IONIQ 5" and "IONIQ" are **separate entities**. Do not shorten "IONIQ 5" to "IONIQ".
+    *   Example: "Galaxy S24 Ultra" must NOT be shortened to "Galaxy" or "Galaxy S24".
+
+10. **Hierarchical Entity Awareness:**
+    *   When both a general entity (e.g., "IONIQ series") and a specific sub-entity (e.g., "IONIQ 5") appear in the text, extract **both** as separate entities.
+    *   Add an appropriate relationship (e.g., "product variant", "belongs to series") between the general and specific entities.
+
+11. **Disambiguation:**
+    *   If two entity names are similar but refer to different things, extract them as **separate entities** with distinct descriptions that clarify the difference.
+    *   Pay special attention to: product models vs product lines, versions vs base products, subsidiaries vs parent organizations, specific events vs event series.
+
 ---Examples---
 {examples}
 
 ---Real Data to be Processed---
 <Input>
-Entity_types: [{entity_types}]
+{entity_types_guide}
 Text:
 ```
 {input_text}
@@ -208,7 +222,7 @@ Description List:
 """
 
 PROMPTS["fail_response"] = (
-    "Sorry, I'm not able to provide an answer to that question.[no-context]"
+    "죄송합니다. 관련 문서가 없어 해당 질문에 답변을 드리기 어렵습니다.[no-context]"
 )
 
 PROMPTS["rag_response"] = """---Role---
@@ -227,9 +241,10 @@ Consider the conversation history if provided to maintain conversational flow an
   - Carefully determine the user's query intent in the context of the conversation history to fully understand the user's information need.
   - Scrutinize both `Knowledge Graph Data` and `Document Chunks` in the **Context**. Identify and extract all pieces of information that are directly relevant to answering the user query.
   - Weave the extracted facts into a coherent and logical response. Your own knowledge must ONLY be used to formulate fluent sentences and connect ideas, NOT to introduce any external information.
-  - Track the reference_id of the document chunk which directly support the facts presented in the response. Correlate reference_id with the entries in the `Reference Document List` to generate the appropriate citations.
-  - Generate a references section at the end of the response. Each reference document must directly support the facts presented in the response.
-  - Do not generate anything after the reference section.
+  - Track the reference_id of the document chunk which directly supports each fact.
+    Place an inline citation [n] immediately after each sentence or clause that uses
+    information from a specific chunk, where n is the reference_id number.
+  - Do NOT generate a separate References section at the end. Inline citations are sufficient.
 
 2. Content & Grounding:
   - Strictly adhere to the provided context from the **Context**; DO NOT invent, assume, or infer any information not explicitly stated.
@@ -239,23 +254,16 @@ Consider the conversation history if provided to maintain conversational flow an
   - The response MUST be in the same language as the user query.
   - The response MUST utilize Markdown formatting for enhanced clarity and structure (e.g., headings, bold text, bullet points).
   - The response should be presented in {response_type}.
+{highlight_instruction}
+4. Inline Citation Format:
+  - Place citation tags in the text as [n] where n is the reference_id from the Document Chunks.
+  - Place citations immediately after the relevant fact, before sentence-ending punctuation.
+  - Multiple citations for one fact: [1][3] (adjacent, no space between).
+  - Use [n] format only. Do not use [^n], (n), or any other variant.
+  - Only cite reference_ids that exist in the provided context.
 
-4. References Section Format:
-  - The References section should be under heading: `### References`
-  - Reference list entries should adhere to the format: `* [n] Document Title`. Do not include a caret (`^`) after opening square bracket (`[`).
-  - The Document Title in the citation must retain its original language.
-  - Output each citation on an individual line
-  - Provide maximum of 5 most relevant citations.
-  - Do not generate footnotes section or any comment, summary, or explanation after the references.
-
-5. Reference Section Example:
-```
-### References
-
-- [1] Document Title One
-- [2] Document Title Two
-- [3] Document Title Three
-```
+5. Citation Example:
+  Machine learning enables computers to learn from data [1]. Neural networks excel at pattern recognition [2][3].
 
 6. Additional Instructions: {user_prompt}
 
@@ -281,9 +289,10 @@ Consider the conversation history if provided to maintain conversational flow an
   - Carefully determine the user's query intent in the context of the conversation history to fully understand the user's information need.
   - Scrutinize `Document Chunks` in the **Context**. Identify and extract all pieces of information that are directly relevant to answering the user query.
   - Weave the extracted facts into a coherent and logical response. Your own knowledge must ONLY be used to formulate fluent sentences and connect ideas, NOT to introduce any external information.
-  - Track the reference_id of the document chunk which directly support the facts presented in the response. Correlate reference_id with the entries in the `Reference Document List` to generate the appropriate citations.
-  - Generate a **References** section at the end of the response. Each reference document must directly support the facts presented in the response.
-  - Do not generate anything after the reference section.
+  - Track the reference_id of the document chunk which directly supports each fact.
+    Place an inline citation [n] immediately after each sentence or clause that uses
+    information from a specific chunk, where n is the reference_id number.
+  - Do NOT generate a separate References section at the end. Inline citations are sufficient.
 
 2. Content & Grounding:
   - Strictly adhere to the provided context from the **Context**; DO NOT invent, assume, or infer any information not explicitly stated.
@@ -293,23 +302,16 @@ Consider the conversation history if provided to maintain conversational flow an
   - The response MUST be in the same language as the user query.
   - The response MUST utilize Markdown formatting for enhanced clarity and structure (e.g., headings, bold text, bullet points).
   - The response should be presented in {response_type}.
+{highlight_instruction}
+4. Inline Citation Format:
+  - Place citation tags in the text as [n] where n is the reference_id from the Document Chunks.
+  - Place citations immediately after the relevant fact, before sentence-ending punctuation.
+  - Multiple citations for one fact: [1][3] (adjacent, no space between).
+  - Use [n] format only. Do not use [^n], (n), or any other variant.
+  - Only cite reference_ids that exist in the provided context.
 
-4. References Section Format:
-  - The References section should be under heading: `### References`
-  - Reference list entries should adhere to the format: `* [n] Document Title`. Do not include a caret (`^`) after opening square bracket (`[`).
-  - The Document Title in the citation must retain its original language.
-  - Output each citation on an individual line
-  - Provide maximum of 5 most relevant citations.
-  - Do not generate footnotes section or any comment, summary, or explanation after the references.
-
-5. Reference Section Example:
-```
-### References
-
-- [1] Document Title One
-- [2] Document Title Two
-- [3] Document Title Three
-```
+5. Citation Example:
+  Machine learning enables computers to learn from data [1]. Neural networks excel at pattern recognition [2][3].
 
 6. Additional Instructions: {user_prompt}
 

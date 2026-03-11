@@ -26,14 +26,23 @@ import {
   DocStatus,
   DocStatusResponse,
   DocumentsRequest,
-  PaginationInfo
+  PaginationInfo,
+  listTasks,
+  TaskStatusResponse
 } from '@/api/lightrag'
 import { errorMessage } from '@/lib/utils'
 import { toast } from 'sonner'
 import { useBackendState } from '@/stores/state'
+import { useWorkspaceStore } from '@/stores/workspace'
 
-import { RefreshCwIcon, ActivityIcon, ArrowUpIcon, ArrowDownIcon, RotateCcwIcon, CheckSquareIcon, XIcon, AlertTriangle, Info } from 'lucide-react'
+import { RefreshCwIcon, ActivityIcon, ArrowUpIcon, ArrowDownIcon, RotateCcwIcon, CheckSquareIcon, XIcon, AlertTriangle, Info, MessageSquareText, ClipboardList, FileTextIcon, GlobeIcon, LayersIcon } from 'lucide-react'
 import PipelineStatusDialog from '@/components/documents/PipelineStatusDialog'
+import URLIngestDialog from '@/components/documents/URLIngestDialog'
+import BoardIngestDialog from '@/components/documents/BoardIngestDialog'
+import MultimodalUploadDialog from '@/components/documents/MultimodalUploadDialog'
+import ActiveTasksPanel from '@/components/documents/ActiveTasksPanel'
+import TaskResultDialog from '@/components/documents/TaskResultDialog'
+import { BoardPostDialog, useBoardPostView } from '@/components/board/BoardPostDialog'
 
 type StatusFilter = DocStatus | 'all';
 
@@ -53,14 +62,37 @@ const hasActiveDocumentsStatus = (counts: Record<string, number>): boolean =>
   getCountValue(counts, 'PENDING', 'pending') > 0 ||
   getCountValue(counts, 'PREPROCESSED', 'preprocessed') > 0
 
-const getDisplayFileName = (doc: DocStatusResponse, maxLength: number = 20): string => {
+const getDisplayFileName = (doc: DocStatusResponse, maxLength: number = 40): string => {
+  // Prefer doc_nm if available (e.g., board post title, page title)
+  const docNm = doc.doc_nm ?? doc.metadata?.doc_nm
+  if (docNm && typeof docNm === 'string' && docNm.trim() !== '') {
+    return docNm.length > maxLength
+      ? docNm.slice(0, maxLength) + '...'
+      : docNm;
+  }
+
   // Check if file_path exists and is a non-empty string
   if (!doc.file_path || typeof doc.file_path !== 'string' || doc.file_path.trim() === '') {
     return doc.id;
   }
 
-  // Try to extract filename from path
-  const parts = doc.file_path.split('/');
+  const fp = doc.file_path;
+
+  // URL-based paths: show protocol + host + truncated path
+  if (/^(https?|board):\/\//.test(fp)) {
+    const match = fp.match(/^((?:https?|board):\/\/[^/]+)(\/.*)?$/);
+    if (match) {
+      const host = match[1];  // e.g. "board://kevcs-ap.lbucess.com"
+      const path = match[2] || '';  // e.g. "/6954e02e..."
+      const display = host + path;
+      return display.length > maxLength
+        ? display.slice(0, maxLength) + '...'
+        : display;
+    }
+  }
+
+  // Regular file paths: extract filename only
+  const parts = fp.split('/');
   const fileName = parts[parts.length - 1];
 
   // Ensure extracted filename is valid
@@ -68,11 +100,37 @@ const getDisplayFileName = (doc: DocStatusResponse, maxLength: number = 20): str
     return doc.id;
   }
 
-  // If filename is longer than maxLength, truncate it and add ellipsis
   return fileName.length > maxLength
     ? fileName.slice(0, maxLength) + '...'
     : fileName;
 };
+
+type DocSourceType = 'document' | 'url' | 'board' | 'multimodal'
+
+const getDocSourceType = (doc: DocStatusResponse): DocSourceType => {
+  const fp = doc.file_path || ''
+  // Board protocol (old format)
+  if (/^board:\/\//.test(fp)) return 'board'
+  // HTTP URLs (URL ingest or board ingest new format)
+  if (/^https?:\/\//.test(fp)) return 'url'
+  // Multimodal: docs with custom_prompts in metadata (set by multimodal processing)
+  if (doc.metadata?.custom_prompts) return 'multimodal'
+  // Default: regular document
+  return 'document'
+}
+
+const DocTypeIcon = ({ type, className = 'h-3.5 w-3.5 shrink-0' }: { type: DocSourceType; className?: string }) => {
+  switch (type) {
+    case 'board':
+      return <ClipboardList className={`${className} text-orange-500`} />
+    case 'url':
+      return <GlobeIcon className={`${className} text-blue-500`} />
+    case 'multimodal':
+      return <LayersIcon className={`${className} text-purple-500`} />
+    default:
+      return <FileTextIcon className={`${className} text-gray-500`} />
+  }
+}
 
 const formatMetadata = (metadata: Record<string, any>): string => {
   const formattedMetadata = { ...metadata };
@@ -91,6 +149,9 @@ const formatMetadata = (metadata: Record<string, any>): string => {
     }
   }
 
+  // Exclude custom_prompts from generic JSON display (handled separately)
+  delete formattedMetadata.custom_prompts;
+
   // Format JSON and remove outer braces and indentation
   const jsonStr = JSON.stringify(formattedMetadata, null, 2);
   const lines = jsonStr.split('\n');
@@ -98,6 +159,28 @@ const formatMetadata = (metadata: Record<string, any>): string => {
   return lines.slice(1, -1)
     .map(line => line.replace(/^ {2}/, ''))
     .join('\n');
+};
+
+const hasCustomPrompts = (metadata?: Record<string, any>): boolean => {
+  if (!metadata?.custom_prompts) return false;
+  const cp = metadata.custom_prompts;
+  return !!(cp.document_prompt || cp.image_prompt || cp.table_prompt);
+};
+
+const formatCustomPrompts = (metadata: Record<string, any>, t: (key: string) => string): string => {
+  const cp = metadata?.custom_prompts;
+  if (!cp) return '';
+  const parts: string[] = [];
+  if (cp.document_prompt) {
+    parts.push(`[${t('documentPanel.documentManager.customPrompts.documentPrompt')}]\n${cp.document_prompt}`);
+  }
+  if (cp.image_prompt) {
+    parts.push(`[${t('documentPanel.documentManager.customPrompts.imagePrompt')}]\n${cp.image_prompt}`);
+  }
+  if (cp.table_prompt) {
+    parts.push(`[${t('documentPanel.documentManager.customPrompts.tablePrompt')}]\n${cp.table_prompt}`);
+  }
+  return parts.join('\n\n');
 };
 
 const pulseStyle = `
@@ -222,6 +305,7 @@ export default function DocumentManager() {
   const { t, i18n } = useTranslation()
   const health = useBackendState.use.health()
   const pipelineBusy = useBackendState.use.pipelineBusy()
+  const currentWorkspaceId = useWorkspaceStore.use.currentWorkspaceId()
 
   // Legacy state for backward compatibility
   const [docs, setDocs] = useState<DocsStatusesResponse | null>(null)
@@ -266,6 +350,12 @@ export default function DocumentManager() {
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([])
   const isSelectionMode = selectedDocIds.length > 0
 
+  // State for task result dialog from document row
+  const [selectedTaskForDoc, setSelectedTaskForDoc] = useState<TaskStatusResponse | null>(null)
+
+  // Board post view for URL-type documents
+  const boardView = useBoardPostView()
+
   // Add refs to track previous pipelineBusy state and current interval
   const prevPipelineBusyRef = useRef<boolean | undefined>(undefined);
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -301,6 +391,38 @@ export default function DocumentManager() {
   const handleDeselectAll = useCallback(() => {
     setSelectedDocIds([])
   }, [])
+
+  // Handle viewing task result for a document
+  const handleViewTaskResult = useCallback(async (doc: DocStatusResponse) => {
+    try {
+      const allTasks = await listTasks()
+      // Match by file_name, url, or file_path_label
+      const matched = allTasks
+        .filter(t => {
+          const meta = t.metadata || {}
+          // Direct match: multimodal upload, URL ingest
+          if (
+            (meta.file_name && meta.file_name === doc.file_path) ||
+            (meta.url && meta.url === doc.file_path) ||
+            (meta.file_path_label && meta.file_path_label === doc.file_path)
+          ) return true
+          // Board ingest: file_path starts with api_url (e.g. https://host/api/posts/123)
+          if (t.task_type === 'board_ingest' && meta.api_url && doc.file_path?.startsWith(meta.api_url.replace(/\/$/, ''))) {
+            return true
+          }
+          return false
+        })
+        .sort((a, b) => b.created_at - a.created_at)
+
+      if (matched.length > 0) {
+        setSelectedTaskForDoc(matched[0])
+      } else {
+        toast.info(t('documentPanel.taskResult.noTaskFound'))
+      }
+    } catch {
+      toast.error('Failed to load tasks')
+    }
+  }, [t])
 
   // Handle sort column click
   const handleSort = (field: SortField) => {
@@ -1109,8 +1231,50 @@ export default function DocumentManager() {
     statusFilter,
     sortField,
     sortDirection,
-    fetchPaginatedDocuments
+    fetchPaginatedDocuments,
+    currentWorkspaceId // Refetch when workspace changes
   ]);
+
+  // Reset all state when workspace changes
+  useEffect(() => {
+    // Clear polling interval to prevent fetching old workspace data
+    clearPollingInterval();
+
+    // Reset all document-related state
+    setDocs(null);
+    setCurrentPageDocs([]);
+    setStatusCounts({ all: 0 });
+    setPagination(prev => ({
+      ...prev,
+      page: 1,
+      total_count: 0,
+      total_pages: 0,
+      has_next: false,
+      has_prev: false
+    }));
+    setPageByStatus({
+      all: 1,
+      processed: 1,
+      preprocessed: 1,
+      processing: 1,
+      pending: 1,
+      failed: 1,
+    });
+    setSelectedDocIds([]);
+
+    // Reset error states
+    setRetryState({
+      count: 0,
+      lastError: null,
+      isBackingOff: false
+    });
+    setCircuitBreakerState({
+      isOpen: false,
+      failureCount: 0,
+      lastFailureTime: null,
+      nextRetryTime: null
+    });
+  }, [currentWorkspaceId, clearPollingInterval]);
 
   return (
     <Card className="!rounded-none !overflow-hidden flex flex-col h-full min-h-0">
@@ -1184,6 +1348,9 @@ export default function DocumentManager() {
             ) : !isSelectionMode ? (
               <ClearDocumentsDialog onDocumentsCleared={handleDocumentsCleared} />
             ) : null}
+            <URLIngestDialog onDocumentsUploaded={fetchDocuments} />
+            <BoardIngestDialog onDocumentsUploaded={fetchDocuments} />
+            <MultimodalUploadDialog onDocumentsUploaded={fetchDocuments} />
             <UploadDocumentsDialog onDocumentsUploaded={fetchDocuments} />
             <PipelineStatusDialog
               open={showPipelineStatus}
@@ -1191,6 +1358,8 @@ export default function DocumentManager() {
             />
           </div>
         </div>
+
+        <ActiveTasksPanel onTaskComplete={fetchDocuments} />
 
         <Card className="flex-1 flex flex-col border rounded-md min-h-0 mb-2">
           <CardHeader className="flex-none py-2 px-4">
@@ -1375,28 +1544,54 @@ export default function DocumentManager() {
                       {filteredAndSortedDocs && filteredAndSortedDocs.map((doc) => (
                         <TableRow key={doc.id}>
                           <TableCell className="truncate font-mono overflow-visible max-w-[250px]">
-                            {showFileName ? (
-                              <>
+                            {(() => {
+                              const docType = getDocSourceType(doc)
+                              const isClickable = docType === 'board' || docType === 'url'
+                              const handleFileClick = isClickable ? async () => {
+                                const fp = doc.file_path || ''
+                                if (/^https?:\/\//.test(fp)) {
+                                  // Try board popup first (silent); falls back to new tab
+                                  const ok = await boardView.open(fp, { silentOnError: true })
+                                  if (!ok) window.open(fp, '_blank')
+                                } else if (/^board:\/\//.test(fp)) {
+                                  // board:// protocol — convert to https and try popup
+                                  const httpsUrl = fp.replace(/^board:\/\//, 'https://')
+                                  boardView.open(httpsUrl)
+                                }
+                              } : undefined
+                              return showFileName ? (
+                                <>
+                                  <div className="group relative overflow-visible tooltip-container">
+                                    <div className={cn(
+                                      'flex items-center gap-1.5 truncate',
+                                      isClickable && 'cursor-pointer text-primary hover:underline'
+                                    )}
+                                      onClick={handleFileClick}
+                                      title={t(`documentPanel.documentManager.docType.${docType}`)}
+                                    >
+                                      <DocTypeIcon type={docType} />
+                                      <span className="truncate">{getDisplayFileName(doc, 28)}</span>
+                                    </div>
+                                    <div className="invisible group-hover:visible tooltip">
+                                      {doc.file_path}
+                                    </div>
+                                  </div>
+                                  <div className="text-xs text-gray-500 pl-5">{doc.id}</div>
+                                </>
+                              ) : (
                                 <div className="group relative overflow-visible tooltip-container">
-                                  <div className="truncate">
-                                    {getDisplayFileName(doc, 30)}
+                                  <div className="flex items-center gap-1.5 truncate"
+                                    title={t(`documentPanel.documentManager.docType.${docType}`)}
+                                  >
+                                    <DocTypeIcon type={docType} />
+                                    <span className="truncate">{doc.id}</span>
                                   </div>
                                   <div className="invisible group-hover:visible tooltip">
                                     {doc.file_path}
                                   </div>
                                 </div>
-                                <div className="text-xs text-gray-500">{doc.id}</div>
-                              </>
-                            ) : (
-                              <div className="group relative overflow-visible tooltip-container">
-                                <div className="truncate">
-                                  {doc.id}
-                                </div>
-                                <div className="invisible group-hover:visible tooltip">
-                                  {doc.file_path}
-                                </div>
-                              </div>
-                            )}
+                              )
+                            })()}
                           </TableCell>
                           <TableCell className="max-w-xs min-w-45 truncate overflow-visible">
                             <div className="group relative overflow-visible tooltip-container">
@@ -1432,6 +1627,19 @@ export default function DocumentManager() {
                               ) : (doc.metadata && Object.keys(doc.metadata).length > 0) && (
                                 <Info className="ml-2 h-4 w-4 text-blue-500" />
                               )}
+                              {hasCustomPrompts(doc.metadata) && (
+                                <MessageSquareText className="ml-1 h-4 w-4 text-violet-500" />
+                              )}
+                              <button
+                                className="ml-1 p-0.5 rounded hover:bg-muted shrink-0"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleViewTaskResult(doc)
+                                }}
+                                title={t('documentPanel.taskResult.viewResult')}
+                              >
+                                <ClipboardList className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
+                              </button>
 
                               {/* Tooltip rendering logic */}
                               {(doc.error_msg || (doc.metadata && Object.keys(doc.metadata).length > 0) || doc.track_id) && (
@@ -1441,6 +1649,12 @@ export default function DocumentManager() {
                                   )}
                                   {doc.metadata && Object.keys(doc.metadata).length > 0 && (
                                     <pre>{formatMetadata(doc.metadata)}</pre>
+                                  )}
+                                  {hasCustomPrompts(doc.metadata) && (
+                                    <div className="mt-2 pt-2 border-t border-white/20">
+                                      <div className="font-semibold mb-1">{t('documentPanel.documentManager.customPrompts.title')}</div>
+                                      <pre className="text-[11px]">{formatCustomPrompts(doc.metadata!, t)}</pre>
+                                    </div>
                                   )}
                                   {doc.error_msg && (
                                     <pre>{doc.error_msg}</pre>
@@ -1475,6 +1689,12 @@ export default function DocumentManager() {
           </CardContent>
         </Card>
       </CardContent>
+
+      <TaskResultDialog task={selectedTaskForDoc} onClose={() => setSelectedTaskForDoc(null)} />
+
+      {boardView.data && (
+        <BoardPostDialog isOpen={true} onClose={boardView.close} data={boardView.data} />
+      )}
     </Card>
   )
 }

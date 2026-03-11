@@ -2,6 +2,7 @@ import axios, { AxiosError } from 'axios'
 import { backendBaseUrl, popularLabelsDefaultLimit, searchLabelsDefaultLimit } from '@/lib/constants'
 import { errorMessage } from '@/lib/utils'
 import { useSettingsStore } from '@/stores/settings'
+import { useWorkspaceStore } from '@/stores/workspace'
 import { navigationService } from '@/services/navigation'
 
 // Types
@@ -137,10 +138,43 @@ export type QueryRequest = {
   user_prompt?: string
   /** Enable reranking for retrieved text chunks. If True but no rerank model is configured, a warning will be issued. Default is True. */
   enable_rerank?: boolean
+  /** If True, includes reference documents in the response. */
+  include_references?: boolean
+  /** If True, includes chunk content (images, tables, etc.) in the references. */
+  include_chunk_content?: boolean
+  /** If True, highlights entity names in bold and relation keywords in italics. */
+  highlight_entities?: boolean
+}
+
+export type StructuredContentItem = {
+  type: 'image' | 'table' | 'text' | 'equation' | string
+  image?: { path?: string; s3_url?: string; captions?: string[]; footnotes?: string[] }
+  table?: { caption?: string[]; footnotes?: string[]; body_markdown?: string }
+  equation?: { text?: string; format?: string }
+  content?: { raw?: string } | string
+  entity?: { name?: string; type?: string; summary?: string }
+  source?: { doc_id?: string; page_idx?: number; file_path?: string; chunk_order_index?: number }
+  analysis?: { description?: string }
+  version?: string
+  score?: number
+}
+
+export type ReferenceItem = {
+  reference_id: string
+  doc_id?: string
+  file_path: string
+  download_url?: string
+  content?: string[]
+  structured_content?: StructuredContentItem[]
+  score?: number
+  scores?: (number | null)[]
+  evidence?: string[]
+  doc_nm?: string
 }
 
 export type QueryResponse = {
   response: string
+  references?: ReferenceItem[]
 }
 
 export type EntityUpdateResponse = {
@@ -196,6 +230,7 @@ export type DocStatusResponse = {
   error_msg?: string
   metadata?: Record<string, any>
   file_path: string
+  doc_nm?: string
 }
 
 export type DocsStatusesResponse = {
@@ -285,10 +320,11 @@ const axiosInstance = axios.create({
   }
 })
 
-// Interceptor: add api key and check authentication
+// Interceptor: add api key, workspace header, and check authentication
 axiosInstance.interceptors.request.use((config) => {
   const apiKey = useSettingsStore.getState().apiKey
   const token = localStorage.getItem('LIGHTRAG-API-TOKEN');
+  const workspaceId = useWorkspaceStore.getState().currentWorkspaceId
 
   // Always include token if it exists, regardless of path
   if (token) {
@@ -296,6 +332,10 @@ axiosInstance.interceptors.request.use((config) => {
   }
   if (apiKey) {
     config.headers['X-API-Key'] = apiKey
+  }
+  // Include workspace header for multi-tenant support
+  if (workspaceId) {
+    config.headers['LIGHTRAG-WORKSPACE'] = workspaceId
   }
   return config
 })
@@ -393,10 +433,13 @@ export const queryText = async (request: QueryRequest): Promise<QueryResponse> =
 export const queryTextStream = async (
   request: QueryRequest,
   onChunk: (chunk: string) => void,
-  onError?: (error: string) => void
+  onError?: (error: string) => void,
+  onReferences?: (references: ReferenceItem[]) => void,
+  onEvidenceMap?: (evidenceMap: Record<string, string[]>) => void
 ) => {
   const apiKey = useSettingsStore.getState().apiKey;
   const token = localStorage.getItem('LIGHTRAG-API-TOKEN');
+  const workspaceId = useWorkspaceStore.getState().currentWorkspaceId;
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
     'Accept': 'application/x-ndjson',
@@ -406,6 +449,9 @@ export const queryTextStream = async (
   }
   if (apiKey) {
     headers['X-API-Key'] = apiKey;
+  }
+  if (workspaceId) {
+    headers['LIGHTRAG-WORKSPACE'] = workspaceId;
   }
 
   try {
@@ -466,9 +512,17 @@ export const queryTextStream = async (
         if (line.trim()) {
           try {
             const parsed = JSON.parse(line);
+            // Handle references and response separately (non-streaming sends both in one line)
+            if (parsed.references && onReferences) {
+              onReferences(parsed.references);
+            }
             if (parsed.response) {
               onChunk(parsed.response);
-            } else if (parsed.error && onError) {
+            }
+            if (parsed.evidence_map && onEvidenceMap) {
+              onEvidenceMap(parsed.evidence_map);
+            }
+            if (parsed.error && onError) {
               onError(parsed.error);
             }
           } catch (error) {
@@ -483,9 +537,16 @@ export const queryTextStream = async (
     if (buffer.trim()) {
       try {
         const parsed = JSON.parse(buffer);
+        if (parsed.references && onReferences) {
+          onReferences(parsed.references);
+        }
         if (parsed.response) {
           onChunk(parsed.response);
-        } else if (parsed.error && onError) {
+        }
+        if (parsed.evidence_map && onEvidenceMap) {
+          onEvidenceMap(parsed.evidence_map);
+        }
+        if (parsed.error && onError) {
           onError(parsed.error);
         }
       } catch (error) {
@@ -1010,5 +1071,711 @@ export const updateUserPromptTemplate = async (
  */
 export const deleteUserPromptTemplate = async (templateId: string): Promise<UserPromptTemplateActionResponse> => {
   const response = await axiosInstance.delete(`/user-prompt-templates/${encodeURIComponent(templateId)}`)
+  return response.data
+}
+
+// Entity Management Types
+export type EntityResponse = {
+  entity_id: string
+  entity_type?: string
+  description?: string
+  source_id?: string
+  file_path?: string
+  created_at?: string
+  s3_url?: string
+  degree: number
+}
+
+export type EntitiesRequest = {
+  page: number
+  page_size: number
+  search?: string
+  entity_type?: string
+  sort_field: string
+  sort_direction: 'asc' | 'desc'
+}
+
+export type EntitiesPaginatedResponse = {
+  entities: EntityResponse[]
+  pagination: PaginationInfo
+}
+
+export type EntityTypeCount = {
+  entity_type: string
+  count: number
+}
+
+export type EntityTypesResponse = {
+  types: EntityTypeCount[]
+  total_entities: number
+}
+
+export type RelationResponse = {
+  source_id: string
+  target_id: string
+  weight?: number
+  keywords?: string
+  description?: string
+  source_chunk_id?: string
+  created_at?: string
+}
+
+export type RelationsRequest = {
+  page: number
+  page_size: number
+  search?: string
+  sort_field: string
+  sort_direction: 'asc' | 'desc'
+}
+
+export type RelationsPaginatedResponse = {
+  relations: RelationResponse[]
+  pagination: PaginationInfo
+}
+
+export type DeleteEntityResponse = {
+  status: string
+  message: string
+}
+
+export type DeleteRelationRequest = {
+  source_id: string
+  target_id: string
+}
+
+export type DeleteRelationResponse = {
+  status: string
+  message: string
+}
+
+// Entity Management API methods
+/**
+ * Get paginated list of entities
+ * @param request The pagination and filter request
+ * @returns Promise with paginated entities response
+ */
+export const getEntitiesPaginated = async (request: EntitiesRequest): Promise<EntitiesPaginatedResponse> => {
+  const response = await axiosInstance.post('/entities', request)
+  return response.data
+}
+
+/**
+ * Get all entity types with counts
+ * @returns Promise with entity types response
+ */
+export const getEntityTypes = async (): Promise<EntityTypesResponse> => {
+  const response = await axiosInstance.get('/entity-types')
+  return response.data
+}
+
+/**
+ * Get paginated list of relations
+ * @param request The pagination and search request
+ * @returns Promise with paginated relations response
+ */
+export const getRelationsPaginated = async (request: RelationsRequest): Promise<RelationsPaginatedResponse> => {
+  const response = await axiosInstance.post('/relations', request)
+  return response.data
+}
+
+/**
+ * Delete an entity
+ * @param entityId The entity ID to delete
+ * @returns Promise with delete response
+ */
+export const deleteEntity = async (entityId: string, cascade: boolean = true): Promise<DeleteEntityResponse> => {
+  const response = await axiosInstance.delete(`/entities/${encodeURIComponent(entityId)}?cascade=${cascade}`)
+  return response.data
+}
+
+/**
+ * Delete a relation between two entities
+ * @param request The delete relation request with source and target IDs
+ * @returns Promise with delete response
+ */
+export const deleteRelation = async (request: DeleteRelationRequest, cascade: boolean = true): Promise<DeleteRelationResponse> => {
+  const response = await axiosInstance.delete(`/relations?cascade=${cascade}`, { data: request })
+  return response.data
+}
+
+// =====================================================
+// Workspace Management Types and API
+// =====================================================
+
+export type WorkspaceInfo = {
+  workspace_id: string
+  name: string
+  description?: string
+  is_default: boolean
+  document_count: number
+  entity_count: number
+  relation_count: number
+  metadata?: Record<string, any>
+  create_time?: number
+  update_time?: number
+  is_busy: boolean
+}
+
+export type WorkspaceListResponse = {
+  workspaces: WorkspaceInfo[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export type WorkspaceCreateRequest = {
+  workspace_id: string
+  name: string
+  description?: string
+  metadata?: Record<string, any>
+}
+
+export type WorkspaceUpdateRequest = {
+  name?: string
+  description?: string
+  metadata?: Record<string, any>
+}
+
+export type WorkspaceStatsResponse = {
+  workspace_id: string
+  document_count: number
+  entity_count: number
+  relation_count: number
+  is_busy: boolean
+  busy_start_time?: number
+}
+
+export type CopySettingsRequest = {
+  target_workspace_id: string
+  include_prompts?: boolean
+  include_templates?: boolean
+}
+
+export type CopyDataRequest = {
+  target_workspace_id: string
+  include_documents?: boolean
+  include_entities?: boolean
+  include_relations?: boolean
+  include_vectors?: boolean
+}
+
+/**
+ * Get paginated list of workspaces
+ * @param page Page number (1-based)
+ * @param pageSize Number of items per page
+ * @returns Promise with paginated workspaces response
+ */
+export const getWorkspaces = async (page: number = 1, pageSize: number = 50): Promise<WorkspaceListResponse> => {
+  const response = await axiosInstance.get('/workspaces', {
+    params: { page, page_size: pageSize }
+  })
+  return response.data
+}
+
+/**
+ * Get workspace by ID
+ * @param workspaceId The workspace ID
+ * @returns Promise with workspace info
+ */
+export const getWorkspace = async (workspaceId: string): Promise<WorkspaceInfo> => {
+  const response = await axiosInstance.get(`/workspaces/${encodeURIComponent(workspaceId)}`)
+  return response.data
+}
+
+/**
+ * Create a new workspace
+ * @param request The workspace creation request
+ * @returns Promise with created workspace info
+ */
+export const createWorkspace = async (request: WorkspaceCreateRequest): Promise<WorkspaceInfo> => {
+  const response = await axiosInstance.post('/workspaces', request)
+  return response.data
+}
+
+/**
+ * Update a workspace
+ * @param workspaceId The workspace ID to update
+ * @param request The workspace update request
+ * @returns Promise with updated workspace info
+ */
+export const updateWorkspace = async (workspaceId: string, request: WorkspaceUpdateRequest): Promise<WorkspaceInfo> => {
+  const response = await axiosInstance.patch(`/workspaces/${encodeURIComponent(workspaceId)}`, request)
+  return response.data
+}
+
+/**
+ * Delete a workspace
+ * @param workspaceId The workspace ID to delete
+ * @param deleteData Whether to delete all data in the workspace
+ * @returns Promise with delete response
+ */
+export const deleteWorkspace = async (workspaceId: string, deleteData: boolean = true): Promise<{ message: string }> => {
+  const response = await axiosInstance.delete(`/workspaces/${encodeURIComponent(workspaceId)}`, {
+    params: { delete_data: deleteData }
+  })
+  return response.data
+}
+
+/**
+ * Get workspace statistics
+ * @param workspaceId The workspace ID
+ * @returns Promise with workspace stats
+ */
+export const getWorkspaceStats = async (workspaceId: string): Promise<WorkspaceStatsResponse> => {
+  const response = await axiosInstance.get(`/workspaces/${encodeURIComponent(workspaceId)}/stats`)
+  return response.data
+}
+
+/**
+ * Sync workspace statistics with actual data
+ * @param workspaceId The workspace ID
+ * @returns Promise with sync response
+ */
+export const syncWorkspaceStats = async (workspaceId: string): Promise<{ message: string }> => {
+  const response = await axiosInstance.post(`/workspaces/${encodeURIComponent(workspaceId)}/sync-stats`)
+  return response.data
+}
+
+/**
+ * Set a workspace as default
+ * @param workspaceId The workspace ID to set as default
+ * @returns Promise with response
+ */
+export const setDefaultWorkspace = async (workspaceId: string): Promise<{ message: string }> => {
+  const response = await axiosInstance.post(`/workspaces/${encodeURIComponent(workspaceId)}/set-default`)
+  return response.data
+}
+
+/**
+ * Get the default workspace
+ * @returns Promise with default workspace info
+ */
+export const getDefaultWorkspace = async (): Promise<WorkspaceInfo> => {
+  const response = await axiosInstance.get('/workspaces/default')
+  return response.data
+}
+
+/**
+ * Copy settings from one workspace to another
+ * @param sourceWorkspaceId The source workspace ID
+ * @param request The copy settings request
+ * @returns Promise with copy response
+ */
+export const copyWorkspaceSettings = async (
+  sourceWorkspaceId: string,
+  request: CopySettingsRequest
+): Promise<{ message: string; copied_items: string[] }> => {
+  const response = await axiosInstance.post(
+    `/workspaces/${encodeURIComponent(sourceWorkspaceId)}/copy-settings`,
+    request
+  )
+  return response.data
+}
+
+/**
+ * Copy data from one workspace to another
+ * @param sourceWorkspaceId The source workspace ID
+ * @param request The copy data request
+ * @returns Promise with copy response
+ */
+export const copyWorkspaceData = async (
+  sourceWorkspaceId: string,
+  request: CopyDataRequest
+): Promise<{ message: string; copied_tables: string[] }> => {
+  const response = await axiosInstance.post(
+    `/workspaces/${encodeURIComponent(sourceWorkspaceId)}/copy-data`,
+    request
+  )
+  return response.data
+}
+
+/**
+ * Move data from one workspace to another (copy then delete source)
+ * @param sourceWorkspaceId The source workspace ID
+ * @param request The move data request (same as copy)
+ * @returns Promise with move response
+ */
+export const moveWorkspaceData = async (
+  sourceWorkspaceId: string,
+  request: CopyDataRequest
+): Promise<{ message: string; moved_tables: string[]; deleted_from_source: string[] }> => {
+  const response = await axiosInstance.post(
+    `/workspaces/${encodeURIComponent(sourceWorkspaceId)}/move-data`,
+    request
+  )
+  return response.data
+}
+
+// =====================================================
+// URL Knowledge Ingestion Types and API
+// =====================================================
+
+export type URLValidateResponse = {
+  valid: boolean
+  normalized_url: string
+  domain: string
+  doc_id: string
+}
+
+export type URLIngestRequest = {
+  url: string
+  file_path_label?: string
+  process_images?: boolean
+  process_tables?: boolean
+  skip_duplicates?: boolean
+  force_reindex?: boolean
+  follow_links?: boolean
+  max_depth?: number
+  document_prompt?: string
+  image_prompt?: string
+  table_prompt?: string
+}
+
+export type URLIngestResponse = {
+  task_id: string
+  stream_url: string
+  message: string
+}
+
+export type URLBatchIngestRequest = {
+  urls: string[]
+  process_images?: boolean
+  process_tables?: boolean
+  skip_duplicates?: boolean
+  force_reindex?: boolean
+  follow_links?: boolean
+  max_depth?: number
+  document_prompt?: string
+  image_prompt?: string
+  table_prompt?: string
+}
+
+export type URLBatchTaskInfo = {
+  task_id: string
+  stream_url: string
+  url: string
+  message: string
+}
+
+export type URLBatchSkippedInfo = {
+  url: string
+  reason: string
+}
+
+export type URLBatchIngestResponse = {
+  tasks: URLBatchTaskInfo[]
+  skipped: URLBatchSkippedInfo[]
+  total_submitted: number
+  total_skipped: number
+}
+
+export const validateUrl = async (url: string): Promise<URLValidateResponse> => {
+  const response = await axiosInstance.post('/api/url/validate', { url })
+  return response.data
+}
+
+export const ingestUrl = async (request: URLIngestRequest): Promise<URLIngestResponse> => {
+  const response = await axiosInstance.post('/api/url/ingest', request)
+  return response.data
+}
+
+export const ingestUrlBatch = async (request: URLBatchIngestRequest): Promise<URLBatchIngestResponse> => {
+  const response = await axiosInstance.post('/api/url/ingest-batch', request)
+  return response.data
+}
+
+// =====================================================
+// Board API Ingestion Types and API
+// =====================================================
+
+export type BoardFieldMapping = {
+  items_path: string
+  title_field: string
+  body_field: string
+  id_field?: string
+  date_field?: string
+  author_field?: string
+  attachments_field?: string
+  attachment_url_field?: string
+  attachment_name_field?: string
+  detail_url_template?: string
+  pagination_type?: 'page_param' | 'offset_limit' | 'cursor' | 'none'
+  page_param?: string
+  page_size_param?: string
+  total_field?: string
+  cursor_field?: string
+}
+
+export type BoardExploreRequest = {
+  api_url: string
+  method?: string
+  headers?: Record<string, string>
+  params?: Record<string, string>
+  body?: Record<string, any>
+  base_url?: string
+  user_mapping?: BoardFieldMapping
+}
+
+export type BoardExploreResponse = {
+  success: boolean
+  sample_data?: Record<string, any>
+  detected_mapping?: BoardFieldMapping
+  detected_items_count: number
+  sample_item?: Record<string, any>
+  alternative_mappings?: BoardFieldMapping[]
+  detection_method?: 'llm' | 'heuristic' | 'manual'
+  llm_confidence?: 'high' | 'medium' | 'low'
+  llm_notes?: string
+  error?: string
+}
+
+export type BoardIngestRequest = {
+  api_url: string
+  method?: string
+  headers?: Record<string, string>
+  params?: Record<string, string>
+  body?: Record<string, any>
+  field_mapping: BoardFieldMapping
+  max_pages?: number
+  page_size?: number
+  process_images?: boolean
+  process_tables?: boolean
+  process_documents?: boolean
+  parser?: 'pymupdf' | 'docling'
+  skip_duplicates?: boolean
+  update_existing?: boolean
+  fetch_detail?: boolean
+  base_url?: string
+  document_prompt?: string
+  image_prompt?: string
+  table_prompt?: string
+}
+
+export type BoardIngestResponse = {
+  task_id: string
+  stream_url: string
+  message: string
+}
+
+export const exploreBoard = async (req: BoardExploreRequest): Promise<BoardExploreResponse> => {
+  const response = await axiosInstance.post('/api/board/explore', req)
+  return response.data
+}
+
+export const ingestBoard = async (req: BoardIngestRequest): Promise<BoardIngestResponse> => {
+  const response = await axiosInstance.post('/api/board/ingest', req)
+  return response.data
+}
+
+export type BoardViewResponse = {
+  success: boolean
+  title: string
+  body: string
+  date: string
+  author: string
+  attachments: any[]
+  raw_data: Record<string, any>
+  error: string
+}
+
+export const viewBoardPost = async (filePath: string): Promise<BoardViewResponse> => {
+  const response = await axiosInstance.post('/api/board/view', { file_path: filePath })
+  return response.data
+}
+
+// =====================================================
+// Async Task Types and API
+// =====================================================
+
+export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+
+export type TaskProgressEvent = {
+  task_id: string
+  status: TaskStatus
+  progress: number
+  message: string
+  detail?: Record<string, any>
+  timestamp: number
+}
+
+export type TaskStatusResponse = {
+  task_id: string
+  task_type: string
+  workspace: string
+  status: TaskStatus
+  progress: number
+  message: string
+  created_at: number
+  updated_at: number
+  result?: Record<string, any>
+  error?: string
+  metadata: Record<string, any>
+}
+
+export type TaskCancelResponse = {
+  task_id: string
+  status: string
+  message: string
+}
+
+export const getTaskStatus = async (taskId: string): Promise<TaskStatusResponse> => {
+  const response = await axiosInstance.get(`/api/tasks/${encodeURIComponent(taskId)}`)
+  return response.data
+}
+
+export const cancelTask = async (taskId: string): Promise<TaskCancelResponse> => {
+  const response = await axiosInstance.post(`/api/tasks/${encodeURIComponent(taskId)}/cancel`)
+  return response.data
+}
+
+export const listTasks = async (): Promise<TaskStatusResponse[]> => {
+  const response = await axiosInstance.get('/api/tasks')
+  return response.data.tasks || []
+}
+
+/**
+ * Stream task progress events via NDJSON.
+ * Uses native fetch (not axios) for streaming support.
+ */
+export const streamTaskProgress = (
+  taskId: string,
+  onEvent: (event: TaskProgressEvent) => void,
+  onError?: (error: string) => void
+): AbortController => {
+  const controller = new AbortController()
+  const apiKey = useSettingsStore.getState().apiKey
+  const token = localStorage.getItem('LIGHTRAG-API-TOKEN')
+  const workspaceId = useWorkspaceStore.getState().currentWorkspaceId
+
+  const headers: HeadersInit = {
+    'Accept': 'application/x-ndjson',
+  }
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  if (apiKey) headers['X-API-Key'] = apiKey
+  if (workspaceId) headers['LIGHTRAG-WORKSPACE'] = workspaceId
+
+  const run = async () => {
+    try {
+      const response = await fetch(`${backendBaseUrl}/api/tasks/${encodeURIComponent(taskId)}/stream`, {
+        method: 'GET',
+        headers,
+        signal: controller.signal,
+      })
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          navigationService.navigateToLogin()
+          onError?.('Authentication required')
+          return
+        }
+        const body = await response.text().catch(() => 'Unknown error')
+        onError?.(`${response.status} ${response.statusText}: ${body}`)
+        return
+      }
+
+      if (!response.body) {
+        onError?.('Response body is null')
+        return
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (!line.trim()) continue
+          try {
+            const parsed = JSON.parse(line)
+            // Skip heartbeat events (server sends {"heartbeat": true, "task_id": "..."})
+            if (parsed.heartbeat || !parsed.status) continue
+            const event: TaskProgressEvent = parsed
+            onEvent(event)
+            // Stop streaming on terminal status
+            if (event.status === 'completed' || event.status === 'failed' || event.status === 'cancelled') {
+              controller.abort()
+              return
+            }
+          } catch {
+            // ignore parse errors for partial lines
+          }
+        }
+      }
+
+      // Process remaining buffer
+      if (buffer.trim()) {
+        try {
+          const parsed = JSON.parse(buffer)
+          if (!parsed.heartbeat && parsed.status) onEvent(parsed as TaskProgressEvent)
+        } catch { /* ignore */ }
+      }
+    } catch (err) {
+      if (controller.signal.aborted) return
+      const msg = errorMessage(err)
+      onError?.(msg)
+    }
+  }
+
+  run()
+  return controller
+}
+
+// =====================================================
+// Multimodal Processing Types and API
+// =====================================================
+
+export type MultimodalProcessResponse = {
+  task_id: string
+  stream_url: string
+  message: string
+}
+
+/**
+ * Upload a file for multimodal processing.
+ * Uses FormData with axios for upload progress tracking.
+ */
+export const processMultimodal = async (
+  file: File,
+  options: {
+    parser?: string
+    process_images?: boolean
+    process_tables?: boolean
+    process_equations?: boolean
+    file_path_label?: string
+    pdf_password?: string
+    document_prompt?: string
+    image_prompt?: string
+    table_prompt?: string
+  },
+  onUploadProgress?: (percentCompleted: number) => void
+): Promise<MultimodalProcessResponse> => {
+  const formData = new FormData()
+  formData.append('file', file)
+  if (options.parser) formData.append('parser', options.parser)
+  if (options.process_images !== undefined) formData.append('process_images', String(options.process_images))
+  if (options.process_tables !== undefined) formData.append('process_tables', String(options.process_tables))
+  if (options.process_equations !== undefined) formData.append('process_equations', String(options.process_equations))
+  if (options.file_path_label) formData.append('file_path_label', options.file_path_label)
+  if (options.pdf_password) formData.append('pdf_password', options.pdf_password)
+  if (options.document_prompt) formData.append('document_prompt', options.document_prompt)
+  if (options.image_prompt) formData.append('image_prompt', options.image_prompt)
+  if (options.table_prompt) formData.append('table_prompt', options.table_prompt)
+
+  const response = await axiosInstance.post('/api/multimodal/process', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    onUploadProgress: onUploadProgress
+      ? (progressEvent) => {
+          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total!)
+          onUploadProgress(percentCompleted)
+        }
+      : undefined,
+  })
   return response.data
 }

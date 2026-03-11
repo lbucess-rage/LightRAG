@@ -4,13 +4,53 @@ This module contains all query-related routes for the LightRAG API.
 
 import json
 from typing import Any, Dict, List, Literal, Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from lightrag.base import QueryParam
 from lightrag.api.utils_api import get_combined_auth_dependency
 from lightrag.utils import logger
 from pydantic import BaseModel, Field, field_validator
+from lightrag.api.citation_utils import (
+    normalize_citations,
+    get_valid_reference_ids,
+    parse_evidence_map,
+    attach_evidence_to_references,
+    extract_evidence_from_chunks,
+)
 
 router = APIRouter(tags=["query"])
+
+# Workspace-aware RAG instance management
+_get_rag_for_workspace = None
+_get_default_workspace = None
+
+
+def set_rag_workspace_getter(getter_func, default_workspace_func=None):
+    """Set the function to get workspace-specific RAG instances."""
+    global _get_rag_for_workspace, _get_default_workspace
+    _get_rag_for_workspace = getter_func
+    _get_default_workspace = default_workspace_func
+
+
+async def get_workspace_rag(workspace: str):
+    """Get RAG instance for a specific workspace."""
+    if _get_rag_for_workspace is not None:
+        return await _get_rag_for_workspace(workspace)
+    return None
+
+
+def _get_workspace_from_request(http_request: Request, body_workspace: str | None = None) -> str:
+    """Extract workspace from request body, header, or use default."""
+    # Priority 1: workspace field in request body
+    if body_workspace and body_workspace.strip():
+        return body_workspace.strip()
+    # Priority 2: LIGHTRAG-WORKSPACE header
+    workspace = http_request.headers.get("LIGHTRAG-WORKSPACE", "").strip()
+    if workspace:
+        return workspace
+    # Priority 3: default workspace
+    if _get_default_workspace:
+        return _get_default_workspace() or "base"
+    return "base"
 
 
 class QueryRequest(BaseModel):
@@ -37,7 +77,18 @@ class QueryRequest(BaseModel):
     response_type: Optional[str] = Field(
         min_length=1,
         default=None,
-        description="Defines the response format. Examples: 'Multiple Paragraphs', 'Single Paragraph', 'Bullet Points'.",
+        description=(
+            "Defines the response format. Available options: "
+            "'Multiple Paragraphs' (default, detailed multi-paragraph answer), "
+            "'Single Paragraph' (concise single-paragraph summary), "
+            "'Bullet Points' (unordered bullet list), "
+            "'Numbered List' (ordered numbered list), "
+            "'Table' (markdown table format), "
+            "'Executive Summary' (brief high-level overview), "
+            "'FAQ' (question-and-answer pairs), "
+            "'Structured Sections' (organized with headings and subsections). "
+            "Custom strings are also accepted and passed directly to the LLM prompt."
+        ),
     )
 
     top_k: Optional[int] = Field(
@@ -105,9 +156,19 @@ class QueryRequest(BaseModel):
         description="If True, includes actual chunk text content in references. Only applies when include_references=True. Useful for evaluation and debugging.",
     )
 
+    highlight_entities: Optional[bool] = Field(
+        default=None,
+        description="If True, instructs the LLM to highlight entity names in **bold** and relation keywords in *italics* for improved readability.",
+    )
+
     stream: Optional[bool] = Field(
         default=True,
         description="If True, enables streaming output for real-time responses. Only affects /query/stream endpoint.",
+    )
+
+    workspace: Optional[str] = Field(
+        default=None,
+        description="Target workspace for this query. Overrides header/query parameter. If not specified, uses header 'LIGHTRAG-WORKSPACE' or server default.",
     )
 
     @field_validator("query", mode="after")
@@ -134,7 +195,7 @@ class QueryRequest(BaseModel):
         # Use Pydantic's `.model_dump(exclude_none=True)` to remove None values automatically
         # Exclude API-level parameters that don't belong in QueryParam
         request_data = self.model_dump(
-            exclude_none=True, exclude={"query", "include_chunk_content"}
+            exclude_none=True, exclude={"query", "include_chunk_content", "workspace"}
         )
 
         # Ensure `mode` and `stream` are set explicitly
@@ -157,7 +218,27 @@ class ReferenceItem(BaseModel):
     )
     content: Optional[List[str]] = Field(
         default=None,
-        description="List of chunk contents from this file (only present when include_chunk_content=True)",
+        description="List of chunk text contents (empty list when all chunks have structured_content)",
+    )
+    structured_content: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="List of structured chunk contents for programmatic parsing",
+    )
+    score: Optional[float] = Field(
+        default=None,
+        description="Max relevance score across chunks (cosine similarity or rerank score)",
+    )
+    scores: Optional[List[Optional[float]]] = Field(
+        default=None,
+        description="Per-chunk relevance scores, parallel to content/structured_content arrays (sorted by relevance, descending)",
+    )
+    evidence: Optional[List[str]] = Field(
+        default=None,
+        description="Evidence snippets — verbatim quotes from chunks used as citation evidence",
+    )
+    doc_nm: Optional[str] = Field(
+        default=None,
+        description="Display name for the document (e.g., board post title)",
     )
 
 
@@ -200,23 +281,26 @@ class StreamChunkResponse(BaseModel):
 def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
     combined_auth = get_combined_auth_dependency(api_key)
 
-    async def _enrich_references_with_s3_url(references: List[Dict]) -> List[Dict]:
-        """Add download_url to references from doc_status s3_url field"""
+    async def _enrich_references_with_s3_url(references: List[Dict], target_rag=None) -> List[Dict]:
+        """Add download_url and doc_nm to references from doc_status"""
         if not references:
             return references
 
+        use_rag = target_rag or rag
         enriched = []
         for ref in references:
             ref_copy = ref.copy()
             doc_id = ref.get("doc_id", "")
             if doc_id:
                 try:
-                    # Use doc_id to get document data (more reliable than file_path)
-                    doc_data = await rag.doc_status.get_by_id(doc_id)
-                    if doc_data and doc_data.get("s3_url"):
-                        ref_copy["download_url"] = doc_data["s3_url"]
+                    doc_data = await use_rag.doc_status.get_by_id(doc_id)
+                    if doc_data:
+                        if doc_data.get("s3_url"):
+                            ref_copy["download_url"] = doc_data["s3_url"]
+                        if doc_data.get("doc_nm"):
+                            ref_copy["doc_nm"] = doc_data["doc_nm"]
                 except Exception as e:
-                    logger.debug(f"Failed to get s3_url for doc_id {doc_id}: {e}")
+                    logger.debug(f"Failed to get doc data for doc_id {doc_id}: {e}")
             enriched.append(ref_copy)
         return enriched
 
@@ -349,7 +433,7 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             },
         },
     )
-    async def query_text(request: QueryRequest):
+    async def query_text(request: QueryRequest, http_request: Request):
         """
         Comprehensive RAG query endpoint with non-streaming response. Parameter "stream" is ignored.
 
@@ -413,7 +497,7 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                 - **query**: The question or prompt to process (min 3 characters)
                 - **mode**: Query strategy - "mix" recommended for best results
                 - **include_references**: Whether to include source citations
-                - **response_type**: Format preference (e.g., "Multiple Paragraphs")
+                - **response_type**: Response format — "Multiple Paragraphs" (default), "Single Paragraph", "Bullet Points", "Numbered List", "Table", "Executive Summary", "FAQ", "Structured Sections", or custom string
                 - **top_k**: Number of top entities/relations to retrieve
                 - **conversation_history**: Previous dialogue context
                 - **max_total_tokens**: Token budget for the entire response
@@ -429,6 +513,12 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                 - 500: Internal processing error (e.g., LLM service unavailable)
         """
         try:
+            # Resolve workspace-specific RAG instance
+            workspace = _get_workspace_from_request(http_request, request.workspace)
+            workspace_rag = await get_workspace_rag(workspace)
+            if workspace_rag is None:
+                workspace_rag = rag
+
             param = request.to_query_params(
                 False
             )  # Ensure stream=False for non-streaming endpoint
@@ -436,7 +526,7 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             param.stream = False
 
             # Unified approach: always use aquery_llm for both cases
-            result = await rag.aquery_llm(request.query, param=param)
+            result = await workspace_rag.aquery_llm(request.query, param=param)
 
             # Extract LLM response and references from unified result
             llm_response = result.get("llm_response", {})
@@ -451,29 +541,60 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             # Enrich references with chunk content if requested
             if request.include_references and request.include_chunk_content:
                 chunks = data.get("chunks", [])
-                # Create a mapping from reference_id to chunk content
-                ref_id_to_content = {}
+                # Collect per-chunk data grouped by reference_id (preserving order)
+                ref_id_to_chunks = {}
                 for chunk in chunks:
                     ref_id = chunk.get("reference_id", "")
-                    content = chunk.get("content", "")
-                    if ref_id and content:
-                        # Collect chunk content; join later to avoid quadratic string concatenation
-                        ref_id_to_content.setdefault(ref_id, []).append(content)
+                    if not ref_id:
+                        continue
+                    ref_id_to_chunks.setdefault(ref_id, []).append(chunk)
 
-                # Add content to references
+                # Build enriched references with parallel arrays
                 enriched_references = []
                 for ref in references:
                     ref_copy = ref.copy()
                     ref_id = ref.get("reference_id", "")
-                    if ref_id in ref_id_to_content:
-                        # Keep content as a list of chunks (one file may have multiple chunks)
-                        ref_copy["content"] = ref_id_to_content[ref_id]
+                    chunk_list = ref_id_to_chunks.get(ref_id, [])
+                    if chunk_list:
+                        contents = [c.get("content", "") for c in chunk_list]
+                        # Empty list when all chunks have structured_content (no text content)
+                        ref_copy["content"] = [] if all(not c for c in contents) else contents
+                        # Build structured_content list with per-item score embedded
+                        sc_list = []
+                        for c in chunk_list:
+                            sc = c.get("structured_content")
+                            if sc:
+                                sc_with_score = {**sc}
+                                if c.get("score") is not None:
+                                    sc_with_score["score"] = c["score"]
+                                sc_list.append(sc_with_score)
+                        if sc_list:
+                            ref_copy["structured_content"] = sc_list
+                        # Per-chunk scores — kept for backward compatibility
+                        per_scores = [c.get("score") for c in chunk_list]
+                        if any(s is not None for s in per_scores):
+                            ref_copy["scores"] = per_scores
+                            ref_copy["score"] = max(s for s in per_scores if s is not None)
                     enriched_references.append(ref_copy)
                 references = enriched_references
 
+            # Strip any legacy evidence map block (safety net)
+            response_content, evidence_map = parse_evidence_map(response_content)
+
+            # Normalize inline citations
+            if references:
+                valid_ids = get_valid_reference_ids(references)
+                response_content = normalize_citations(response_content, valid_ids)
+
+            # Attach evidence: prefer LLM-generated map, fallback to backend extraction
+            if evidence_map and references:
+                attach_evidence_to_references(references, evidence_map)
+            elif references and request.include_chunk_content:
+                extract_evidence_from_chunks(response_content, references)
+
             # Enrich references with S3 download URLs
             if request.include_references:
-                references = await _enrich_references_with_s3_url(references)
+                references = await _enrich_references_with_s3_url(references, workspace_rag)
                 return QueryResponse(response=response_content, references=references)
             else:
                 return QueryResponse(response=response_content, references=None)
@@ -560,7 +681,7 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             },
         },
     )
-    async def query_text_stream(request: QueryRequest):
+    async def query_text_stream(request: QueryRequest, http_request: Request):
         """
         Advanced RAG query endpoint with flexible streaming response.
 
@@ -664,7 +785,7 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                 - **mode**: Query strategy - "mix" recommended for best results
                 - **stream**: Enable streaming (True) or complete response (False)
                 - **include_references**: Whether to include source citations
-                - **response_type**: Format preference (e.g., "Multiple Paragraphs")
+                - **response_type**: Response format — "Multiple Paragraphs" (default), "Single Paragraph", "Bullet Points", "Numbered List", "Table", "Executive Summary", "FAQ", "Structured Sections", or custom string
                 - **top_k**: Number of top entities/relations to retrieve
                 - **conversation_history**: Previous dialogue context for multi-turn conversations
                 - **max_total_tokens**: Token budget for the entire response
@@ -688,6 +809,12 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             Use streaming mode for real-time interfaces and non-streaming for batch processing.
         """
         try:
+            # Resolve workspace-specific RAG instance
+            workspace = _get_workspace_from_request(http_request, request.workspace)
+            workspace_rag = await get_workspace_rag(workspace)
+            if workspace_rag is None:
+                workspace_rag = rag
+
             # Use the stream parameter from the request, defaulting to True if not specified
             stream_mode = request.stream if request.stream is not None else True
             param = request.to_query_params(stream_mode)
@@ -695,7 +822,7 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             from fastapi.responses import StreamingResponse
 
             # Unified approach: always use aquery_llm for all cases
-            result = await rag.aquery_llm(request.query, param=param)
+            result = await workspace_rag.aquery_llm(request.query, param=param)
 
             async def stream_generator():
                 # Extract references and LLM response from unified result
@@ -706,29 +833,36 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                 if request.include_references and request.include_chunk_content:
                     data = result.get("data", {})
                     chunks = data.get("chunks", [])
-                    # Create a mapping from reference_id to chunk content
-                    ref_id_to_content = {}
+                    # Collect per-chunk data grouped by reference_id (preserving order)
+                    ref_id_to_chunks = {}
                     for chunk in chunks:
                         ref_id = chunk.get("reference_id", "")
-                        content = chunk.get("content", "")
-                        if ref_id and content:
-                            # Collect chunk content
-                            ref_id_to_content.setdefault(ref_id, []).append(content)
+                        if not ref_id:
+                            continue
+                        ref_id_to_chunks.setdefault(ref_id, []).append(chunk)
 
-                    # Add content to references
+                    # Build enriched references with parallel arrays
                     enriched_references = []
                     for ref in references:
                         ref_copy = ref.copy()
                         ref_id = ref.get("reference_id", "")
-                        if ref_id in ref_id_to_content:
-                            # Keep content as a list of chunks (one file may have multiple chunks)
-                            ref_copy["content"] = ref_id_to_content[ref_id]
+                        chunk_list = ref_id_to_chunks.get(ref_id, [])
+                        if chunk_list:
+                            contents = [c.get("content", "") for c in chunk_list]
+                            ref_copy["content"] = [] if all(not c for c in contents) else contents
+                            sc_list = [c["structured_content"] for c in chunk_list if c.get("structured_content")]
+                            if sc_list:
+                                ref_copy["structured_content"] = sc_list
+                            per_scores = [c.get("score") for c in chunk_list]
+                            if any(s is not None for s in per_scores):
+                                ref_copy["scores"] = per_scores
+                                ref_copy["score"] = max(s for s in per_scores if s is not None)
                         enriched_references.append(ref_copy)
                     references = enriched_references
 
                 # Enrich references with S3 download URLs
                 if request.include_references:
-                    references = await _enrich_references_with_s3_url(references)
+                    references = await _enrich_references_with_s3_url(references, workspace_rag)
 
                 if llm_response.get("is_streaming"):
                     # Streaming mode: send references first, then stream response chunks
@@ -737,18 +871,44 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
 
                     response_stream = llm_response.get("response_iterator")
                     if response_stream:
+                        accumulated_response = ""
                         try:
                             async for chunk in response_stream:
-                                if chunk:  # Only send non-empty content
+                                if chunk:
+                                    accumulated_response += chunk
                                     yield f"{json.dumps({'response': chunk})}\n"
                         except Exception as e:
                             logger.error(f"Streaming error: {str(e)}")
                             yield f"{json.dumps({'error': str(e)})}\n"
+
+                        # Backend evidence extraction from accumulated response + chunk content
+                        if request.include_references and request.include_chunk_content and references:
+                            extract_evidence_from_chunks(accumulated_response, references)
+                            evidence_map = {
+                                str(r.get("reference_id", "")): r["evidence"]
+                                for r in references if r.get("evidence")
+                            }
+                            if evidence_map:
+                                yield f"{json.dumps({'evidence_map': evidence_map})}\n"
                 else:
                     # Non-streaming mode: send complete response in one message
                     response_content = llm_response.get("content", "")
                     if not response_content:
                         response_content = "No relevant context found for the query."
+
+                    # Strip any legacy evidence map block (safety net)
+                    response_content, evidence_map = parse_evidence_map(response_content)
+
+                    # Normalize inline citations
+                    if references:
+                        valid_ids = get_valid_reference_ids(references)
+                        response_content = normalize_citations(response_content, valid_ids)
+
+                    # Attach evidence: prefer LLM map, fallback to backend extraction
+                    if evidence_map and references:
+                        attach_evidence_to_references(references, evidence_map)
+                    elif references and request.include_chunk_content:
+                        extract_evidence_from_chunks(response_content, references)
 
                     # Create complete response object
                     complete_response = {"response": response_content}
@@ -1067,7 +1227,7 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             },
         },
     )
-    async def query_data(request: QueryRequest):
+    async def query_data(request: QueryRequest, http_request: Request):
         """
         Advanced data retrieval endpoint for structured RAG analysis.
 
@@ -1171,8 +1331,14 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             as structured data analysis typically requires source attribution.
         """
         try:
+            # Resolve workspace-specific RAG instance
+            workspace = _get_workspace_from_request(http_request, request.workspace)
+            workspace_rag = await get_workspace_rag(workspace)
+            if workspace_rag is None:
+                workspace_rag = rag
+
             param = request.to_query_params(False)  # No streaming for data endpoint
-            response = await rag.aquery_data(request.query, param=param)
+            response = await workspace_rag.aquery_data(request.query, param=param)
 
             # aquery_data returns the new format with status, message, data, and metadata
             if isinstance(response, dict):

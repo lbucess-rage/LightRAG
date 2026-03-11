@@ -1,0 +1,186 @@
+{
+  "domain": "contact_center",
+  "display_name": "컨택센터 상담",
+  "description": "고객 상담 및 문의 처리를 위한 스키마",
+  "version": "1.0.0",
+  "tags": ["customer", "service", "support", "inquiry"],
+  "entity_types": [
+    {
+      "name": "Customer",
+      "display_name": "고객",
+      "description": "서비스를 이용하고 문의를 제기하는 고객",
+      "examples": ["고객", "구매자", "회원", "이용자"],
+      "color": "#4CAF50",
+      "icon": "person"
+    },
+    {
+      "name": "Agent",
+      "display_name": "상담원",
+      "description": "고객 문의를 처리하는 상담 직원",
+      "examples": ["상담원", "담당자", "상담사", "선임"],
+      "color": "#2196F3",
+      "icon": "headset"
+    },
+    {
+      "name": "InquiryType",
+      "display_name": "문의 유형",
+      "description": "고객 문의의 분류/카테고리",
+      "examples": ["오배송 문의", "환불 요청", "교환 요청", "배송 지연 문의", "결제 문의"],
+      "color": "#FF9800",
+      "icon": "help"
+    },
+    {
+      "name": "Product",
+      "display_name": "상품",
+      "description": "거래 대상 상품 또는 서비스",
+      "examples": ["택배 상품", "구독 서비스", "주문 상품"],
+      "color": "#9C27B0",
+      "icon": "inventory"
+    },
+    {
+      "name": "Order",
+      "display_name": "주문",
+      "description": "주문 정보",
+      "examples": ["주문번호", "주문 건", "거래 내역"],
+      "color": "#3F51B5",
+      "icon": "receipt"
+    },
+    {
+      "name": "DeliveryInfo",
+      "display_name": "배송 정보",
+      "description": "배송 관련 식별 정보",
+      "examples": ["운송장번호", "배송상태", "배송일", "송장번호"],
+      "color": "#009688",
+      "icon": "local_shipping"
+    },
+    {
+      "name": "Store",
+      "display_name": "매장",
+      "description": "매장 또는 지점",
+      "examples": ["GS25신도림역점", "편의점", "픽업지점", "강남점"],
+      "color": "#795548",
+      "icon": "store"
+    },
+    {
+      "name": "Channel",
+      "display_name": "채널",
+      "description": "문의 접수 또는 알림 채널",
+      "examples": ["알림톡", "이메일", "전화", "홈페이지", "채팅"],
+      "color": "#607D8B",
+      "icon": "forum"
+    },
+    {
+      "name": "System",
+      "display_name": "시스템",
+      "description": "내부 시스템 또는 플랫폼",
+      "examples": ["리테일 시스템", "CRM", "홈페이지", "주문 시스템"],
+      "color": "#455A64",
+      "icon": "dns"
+    },
+    {
+      "name": "Policy",
+      "display_name": "정책",
+      "description": "정책, 규정, 약관",
+      "examples": ["환불 정책", "배송 규정", "홈페이지 약관", "교환 정책"],
+      "color": "#5D4037",
+      "icon": "policy"
+    },
+    {
+      "name": "Resolution",
+      "display_name": "해결 방안",
+      "description": "문의에 대한 처리 결과 또는 해결 방법",
+      "examples": ["재배송 처리", "환불 완료", "포인트 보상", "교환 처리"],
+      "color": "#43A047",
+      "icon": "check_circle"
+    },
+    {
+      "name": "Issue",
+      "display_name": "이슈",
+      "description": "문제 또는 장애 상황",
+      "examples": ["시스템 오류", "연동 실패", "배송 지연", "결제 실패"],
+      "color": "#E53935",
+      "icon": "error"
+    }
+  ],
+  "relation_types": [
+    {
+      "name": "SUBMITTED",
+      "display_name": "접수함",
+      "description": "고객이 문의를 접수하는 관계",
+      "source_types": ["Customer"],
+      "target_types": ["InquiryType"]
+    },
+    {
+      "name": "HANDLED",
+      "display_name": "처리함",
+      "description": "상담원이 문의를 처리하는 관계",
+      "source_types": ["Agent"],
+      "target_types": ["InquiryType"]
+    },
+    {
+      "name": "RESOLVED_WITH",
+      "display_name": "해결됨",
+      "description": "문의가 특정 방안으로 해결되는 관계",
+      "source_types": ["InquiryType"],
+      "target_types": ["Resolution"]
+    },
+    {
+      "name": "ESCALATED_TO",
+      "display_name": "이관됨",
+      "description": "문의가 상위 담당자에게 이관되는 관계",
+      "source_types": ["InquiryType"],
+      "target_types": ["Agent"]
+    },
+    {
+      "name": "EXPERIENCED",
+      "display_name": "경험함",
+      "description": "고객이 문제를 경험하는 관계",
+      "source_types": ["Customer"],
+      "target_types": ["Issue"]
+    },
+    {
+      "name": "CAUSED_BY",
+      "display_name": "원인됨",
+      "description": "문의의 원인이 되는 관계",
+      "source_types": ["InquiryType"],
+      "target_types": ["Issue"]
+    },
+    {
+      "name": "RELATED_TO",
+      "display_name": "관련됨",
+      "description": "주문과 상품의 관련 관계",
+      "source_types": ["Order"],
+      "target_types": ["Product"]
+    },
+    {
+      "name": "DELIVERED_TO",
+      "display_name": "배송됨",
+      "description": "배송 목적지 관계",
+      "source_types": ["DeliveryInfo"],
+      "target_types": ["Store"]
+    },
+    {
+      "name": "RECEIVED_VIA",
+      "display_name": "접수채널",
+      "description": "문의가 접수된 채널 관계",
+      "source_types": ["InquiryType"],
+      "target_types": ["Channel"]
+    },
+    {
+      "name": "GOVERNED_BY",
+      "display_name": "적용됨",
+      "description": "정책이 적용되는 관계",
+      "source_types": ["InquiryType"],
+      "target_types": ["Policy"]
+    },
+    {
+      "name": "AFFECTED_BY",
+      "display_name": "영향받음",
+      "description": "시스템이 이슈의 영향을 받는 관계",
+      "source_types": ["System"],
+      "target_types": ["Issue"]
+    }
+  ],
+  "created_at": "2025-02-04T00:00:00Z",
+  "author": "system"
+}

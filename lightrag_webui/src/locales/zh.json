@@ -414,7 +414,14 @@
       "responseFormatOptions": {
         "multipleParagraphs": "多段落",
         "singleParagraph": "单段落",
-        "bulletPoints": "要点"
+        "bulletPoints": "要点",
+        "numberedList": "编号列表",
+        "table": "表格",
+        "executiveSummary": "摘要报告",
+        "faq": "常见问题",
+        "structuredSections": "结构化章节",
+        "threeLineSummary": "三行摘要",
+        "briefAnswer": "简要回答"
       },
       "topK": "KG Top K",
       "topKTooltip": "实体关系检索数量, 适用于非naive模式",

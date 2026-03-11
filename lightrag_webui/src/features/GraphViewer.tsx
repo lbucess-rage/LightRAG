@@ -23,7 +23,9 @@ import LegendButton from '@/components/graph/LegendButton'
 
 import { useSettingsStore } from '@/stores/settings'
 import { useGraphStore } from '@/stores/graph'
+import { useWorkspaceStore } from '@/stores/workspace'
 import { labelColorDarkTheme, labelColorLightTheme } from '@/lib/constants'
+import { SearchHistoryManager } from '@/utils/SearchHistoryManager'
 
 import '@react-sigma/core/lib/style.css'
 import '@react-sigma/graph-search/lib/style.css'
@@ -111,6 +113,7 @@ const GraphViewer = () => {
   const [isThemeSwitching, setIsThemeSwitching] = useState(false)
   const sigmaRef = useRef<any>(null)
   const prevTheme = useRef<string>('')
+  const prevWorkspaceRef = useRef<string | null>(null)
 
   const selectedNode = useGraphStore.use.selectedNode()
   const focusedNode = useGraphStore.use.focusedNode()
@@ -122,12 +125,41 @@ const GraphViewer = () => {
   const enableNodeDrag = useSettingsStore.use.enableNodeDrag()
   const showLegend = useSettingsStore.use.showLegend()
   const theme = useSettingsStore.use.theme()
+  const currentWorkspaceId = useWorkspaceStore.use.currentWorkspaceId()
 
   // Memoize sigma settings to prevent unnecessary re-creation
   const memoizedSigmaSettings = useMemo(() => {
     const isDarkTheme = theme === 'dark'
     return createSigmaSettings(isDarkTheme)
   }, [theme])
+
+  // Reset graph state when workspace changes
+  useEffect(() => {
+    if (prevWorkspaceRef.current !== null && prevWorkspaceRef.current !== currentWorkspaceId) {
+      console.log('Workspace changed, resetting graph state:', prevWorkspaceRef.current, '->', currentWorkspaceId)
+
+      // Reset graph store state
+      useGraphStore.getState().reset()
+
+      // Reset graph fetch flags
+      useGraphStore.getState().setGraphDataFetchAttempted(false)
+      useGraphStore.getState().setLabelsFetchAttempted(false)
+      useGraphStore.getState().setLastSuccessfulQueryLabel('')
+
+      // Clear legend cache
+      useGraphStore.getState().setTypeColorMap(new Map<string, string>())
+
+      // Clear search history for fresh workspace data
+      SearchHistoryManager.clearHistory()
+
+      // Reset query label to trigger fresh fetch
+      useSettingsStore.getState().setQueryLabel('*')
+
+      // Force data version increment to trigger refresh
+      useGraphStore.getState().incrementGraphDataVersion()
+    }
+    prevWorkspaceRef.current = currentWorkspaceId
+  }, [currentWorkspaceId])
 
   // Initialize sigma settings based on theme with theme switching protection
   useEffect(() => {
@@ -148,6 +180,34 @@ const GraphViewer = () => {
     prevTheme.current = theme
     console.log('Initialized sigma settings for theme:', theme)
   }, [theme])
+
+  // Refresh sigma when tab becomes visible (fixes blank canvas after tab switch)
+  const containerRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = containerRef.current?.closest('[data-state]')
+    if (!el) return
+
+    const observer = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        if (m.attributeName === 'data-state' && el.getAttribute('data-state') === 'active') {
+          const sigma = useGraphStore.getState().sigmaInstance
+          if (sigma) {
+            // Small delay to ensure layout is complete after visibility change
+            requestAnimationFrame(() => {
+              try {
+                sigma.refresh()
+              } catch (e) {
+                console.warn('Sigma refresh failed after tab switch:', e)
+              }
+            })
+          }
+        }
+      }
+    })
+
+    observer.observe(el, { attributes: true, attributeFilter: ['data-state'] })
+    return () => observer.disconnect()
+  }, [])
 
   // Clean up sigma instance when component unmounts
   useEffect(() => {
@@ -193,7 +253,7 @@ const GraphViewer = () => {
 
   // Always render SigmaContainer but control its visibility with CSS
   return (
-    <div className="relative h-full w-full overflow-hidden">
+    <div ref={containerRef} className="relative h-full w-full overflow-hidden">
       <SigmaContainer
         settings={memoizedSigmaSettings}
         className="!bg-background !size-full overflow-hidden"

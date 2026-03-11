@@ -1,0 +1,1154 @@
+{
+  "domain": "gsnw-t-1",
+  "display_name": "GS네트웍스 템플릿v1",
+  "description": "이 도메인은 GS편의점 택배 서비스를 중심으로 한 국내 및 국제 물류 서비스에 대한 상담사용 교육자료입니다. 주요 서비스로는 국내택배, 반값택배, 국제택배, 쇼핑몰택배, 픽업 등이 있으며, 각 서비스는 접수 기준, 크기·무게 제한, 금지 품목, 운임, 보상 기준 등이 상이합니다. 핵심 엔티티로는 택배물품, 운송 건, 서비스 유형, 배송지점, 배송 담당자 등이 있으며, 이들 간의 관계는 접수, 수거, 배송, 보상, 반송 등 물류 흐름을 기반으로 정의됩니다. 주요 관계는 고객-물품-서비스-물류센터-배송사 간의 흐름을 포괄하며, 보상, 지연, 예외 처리 등 운영 정책도 포함됩니다.",
+  "entity_types": [
+    {
+      "name": "Parcel",
+      "display_name": "택배물품",
+      "description": "택배 서비스를 통해 이동하는 물품으로, 포장 상태, 크기, 무게, 가액 등에 따라 접수 가능 여부가 결정됨",
+      "examples": [
+        "의류 상자",
+        "전자기기 박스",
+        "과일즙 병",
+        "한약재 포장"
+      ]
+    },
+    {
+      "name": "Shipment",
+      "display_name": "운송 건",
+      "description": "택배 서비스에서 특정 물품이 접수되고 배송되는 일련의 과정을 의미하며, 운송장 번호로 식별됨",
+      "examples": [
+        "210034242876",
+        "CJ123456789KR"
+      ]
+    },
+    {
+      "name": "ServiceType",
+      "display_name": "서비스 유형",
+      "description": "택배 서비스의 종류로, 국내택배, 반값택배, 국제택배, 쇼핑몰택배, 픽업 등이 있음",
+      "examples": [
+        "국내택배",
+        "반값택배",
+        "국제택배",
+        "쇼핑몰택배",
+        "픽업"
+      ]
+    },
+    {
+      "name": "DeliveryPoint",
+      "display_name": "배송지점",
+      "description": "택배 물품의 수거 또는 배송이 이루어지는 물리적 위치로, 편의점, 허브센터, 지점 등이 포함됨",
+      "examples": [
+        "GS25 세종하늘채점",
+        "인천도화저온센터",
+        "CJ대한통운 강서지점"
+      ]
+    },
+    {
+      "name": "Courier",
+      "display_name": "배송 담당자",
+      "description": "택배 물품을 수거하거나 배송하는 현장 담당자로, CJ대한통운 SM 또는 GS네트웍스 배송매니저 등이 있음",
+      "examples": [
+        "CJ대한통운 SM 김철수",
+        "GS네트웍스 배송매니저 이지영"
+      ]
+    },
+    {
+      "name": "Sender",
+      "display_name": "보내는 사람",
+      "description": "택배를 발송하는 고객 또는 기업으로, 물품의 송하인으로 기재됨",
+      "examples": [
+        "서울시 강남구 고객 A",
+        "온라인 쇼핑몰 B"
+      ]
+    },
+    {
+      "name": "Receiver",
+      "display_name": "받는 사람",
+      "description": "택배를 수령하는 고객 또는 기업으로, 물품의 수하인으로 기재됨",
+      "examples": [
+        "부산시 해운대구 고객 B",
+        "회사 물류팀"
+      ]
+    },
+    {
+      "name": "ParcelStatus",
+      "display_name": "물품 상태",
+      "description": "택배 물품의 이동 단계를 나타내는 상태 정보로, 수거 완료, 중계, 배송 출발, 배송 완료 등이 있음",
+      "examples": [
+        "집하처리",
+        "배송출발",
+        "배달완료",
+        "보관중"
+      ]
+    },
+    {
+      "name": "Region",
+      "display_name": "권역",
+      "description": "국내택배 및 반값택배의 운임 산정 기준이 되는 행정구역 기반의 지역 분류",
+      "examples": [
+        "수도권",
+        "강원권",
+        "제주권",
+        "전북권"
+      ]
+    },
+    {
+      "name": "PaymentMethod",
+      "display_name": "결제 수단",
+      "description": "택배 운임의 결제 방식으로, 카카오페이, 네이버페이, 페이코, GS수퍼마켓 등이 포함됨",
+      "examples": [
+        "카카오페이",
+        "네이버페이",
+        "GS25 POS 결제"
+      ]
+    },
+    {
+      "name": "Inquiry",
+      "display_name": "문의 내역",
+      "description": "고객이 접수한 택배 관련 문의 사항으로, 배송 지연, 분실, 오배송 등에 대한 문의가 포함됨",
+      "examples": [
+        "배송이 3일째 지연됨",
+        "물품이 도착하지 않음"
+      ]
+    },
+    {
+      "name": "CompensationClaim",
+      "display_name": "보상 청구",
+      "description": "택배 분실, 파손, 지연 등의 사유로 보상을 요청하는 행위로, 보상 기준에 따라 금액 산정됨",
+      "examples": [
+        "5일 지연 → 6,000원 보상 요청",
+        "물품가액 99만원 → 50만원 보상 요청"
+      ]
+    },
+    {
+      "name": "ProhibitedItem",
+      "display_name": "금지 품목",
+      "description": "택배 접수 시 금지되는 품목으로, 유리류, 액체류, 현금, 귀금속, 약품 등이 포함됨",
+      "examples": [
+        "현금",
+        "여권",
+        "생선",
+        "화장품"
+      ]
+    },
+    {
+      "name": "HandlingException",
+      "display_name": "처리 예외",
+      "description": "택배 접수 또는 배송 과정에서 발생하는 예외 상황으로, 규격 초과, 포장 불량, 결제 미완료 등이 있음",
+      "examples": [
+        "포장 크기 초과",
+        "결제 미완료",
+        "QR코드 재발송 요청"
+      ]
+    },
+    {
+      "name": "TrackingInfo",
+      "display_name": "배송 추적 정보",
+      "description": "택배의 이동 경로와 상태를 실시간으로 제공하는 정보로, 스캔 기록, 위치, 시간 등 포함",
+      "examples": [
+        "9/1 접수 → 9/6 도착",
+        "210034242876 - 인천공항 도착"
+      ]
+    },
+    {
+      "name": "ReturnProcess",
+      "display_name": "반송 프로세스",
+      "description": "택배가 점포에서 반송되는 처리 과정으로, 규격 초과 또는 보관 기간 만료 시 발생",
+      "examples": [
+        "도착 후 3일 경과 → 반송 처리",
+        "송하인 주소 오류 → 반송"
+      ]
+    },
+    {
+      "name": "ReturnShipment",
+      "display_name": "반송 운송 건",
+      "description": "반송된 택배를 다시 배송하는 운송 건으로, 송하인 주소로 발송됨",
+      "examples": [
+        "반송송장 생성 후 3일 내 배송 시작"
+      ]
+    },
+    {
+      "name": "Notification",
+      "display_name": "알림 정보",
+      "description": "고객에게 발송되는 알림 내용으로, 알림톡, SMS, 문자 메시지 등이 포함됨",
+      "examples": [
+        "도착 알림톡 발송",
+        "QR코드 재발송 요청"
+      ]
+    },
+    {
+      "name": "CourierVehicle",
+      "display_name": "배송 차량",
+      "description": "택배 물품을 운반하는 차량으로, 간선상차, 하차, 배송 출발 등에 사용됨",
+      "examples": [
+        "간선배송 차량 A",
+        "지역배송 트럭 B"
+      ]
+    },
+    {
+      "name": "HubCenter",
+      "display_name": "허브 센터",
+      "description": "택배 물품의 분류 및 중계를 수행하는 물류 센터로, 인천도화저온센터, 이천허브센터 등이 있음",
+      "examples": [
+        "인천도화저온센터",
+        "이천허브센터"
+      ]
+    },
+    {
+      "name": "Postbox",
+      "display_name": "포스트박스",
+      "description": "반값택배의 수령을 위한 편의점 내 설치된 물품 보관함으로, QR코드를 통해 수령 가능",
+      "examples": [
+        "GS25 세종하늘채점 포스트박스"
+      ]
+    },
+    {
+      "name": "ServiceManager",
+      "display_name": "서비스 매니저",
+      "description": "택배 서비스의 운영을 담당하는 관리자로, CJ대한통운 SM 또는 GS네트웍스 매니저 등이 있음",
+      "examples": [
+        "CJ대한통운 SM 김민수",
+        "GS네트웍스 배송매니저 박영희"
+      ]
+    },
+    {
+      "name": "Customer",
+      "display_name": "고객",
+      "description": "택배 서비스를 이용하는 개인 또는 기업으로, 송하인 또는 수하인으로 활동함",
+      "examples": [
+        "온라인 쇼핑몰 고객",
+        "회사 물류 담당자"
+      ]
+    },
+    {
+      "name": "TransportationContract",
+      "display_name": "운송 계약",
+      "description": "택배 서비스 제공과 관련된 계약 조건으로, 보상 기준, 책임 소재, 운임 기준 등 포함",
+      "examples": [
+        "소화물일괄수송약관",
+        "국내택배 운송약관"
+      ]
+    },
+    {
+      "name": "WeightLimit",
+      "display_name": "무게 제한",
+      "description": "택배 접수 시 허용되는 최대 무게 기준으로, 국내택배 20kg, 반값택배 5kg 등이 있음",
+      "examples": [
+        "국내택배: 20kg 이하",
+        "반값택배: 5kg 이하"
+      ]
+    },
+    {
+      "name": "SizeLimit",
+      "display_name": "크기 제한",
+      "description": "택배 접수 시 허용되는 최대 치수 기준으로, 세변의 합 또는 한 변의 길이 제한이 있음",
+      "examples": [
+        "세변의 합 160cm 이하",
+        "세변의 합 80cm 이하"
+      ]
+    },
+    {
+      "name": "ParcelValue",
+      "display_name": "물품 가액",
+      "description": "택배 운송장에 기재된 물품의 가격으로, 보상 기준 및 운임 산정에 사용됨",
+      "examples": [
+        "30만원",
+        "99만원"
+      ]
+    },
+    {
+      "name": "ShippingFee",
+      "display_name": "운임",
+      "description": "택배 서비스의 요금으로, 선불 또는 착불 방식으로 지불됨",
+      "examples": [
+        "3,000원 (선불)",
+        "2,100원 (선불)"
+      ]
+    },
+    {
+      "name": "DeliveryDelay",
+      "display_name": "배송 지연",
+      "description": "정상 배송 기한 내에 배송 완료되지 않은 상태로, 보상 대상이 됨",
+      "examples": [
+        "정상기한: 수요일 → 실제 완료: 금요일",
+        "지연일수: 5일"
+      ]
+    },
+    {
+      "name": "LostParcel",
+      "display_name": "분실 물품",
+      "description": "택배 중 물품이 발견되지 않거나 소재를 알 수 없는 상태로, 보상 대상이 됨",
+      "examples": [
+        "운송장번호 210034242876 물품 분실"
+      ]
+    },
+    {
+      "name": "DamagedParcel",
+      "display_name": "파손 물품",
+      "description": "택배 중 물품이 손상된 상태로, 수선 또는 보상이 가능함",
+      "examples": [
+        "전자기기 파손",
+        "의류 찢어짐"
+      ]
+    },
+    {
+      "name": "CustomerContact",
+      "display_name": "고객 연락처",
+      "description": "고객의 전화번호 또는 메신저 아이디로, 알림톡, SMS 발송용으로 사용됨",
+      "examples": [
+        "010-1234-5678",
+        "kakao_id: user123"
+      ]
+    },
+    {
+      "name": "ReceiptPoint",
+      "display_name": "접수 지점",
+      "description": "택배 물품을 접수하는 편의점, 물류센터, 지점 등으로, 물품의 최초 입고 지점임",
+      "examples": [
+        "GS25 군산오션점",
+        "CJ대한통운 강서지점"
+      ]
+    },
+    {
+      "name": "DeliverySchedule",
+      "display_name": "배송 일정",
+      "description": "택배의 수거 및 배송 일정 정보로, 시간대, 요일, 지역별로 차이 있음",
+      "examples": [
+        "월요일 17시 마감 → 당일 수거",
+        "토요일 15시 마감 → 익일 수거"
+      ]
+    },
+    {
+      "name": "PaymentStatus",
+      "display_name": "결제 상태",
+      "description": "택배 운임의 결제 여부 및 상태로, 미결제, 결제 완료, 취소 등이 있음",
+      "examples": [
+        "결제 완료",
+        "결제 취소됨"
+      ]
+    },
+    {
+      "name": "ServiceArea",
+      "display_name": "서비스 지역",
+      "description": "택배 서비스가 제공되는 지역으로, 전국, 제주도, 도서지역 등으로 구분됨",
+      "examples": [
+        "전국 GS25 점포",
+        "제주도 제외"
+      ]
+    },
+    {
+      "name": "TrackingNumber",
+      "display_name": "운송장 번호",
+      "description": "택배 물품의 고유 식별 번호로, 배송 추적 및 조회에 사용됨",
+      "examples": [
+        "210034242876",
+        "CJ123456789KR"
+      ]
+    },
+    {
+      "name": "CourierCompany",
+      "display_name": "배송 회사",
+      "description": "택배를 실제 운송하는 회사로, CJ대한통운, GS네트웍스, SF Express 등이 있음",
+      "examples": [
+        "CJ대한통운",
+        "GS네트웍스",
+        "SF Express"
+      ]
+    },
+    {
+      "name": "ServiceContract",
+      "display_name": "서비스 계약",
+      "description": "택배 서비스 제공과 관련된 법적 조건 및 약관으로, 보상, 책임, 이용 제한 등 포함",
+      "examples": [
+        "국내택배 약관",
+        "반값택배 이용약관"
+      ]
+    },
+    {
+      "name": "ReturnFee",
+      "display_name": "반송 수수료",
+      "description": "반송 시 고객이 부담해야 하는 비용으로, 운임의 일정 비율 또는 고정 금액으로 설정됨",
+      "examples": [
+        "3,500원 (2kg 기준)",
+        "5,500원 (10kg 기준)"
+      ]
+    },
+    {
+      "name": "CompensationRate",
+      "display_name": "보상 비율",
+      "description": "배송 지연 또는 분실 시 보상 금액 산정에 사용되는 비율로, 운임의 50% 또는 200% 기준",
+      "examples": [
+        "지연일수 × 운임의 50%",
+        "최대 운임의 200%"
+      ]
+    },
+    {
+      "name": "HandlingFee",
+      "display_name": "처리 수수료",
+      "description": "택배 접수 시 추가 부과되는 수수료로, 고액 상품, 도서지역 등에 적용됨",
+      "examples": [
+        "고액상품 할증료 2,000원",
+        "도서지역 배송비 4,000원"
+      ]
+    },
+    {
+      "name": "NotificationType",
+      "display_name": "알림 유형",
+      "description": "고객에게 발송되는 알림의 종류로, 알림톡, SMS, 문자 메시지 등이 있음",
+      "examples": [
+        "알림톡",
+        "SMS",
+        "문자 메시지"
+      ]
+    },
+    {
+      "name": "OrderStatus",
+      "display_name": "주문 상태",
+      "description": "택배 접수 이후의 상태로, 접수 완료, 수거 완료, 배송 중, 배송 완료 등이 있음",
+      "examples": [
+        "접수 완료",
+        "배송 중",
+        "배송 완료"
+      ]
+    },
+    {
+      "name": "PackagingStandard",
+      "display_name": "PackagingStandard",
+      "description": "Auto-generated entity type referenced in relations",
+      "examples": []
+    },
+    {
+      "name": "Agent",
+      "display_name": "상담원",
+      "description": "고객 문의를 처리하는 상담 직원",
+      "examples": [
+        "상담원",
+        "담당자",
+        "상담사",
+        "CS직원"
+      ]
+    },
+    {
+      "name": "InquiryType",
+      "display_name": "문의유형",
+      "description": "문의의 유형/카테고리",
+      "examples": [
+        "배송문의",
+        "환불요청",
+        "제품불량",
+        "사용방법"
+      ]
+    },
+    {
+      "name": "Channel",
+      "display_name": "채널",
+      "description": "고객 접촉 채널",
+      "examples": [
+        "전화",
+        "채팅",
+        "이메일",
+        "카카오톡",
+        "홈페이지"
+      ]
+    },
+    {
+      "name": "Product",
+      "display_name": "상품",
+      "description": "서비스 또는 상품",
+      "examples": [
+        "상품",
+        "서비스",
+        "제품",
+        "품목"
+      ]
+    },
+    {
+      "name": "Policy",
+      "display_name": "정책",
+      "description": "처리 기준이 되는 정책/규정/약관",
+      "examples": [
+        "환불정책",
+        "배송규정",
+        "이용약관",
+        "처리기준"
+      ]
+    },
+    {
+      "name": "Resolution",
+      "display_name": "해결방안",
+      "description": "문의에 대한 처리 결과/해결 방법",
+      "examples": [
+        "환불처리",
+        "재배송",
+        "교환",
+        "보상"
+      ]
+    },
+    {
+      "name": "Status",
+      "display_name": "상태",
+      "description": "처리 상태/진행 상태",
+      "examples": [
+        "접수",
+        "처리중",
+        "완료",
+        "보류",
+        "이관"
+      ]
+    },
+    {
+      "name": "Organization",
+      "display_name": "조직",
+      "description": "회사, 부서, 팀 등 조직 단위",
+      "examples": [
+        "회사",
+        "부서",
+        "팀",
+        "센터",
+        "지점"
+      ]
+    },
+    {
+      "name": "Location",
+      "display_name": "장소",
+      "description": "물리적 위치/장소",
+      "examples": [
+        "매장",
+        "센터",
+        "창고",
+        "배송지"
+      ]
+    },
+    {
+      "name": "Document",
+      "display_name": "문서",
+      "description": "관련 문서/자료",
+      "examples": [
+        "매뉴얼",
+        "가이드",
+        "안내문",
+        "공지사항"
+      ]
+    }
+  ],
+  "relation_types": [
+    {
+      "name": "SUBMITTED_BY",
+      "display_name": "보내는 사람 접수",
+      "description": "택배 물품이 고객(보내는 사람)에 의해 접수됨",
+      "source_types": [
+        "Sender"
+      ],
+      "target_types": [
+        "Shipment"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HANDLED_BY",
+      "display_name": "처리 담당",
+      "description": "택배 물품을 실제 수거하거나 처리하는 담당자 또는 조직이 있음",
+      "source_types": [
+        "Courier",
+        "ServiceManager"
+      ],
+      "target_types": [
+        "Shipment"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "DELIVERED_TO",
+      "display_name": "배송 목적지",
+      "description": "택배 물품이 수령되는 최종 목적지로, 수하인 또는 수령 지점",
+      "source_types": [
+        "Shipment"
+      ],
+      "target_types": [
+        "Receiver",
+        "DeliveryPoint"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "RECEIVED_AT",
+      "display_name": "도착 지점",
+      "description": "택배 물품이 도착한 지점 또는 센터",
+      "source_types": [
+        "Shipment"
+      ],
+      "target_types": [
+        "DeliveryPoint",
+        "HubCenter"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "TRACKED_BY",
+      "display_name": "추적 정보 제공",
+      "description": "택배의 이동 상태를 실시간으로 추적하는 정보 제공",
+      "source_types": [
+        "TrackingInfo"
+      ],
+      "target_types": [
+        "Shipment"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "ASSIGNED_TO",
+      "display_name": "배정됨",
+      "description": "택배 물품이 특정 배송 담당자 또는 차량에 할당됨",
+      "source_types": [
+        "Courier",
+        "CourierVehicle"
+      ],
+      "target_types": [
+        "Shipment"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "CATEGORIZED_AS",
+      "display_name": "유형 분류",
+      "description": "택배 물품이 특정 서비스 유형에 속함",
+      "source_types": [
+        "Shipment"
+      ],
+      "target_types": [
+        "ServiceType"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "LIMITED_BY",
+      "display_name": "제한 조건",
+      "description": "택배 접수 시 크기, 무게, 포장 상태 등에 따라 제한됨",
+      "source_types": [
+        "Parcel"
+      ],
+      "target_types": [
+        "SizeLimit",
+        "WeightLimit",
+        "PackagingStandard"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "PROHIBITED_IN",
+      "display_name": "금지 품목 포함",
+      "description": "금지 품목이 포함된 택배 물품은 접수 불가",
+      "source_types": [
+        "Parcel"
+      ],
+      "target_types": [
+        "ProhibitedItem"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_STATUS",
+      "display_name": "상태 보유",
+      "description": "택배 물품이 특정 상태를 가짐",
+      "source_types": [
+        "Shipment"
+      ],
+      "target_types": [
+        "ParcelStatus"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "INITIATED_BY",
+      "display_name": "시작 요청",
+      "description": "택배 접수가 고객에 의해 요청됨",
+      "source_types": [
+        "Customer"
+      ],
+      "target_types": [
+        "Shipment"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "PAYMENT_FOR",
+      "display_name": "운임 지불",
+      "description": "운임이 지불된 상태로, 선불 또는 착불로 구분됨",
+      "source_types": [
+        "PaymentMethod"
+      ],
+      "target_types": [
+        "ShippingFee"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "CAUSED_BY",
+      "display_name": "원인 제공",
+      "description": "배송 지연 또는 분실의 원인이 특정 주체에 의해 발생함",
+      "source_types": [
+        "ServiceManager",
+        "CourierCompany"
+      ],
+      "target_types": [
+        "DeliveryDelay",
+        "LostParcel"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "CLAIMED_BY",
+      "display_name": "청구 주체",
+      "description": "보상 청구를 요청하는 주체로, 송하인 또는 수하인",
+      "source_types": [
+        "Customer"
+      ],
+      "target_types": [
+        "CompensationClaim"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "COMPENSATED_BY",
+      "display_name": "보상 제공",
+      "description": "보상금을 지급하는 주체로, CJ대한통운 또는 GS네트웍스",
+      "source_types": [
+        "CourierCompany",
+        "ServiceManager"
+      ],
+      "target_types": [
+        "CompensationClaim"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "SCHEDULED_FOR",
+      "display_name": "배송 일정 설정",
+      "description": "택배 물품의 수거 또는 배송 일정이 설정됨",
+      "source_types": [
+        "DeliverySchedule"
+      ],
+      "target_types": [
+        "Shipment"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "REGISTERED_AT",
+      "display_name": "등록 지점",
+      "description": "택배 접수가 이루어진 지점",
+      "source_types": [
+        "Shipment"
+      ],
+      "target_types": [
+        "ReceiptPoint"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "DELIVERED_BY",
+      "display_name": "배송 담당",
+      "description": "택배를 실제로 배송하는 회사 또는 담당자",
+      "source_types": [
+        "CourierCompany",
+        "Courier"
+      ],
+      "target_types": [
+        "Shipment"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "CONTAINS",
+      "display_name": "포함됨",
+      "description": "택배 물품에 포함된 품목 또는 내용물",
+      "source_types": [
+        "Parcel"
+      ],
+      "target_types": [
+        "ProhibitedItem",
+        "ParcelValue"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "LINKED_TO",
+      "display_name": "연결됨",
+      "description": "다른 운송 건 또는 정보와 연결됨",
+      "source_types": [
+        "Shipment"
+      ],
+      "target_types": [
+        "TrackingInfo",
+        "ReturnShipment"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "MANAGED_BY",
+      "display_name": "운영 담당",
+      "description": "택배 서비스의 운영을 담당하는 조직 또는 매니저",
+      "source_types": [
+        "ServiceManager"
+      ],
+      "target_types": [
+        "ServiceType"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "PROVIDED_IN",
+      "display_name": "제공 지역",
+      "description": "택배 서비스가 제공되는 지역",
+      "source_types": [
+        "ServiceType"
+      ],
+      "target_types": [
+        "ServiceArea"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "EXCEEDS_LIMIT",
+      "display_name": "제한 초과",
+      "description": "크기, 무게, 포장 상태 등에서 제한을 초과함",
+      "source_types": [
+        "Parcel"
+      ],
+      "target_types": [
+        "SizeLimit",
+        "WeightLimit",
+        "PackagingStandard"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "RECEIVED_FROM",
+      "display_name": "수거 출처",
+      "description": "택배 물품이 수거된 출처 지점",
+      "source_types": [
+        "Shipment"
+      ],
+      "target_types": [
+        "ReceiptPoint"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "ALERTED_TO",
+      "display_name": "알림 대상",
+      "description": "알림톡, SMS 등이 발송된 고객",
+      "source_types": [
+        "Notification"
+      ],
+      "target_types": [
+        "Customer"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_EXCEPTION",
+      "display_name": "예외 발생",
+      "description": "택배 처리 중 예외 상황 발생",
+      "source_types": [
+        "Shipment"
+      ],
+      "target_types": [
+        "HandlingException"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "RETURNED_TO",
+      "display_name": "반송 목적지",
+      "description": "반송된 물품이 송하인 주소로 발송됨",
+      "source_types": [
+        "ReturnShipment"
+      ],
+      "target_types": [
+        "Sender"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "APPLIED_TO",
+      "display_name": "적용됨",
+      "description": "운임, 보상, 수수료 등의 조건이 특정 운송 건에 적용됨",
+      "source_types": [
+        "ShippingFee",
+        "CompensationRate",
+        "HandlingFee"
+      ],
+      "target_types": [
+        "Shipment"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_TRACKING",
+      "display_name": "추적 가능",
+      "description": "택배 운송 건에 대한 추적 정보가 존재함",
+      "source_types": [
+        "Shipment"
+      ],
+      "target_types": [
+        "TrackingInfo"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "ASSIGNED_TO_REGION",
+      "display_name": "권역 할당",
+      "description": "택배 운송 건이 특정 권역에 할당됨",
+      "source_types": [
+        "Shipment"
+      ],
+      "target_types": [
+        "Region"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "PROCESSING_FOR",
+      "display_name": "처리 대상",
+      "description": "반송 또는 재배송 프로세스의 대상이 되는 운송 건",
+      "source_types": [
+        "ReturnProcess",
+        "ReturnShipment"
+      ],
+      "target_types": [
+        "Shipment"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "INITIATED_BY_SERVICE",
+      "display_name": "서비스 요청",
+      "description": "택배 서비스의 접수가 특정 서비스에 의해 시작됨",
+      "source_types": [
+        "ServiceType"
+      ],
+      "target_types": [
+        "Shipment"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HAS_PAYMENT",
+      "display_name": "결제 포함",
+      "description": "택배 운임에 대한 결제 정보 포함",
+      "source_types": [
+        "Shipment"
+      ],
+      "target_types": [
+        "PaymentMethod"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "COSTS",
+      "display_name": "비용 발생",
+      "description": "택배 운송 건에 대한 비용 발생",
+      "source_types": [
+        "Shipment"
+      ],
+      "target_types": [
+        "ShippingFee",
+        "ReturnFee"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "CONNECTED_TO",
+      "display_name": "연결됨",
+      "description": "다른 물류 센터 또는 지점과 연결됨",
+      "source_types": [
+        "HubCenter"
+      ],
+      "target_types": [
+        "DeliveryPoint",
+        "Shipment"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "DELIVERED_IN",
+      "display_name": "배송 지역",
+      "description": "택배 물품이 배송되는 지역",
+      "source_types": [
+        "Shipment"
+      ],
+      "target_types": [
+        "ServiceArea"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "SUBMITTED",
+      "display_name": "접수함",
+      "description": "고객이 문의를 접수하는 관계",
+      "source_types": [
+        "Customer"
+      ],
+      "target_types": [
+        "Inquiry",
+        "InquiryType"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "HANDLED",
+      "display_name": "처리함",
+      "description": "상담원이 문의를 처리하는 관계",
+      "source_types": [
+        "Agent"
+      ],
+      "target_types": [
+        "Inquiry",
+        "InquiryType"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "INQUIRED_ABOUT",
+      "display_name": "문의대상",
+      "description": "문의가 특정 상품/서비스에 대한 것임",
+      "source_types": [
+        "Inquiry"
+      ],
+      "target_types": [
+        "Product"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "RESOLVED_WITH",
+      "display_name": "해결됨",
+      "description": "문의가 특정 방안으로 해결됨",
+      "source_types": [
+        "Inquiry"
+      ],
+      "target_types": [
+        "Resolution"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "CONTACTED_VIA",
+      "display_name": "채널로연락",
+      "description": "고객이 특정 채널로 연락함",
+      "source_types": [
+        "Customer",
+        "Inquiry"
+      ],
+      "target_types": [
+        "Channel"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "FOLLOWS_POLICY",
+      "display_name": "정책준수",
+      "description": "처리가 특정 정책을 따름",
+      "source_types": [
+        "Resolution",
+        "Agent"
+      ],
+      "target_types": [
+        "Policy"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "BELONGS_TO",
+      "display_name": "소속",
+      "description": "소속 관계",
+      "source_types": [
+        "Agent",
+        "Product"
+      ],
+      "target_types": [
+        "Organization"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "LOCATED_AT",
+      "display_name": "위치",
+      "description": "위치 관계",
+      "source_types": [
+        "Organization",
+        "Product"
+      ],
+      "target_types": [
+        "Location"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    },
+    {
+      "name": "REFERENCES",
+      "display_name": "참조",
+      "description": "문서/정책을 참조함",
+      "source_types": [
+        "Inquiry",
+        "Resolution"
+      ],
+      "target_types": [
+        "Document",
+        "Policy"
+      ],
+      "is_directional": true,
+      "cardinality": "N:M"
+    }
+  ],
+  "version": "1.0.0",
+  "tags": [],
+  "created_at": "2026-02-06T13:01:35.626168",
+  "updated_at": "2026-02-06T13:01:35.626168"
+}
