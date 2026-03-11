@@ -140,7 +140,8 @@ const useSettingsStoreBase = create<SettingsState>()(
         user_prompt: '',
         enable_rerank: true,
         include_references: true,
-        include_chunk_content: false
+        include_chunk_content: false,
+        highlight_entities: false
       },
 
       setTheme: (theme: Theme) => set({ theme }),
@@ -246,7 +247,7 @@ const useSettingsStoreBase = create<SettingsState>()(
     {
       name: 'settings-storage',
       storage: createJSONStorage(() => localStorage),
-      version: 23,
+      version: 24,
       migrate: (state: any, version: number) => {
         if (version < 2) {
           state.showEdgeLabel = false
@@ -365,6 +366,12 @@ const useSettingsStoreBase = create<SettingsState>()(
         }
         if (version < 23) {
           state.showQuerySettings ??= true
+        }
+        if (version < 24) {
+          // Add highlight_entities field
+          if (state.querySettings) {
+            state.querySettings.highlight_entities ??= false
+          }
         }
         return state
       }

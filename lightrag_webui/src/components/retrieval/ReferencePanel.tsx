@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { ReferenceItem, StructuredContentItem, BoardViewResponse, viewBoardPost } from '@/api/lightrag'
-import { ChevronDownIcon, DownloadIcon, ExternalLinkIcon, ImageIcon, FileTextIcon, BookOpenIcon, XIcon, TableIcon, EyeIcon, Loader2Icon } from 'lucide-react'
+import { ChevronDownIcon, DownloadIcon, ExternalLinkIcon, ImageIcon, FileTextIcon, BookOpenIcon, XIcon, TableIcon, EyeIcon, Loader2Icon, BracesIcon } from 'lucide-react'
 import Button from '@/components/ui/Button'
 import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
@@ -51,9 +51,9 @@ function isViewableInBrowser(filePath: string): boolean {
   return ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico'].includes(ext)
 }
 
-/** Board URL: starts with http(s):// and has no download_url (board ingestion doesn't create download links) */
+/** Board URL: HTTP URL containing /api/board/ pattern (board API ingestion) */
 function isBoardUrl(reference: ReferenceItem): boolean {
-  return /^https?:\/\//.test(reference.file_path) && !reference.download_url
+  return /^https?:\/\//.test(reference.file_path) && /\/api\/board\//.test(reference.file_path)
 }
 
 /** Check if file_path is an external URL */
@@ -359,10 +359,10 @@ function ReferenceCard({ reference, isHighlighted }: {
   }
 
   const isUrlRef = isExternalUrl(reference.file_path)
-  // Board refs: show full URL; others: show last path segment
+  // Board refs: prefer doc_nm (post title), fallback to URL; others: show last path segment
   const displayName = isBoardRef
-    ? reference.file_path
-    : (reference.file_path.split('/').pop() || reference.file_path)
+    ? (reference.doc_nm || reference.file_path)
+    : (reference.doc_nm || reference.file_path.split('/').pop() || reference.file_path)
 
   const allStructured = reference.structured_content || []
   const others = allStructured.filter(sc => sc.type !== 'image' && sc.type !== 'table')
@@ -435,17 +435,28 @@ function ReferenceCard({ reference, isHighlighted }: {
         {/* Action buttons */}
         <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
           {isBoardRef && (
-            <button
-              onClick={handleViewBoardPost}
-              disabled={boardLoading}
-              className="p-1 rounded hover:bg-muted transition-colors"
-              title={t('boardView.viewPost')}
-            >
-              {boardLoading
-                ? <Loader2Icon className="h-3 w-3 text-muted-foreground animate-spin" />
-                : <EyeIcon className="h-3 w-3 text-muted-foreground" />
-              }
-            </button>
+            <>
+              <button
+                onClick={handleViewBoardPost}
+                disabled={boardLoading}
+                className="p-1 rounded hover:bg-muted transition-colors"
+                title={t('boardView.viewPost')}
+              >
+                {boardLoading
+                  ? <Loader2Icon className="h-3 w-3 text-muted-foreground animate-spin" />
+                  : <EyeIcon className="h-3 w-3 text-muted-foreground" />
+                }
+              </button>
+              <a
+                href={reference.file_path}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-1 rounded hover:bg-muted transition-colors"
+                title={t('boardView.viewApiJson')}
+              >
+                <BracesIcon className="h-3 w-3 text-muted-foreground" />
+              </a>
+            </>
           )}
           {reference.download_url && isViewableInBrowser(reference.file_path) && (
             <a href={reference.download_url} target="_blank" rel="noopener noreferrer"

@@ -115,7 +115,22 @@ class DoclingMultimodalParser:
 
         # Convert document using Docling Python API
         result = converter.convert(file_path)
+
+        # Check conversion status
+        from docling.datamodel.base_models import ConversionStatus
+        if result.status == ConversionStatus.FAILURE:
+            errors = getattr(result, 'errors', []) or []
+            error_msgs = "; ".join(str(e) for e in errors) if errors else "unknown error"
+            raise RuntimeError(
+                f"Docling conversion failed for {file_path.name}: {error_msgs}"
+            )
+
         doc = result.document
+        if doc is None:
+            raise RuntimeError(
+                f"Docling returned no document for {file_path.name} "
+                f"(status: {result.status})"
+            )
 
         # Convert DoclingDocument to content_list
         content_list = self._convert_document(doc, img_dir)

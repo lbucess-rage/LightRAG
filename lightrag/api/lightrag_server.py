@@ -484,10 +484,18 @@ def create_app(args):
             # Set DB reference for task persistence and load recent tasks
             try:
                 task_svc = get_task_service()
-                task_db = getattr(getattr(rag, 'doc_status', None), 'db', None)
+                doc_status = getattr(rag, 'doc_status', None)
+                task_db = getattr(doc_status, 'db', None) if doc_status else None
+                logger.info(
+                    f"Task DB setup: doc_status={type(doc_status).__name__ if doc_status else 'None'}, "
+                    f"db={'available' if task_db else 'None'}"
+                )
                 if task_db:
                     task_svc._db = task_db
-                    await task_svc.load_tasks_from_db()
+                    loaded = await task_svc.load_tasks_from_db()
+                    logger.info(f"Loaded {loaded} tasks from DB on startup")
+                else:
+                    logger.warning("No DB reference available for task persistence")
             except Exception as e:
                 logger.warning(f"Failed to load tasks from DB on startup: {e}")
 

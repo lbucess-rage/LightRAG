@@ -168,6 +168,10 @@ class QueryParam:
     containing citation information for the retrieved content.
     """
 
+    highlight_entities: bool = False
+    """If True, instructs the LLM to highlight entity names in bold and relation keywords in italics
+    within the response for improved readability."""
+
 
 @dataclass
 class StorageNameSpace(ABC):
@@ -700,6 +704,8 @@ class DocProcessingStatus:
     """Error message if failed"""
     s3_url: str | None = None
     """S3 download URL for the document file"""
+    doc_nm: str | None = None
+    """Display name for the document (e.g., board post title, page title)"""
     metadata: dict[str, Any] = field(default_factory=dict)
     """Additional metadata"""
     multimodal_processed: bool | None = field(default=None, repr=False)
@@ -790,6 +796,11 @@ class DocStatusStorage(BaseKVStorage, ABC):
         doc = await self.get_doc_by_file_path(file_path)
         if doc and "id" in doc:
             return [doc["id"]]
+        return []
+
+    async def get_doc_ids_by_parent_file_path(self, parent_file_path: str) -> list[str]:
+        """Get all document IDs whose metadata.parent_file_path matches the given value.
+        Used for cascading deletion of board post attachments."""
         return []
 
 

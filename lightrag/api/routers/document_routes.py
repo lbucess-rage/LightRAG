@@ -501,6 +501,9 @@ class DocStatusResponse(BaseModel):
     s3_url: Optional[str] = Field(
         default=None, description="S3 download URL for the document file"
     )
+    doc_nm: Optional[str] = Field(
+        default=None, description="Display name for the document"
+    )
 
     class Config:
         json_schema_extra = {
@@ -1638,7 +1641,8 @@ async def pipeline_enqueue_file(
                 doc_id = compute_mdhash_id(sanitized_content, prefix="doc-")
 
                 await rag.apipeline_enqueue_documents(
-                    content, file_paths=file_path.name, track_id=track_id
+                    content, file_paths=file_path.name, track_id=track_id,
+                    doc_nms=file_path.name,
                 )
 
                 logger.info(
@@ -2059,6 +2063,29 @@ async def background_delete_documents(
                 pipeline_status["cur_batch"] = i
                 pipeline_status["latest_message"] = start_msg
                 pipeline_status["history_messages"].append(start_msg)
+
+            # Cascading deletion: find child documents (e.g., board post attachments)
+            try:
+                doc_info = await rag.doc_status.get_by_id(doc_id)
+                if doc_info:
+                    parent_fp = doc_info.get("file_path", "")
+                    if parent_fp:
+                        child_ids = await rag.doc_status.get_doc_ids_by_parent_file_path(parent_fp)
+                        new_children = [
+                            cid for cid in child_ids
+                            if cid not in doc_ids and cid not in successful_deletions
+                        ]
+                        if new_children:
+                            doc_ids.extend(new_children)
+                            total_docs = len(doc_ids)
+                            async with pipeline_status_lock:
+                                pipeline_status["docs"] = total_docs
+                                pipeline_status["batchs"] = total_docs
+                                child_msg = f"Found {len(new_children)} child document(s) for {parent_fp}"
+                                logger.info(child_msg)
+                                pipeline_status["history_messages"].append(child_msg)
+            except Exception as e:
+                logger.warning(f"Failed to find child documents for {doc_id}: {e}")
 
             file_path = "#"
             try:
@@ -2981,6 +3008,7 @@ def create_document_routes(
                             metadata=doc_status.metadata,
                             file_path=doc_status.file_path,
                             s3_url=getattr(doc_status, "s3_url", None),
+                            doc_nm=getattr(doc_status, "doc_nm", None),
                         )
                     )
 
@@ -3364,6 +3392,7 @@ def create_document_routes(
                         metadata=doc.metadata,
                         file_path=doc.file_path,
                         s3_url=getattr(doc, "s3_url", None),
+                        doc_nm=getattr(doc, "doc_nm", None),
                     )
                 )
 

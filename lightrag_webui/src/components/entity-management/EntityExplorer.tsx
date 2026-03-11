@@ -108,13 +108,24 @@ export default function EntityExplorer() {
 
   const handleDelete = useCallback(async (e: React.MouseEvent, entityId: string) => {
     e.stopPropagation()
-    if (!window.confirm(t('entityManagement.entityExplorer.confirmDelete', { entityId }))) {
-      return
+
+    // Ask cascade or graph-only via confirm/cancel pattern
+    const cascadeMsg = t('entityManagement.entityExplorer.confirmDeleteCascade', { entityId })
+    const graphOnlyMsg = t('entityManagement.entityExplorer.confirmDeleteGraphOnly', { entityId })
+    const cascade = window.confirm(
+      `${cascadeMsg}\n\n[OK] = ${t('entityManagement.cascadeDelete')}\n[Cancel] = ${t('entityManagement.graphOnlyDelete')}`
+    )
+
+    // If user pressed Cancel on cascade prompt, ask if they want graph-only
+    let proceed = true
+    if (!cascade) {
+      proceed = window.confirm(graphOnlyMsg)
+      if (!proceed) return
     }
 
     setDeleteLoading(entityId)
     try {
-      await removeEntity(entityId)
+      await removeEntity(entityId, cascade)
       toast.success(t('entityManagement.entityExplorer.deleteSuccess', { entityId }))
     } catch (error) {
       toast.error(t('entityManagement.entityExplorer.deleteFailed'))

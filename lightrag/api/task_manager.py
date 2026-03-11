@@ -434,7 +434,12 @@ class TaskService:
             pass  # No running event loop
 
     async def load_tasks_from_db(self, max_age_hours: int = 72) -> int:
-        """Load recent tasks from DB into memory registry on startup."""
+        """Load recent tasks from DB into memory registry on startup.
+
+        Tasks of certain types (e.g., board_ingest) are always loaded
+        regardless of age because their metadata is needed for ongoing
+        operations like board post viewing.
+        """
         if not self._db:
             return 0
         try:
@@ -444,6 +449,7 @@ class TaskService:
                             EXTRACT(EPOCH FROM updated_at) as updated_at
                      FROM LIGHTRAG_TASKS
                      WHERE updated_at > NOW() - INTERVAL '{int(max_age_hours)} hours'
+                        OR task_type IN ('board_ingest', 'url_ingest')
                      ORDER BY created_at DESC"""
             rows = await self._db.query(sql, multirows=True)
             if not rows:

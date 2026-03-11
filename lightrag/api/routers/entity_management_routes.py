@@ -253,12 +253,17 @@ def create_entity_management_routes(rag, api_key: Optional[str] = None):
             )
 
     @router.delete("/entities/{entity_id}", dependencies=[Depends(combined_auth)])
-    async def delete_entity(http_request: Request, entity_id: str):
+    async def delete_entity(
+        http_request: Request,
+        entity_id: str,
+        cascade: bool = Query(True, description="true: delete graph+vector+chunk mappings, false: graph only"),
+    ):
         """
-        Delete an entity and all its relationships.
+        Delete an entity and optionally cascade to vector embeddings and chunk mappings.
 
         Args:
             entity_id: The entity ID to delete
+            cascade: If true, also delete vector embeddings and chunk mappings
 
         Returns:
             DeleteEntityResponse with status and message
@@ -282,13 +287,28 @@ def create_entity_management_routes(rag, api_key: Optional[str] = None):
                     status_code=404, detail=f"Entity '{entity_id}' not found"
                 )
 
-            # Delete the entity
-            await graph_storage.delete_node(entity_id)
+            if cascade:
+                from lightrag.utils_graph import adelete_by_entity
 
-            return DeleteEntityResponse(
-                status="success",
-                message=f"Entity '{entity_id}' deleted successfully"
-            )
+                result = await adelete_by_entity(
+                    chunk_entity_relation_graph=workspace_rag.chunk_entity_relation_graph,
+                    entities_vdb=workspace_rag.entities_vdb,
+                    relationships_vdb=workspace_rag.relationships_vdb,
+                    entity_name=entity_id,
+                    entity_chunks_storage=workspace_rag.entity_chunks,
+                    relation_chunks_storage=workspace_rag.relation_chunks,
+                    text_chunks_storage=workspace_rag.text_chunks,
+                    chunks_vdb=workspace_rag.chunks_vdb,
+                )
+                if result.status_code != 200:
+                    raise HTTPException(status_code=result.status_code, detail=result.message)
+                return DeleteEntityResponse(status="success", message=result.message)
+            else:
+                await graph_storage.delete_node(entity_id)
+                return DeleteEntityResponse(
+                    status="success",
+                    message=f"Entity '{entity_id}' deleted from graph only"
+                )
         except HTTPException:
             raise
         except Exception as e:
@@ -299,12 +319,17 @@ def create_entity_management_routes(rag, api_key: Optional[str] = None):
             )
 
     @router.delete("/relations", dependencies=[Depends(combined_auth)])
-    async def delete_relation(http_request: Request, request: DeleteRelationRequest):
+    async def delete_relation(
+        http_request: Request,
+        request: DeleteRelationRequest,
+        cascade: bool = Query(True, description="true: delete graph+vector+chunk mappings, false: graph only"),
+    ):
         """
-        Delete a relation between two entities.
+        Delete a relation between two entities, optionally cascading to vector embeddings and chunk mappings.
 
         Args:
             request: DeleteRelationRequest with source_id and target_id
+            cascade: If true, also delete vector embeddings and chunk mappings
 
         Returns:
             DeleteRelationResponse with status and message
@@ -329,13 +354,25 @@ def create_entity_management_routes(rag, api_key: Optional[str] = None):
                     detail=f"Relation between '{request.source_id}' and '{request.target_id}' not found"
                 )
 
-            # Delete the relation
-            await graph_storage.remove_edges([(request.source_id, request.target_id)])
+            if cascade:
+                from lightrag.utils_graph import adelete_by_relation
 
-            return DeleteRelationResponse(
-                status="success",
-                message=f"Relation between '{request.source_id}' and '{request.target_id}' deleted successfully"
-            )
+                result = await adelete_by_relation(
+                    chunk_entity_relation_graph=workspace_rag.chunk_entity_relation_graph,
+                    relationships_vdb=workspace_rag.relationships_vdb,
+                    source_entity=request.source_id,
+                    target_entity=request.target_id,
+                    relation_chunks_storage=workspace_rag.relation_chunks,
+                )
+                if result.status_code != 200:
+                    raise HTTPException(status_code=result.status_code, detail=result.message)
+                return DeleteRelationResponse(status="success", message=result.message)
+            else:
+                await graph_storage.remove_edges([(request.source_id, request.target_id)])
+                return DeleteRelationResponse(
+                    status="success",
+                    message=f"Relation between '{request.source_id}' and '{request.target_id}' deleted from graph only"
+                )
         except HTTPException:
             raise
         except Exception as e:

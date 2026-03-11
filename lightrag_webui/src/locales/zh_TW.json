@@ -414,7 +414,14 @@
       "responseFormatOptions": {
         "multipleParagraphs": "多段落",
         "singleParagraph": "單段落",
-        "bulletPoints": "重點"
+        "bulletPoints": "重點",
+        "numberedList": "編號列表",
+        "table": "表格",
+        "executiveSummary": "摘要報告",
+        "faq": "常見問題",
+        "structuredSections": "結構化章節",
+        "threeLineSummary": "三行摘要",
+        "briefAnswer": "簡要回答"
       },
       "topK": "知識圖譜 Top K",
       "topKTooltip": "實體關係檢索數量，適用於非 naive 模式。",

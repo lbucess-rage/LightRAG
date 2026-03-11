@@ -54,6 +54,57 @@ async def _persist_graph_updates(
         )
 
 
+async def _find_orphan_chunks(
+    chunk_ids: list[str],
+    entity_chunks_storage,
+    relation_chunks_storage,
+) -> list[str]:
+    """Find chunk_ids that are not referenced by any remaining entity or relation.
+
+    Uses SQL query on entity_chunks/relation_chunks tables to check if any
+    remaining entry references each chunk_id via JSONB containment.
+    """
+    if not chunk_ids:
+        return []
+
+    orphans = []
+    for chunk_id in chunk_ids:
+        still_referenced = False
+
+        # Check entity_chunks: any remaining entity references this chunk?
+        if entity_chunks_storage is not None and hasattr(entity_chunks_storage, 'db'):
+            try:
+                sql = """SELECT 1 FROM LIGHTRAG_ENTITY_CHUNKS
+                         WHERE workspace=$1 AND chunk_ids @> $2::jsonb
+                         LIMIT 1"""
+                result = await entity_chunks_storage.db.query(
+                    sql, [entity_chunks_storage.workspace, f'["{chunk_id}"]']
+                )
+                if result:
+                    still_referenced = True
+            except Exception as e:
+                logger.debug(f"Error checking entity_chunks for chunk {chunk_id}: {e}")
+
+        # Check relation_chunks: any remaining relation references this chunk?
+        if not still_referenced and relation_chunks_storage is not None and hasattr(relation_chunks_storage, 'db'):
+            try:
+                sql = """SELECT 1 FROM LIGHTRAG_RELATION_CHUNKS
+                         WHERE workspace=$1 AND chunk_ids @> $2::jsonb
+                         LIMIT 1"""
+                result = await relation_chunks_storage.db.query(
+                    sql, [relation_chunks_storage.workspace, f'["{chunk_id}"]']
+                )
+                if result:
+                    still_referenced = True
+            except Exception as e:
+                logger.debug(f"Error checking relation_chunks for chunk {chunk_id}: {e}")
+
+        if not still_referenced:
+            orphans.append(chunk_id)
+
+    return orphans
+
+
 async def adelete_by_entity(
     chunk_entity_relation_graph,
     entities_vdb,
@@ -61,10 +112,13 @@ async def adelete_by_entity(
     entity_name: str,
     entity_chunks_storage=None,
     relation_chunks_storage=None,
+    text_chunks_storage=None,
+    chunks_vdb=None,
 ) -> DeletionResult:
     """Asynchronously delete an entity and all its relationships.
 
-    Also cleans up entity_chunks_storage and relation_chunks_storage to remove chunk tracking.
+    Also cleans up entity_chunks_storage, relation_chunks_storage,
+    and optionally orphaned chunks from text_chunks and chunks_vdb.
 
     Args:
         chunk_entity_relation_graph: Graph storage instance
@@ -73,6 +127,8 @@ async def adelete_by_entity(
         entity_name: Name of the entity to delete
         entity_chunks_storage: Optional KV storage for tracking chunks that reference this entity
         relation_chunks_storage: Optional KV storage for tracking chunks that reference relations
+        text_chunks_storage: Optional KV storage for text chunks (doc_chunks)
+        chunks_vdb: Optional vector storage for chunk embeddings
     """
     # Use keyed lock for entity to ensure atomic graph and vector db operations
     workspace = entities_vdb.global_config.get("workspace", "")
@@ -94,21 +150,49 @@ async def adelete_by_entity(
             edges = await chunk_entity_relation_graph.get_node_edges(entity_name)
             related_relations_count = len(edges) if edges else 0
 
-            # Clean up chunk tracking storages before deletion
+            # Collect chunk_ids BEFORE deleting entity_chunks mapping
+            entity_chunk_ids = []
             if entity_chunks_storage is not None:
-                # Delete entity's entry from entity_chunks_storage
+                try:
+                    entity_data = await entity_chunks_storage.get_by_id(entity_name)
+                    if entity_data:
+                        entity_chunk_ids = entity_data.get("chunk_ids", [])
+                        if isinstance(entity_chunk_ids, str):
+                            import json
+                            entity_chunk_ids = json.loads(entity_chunk_ids)
+                except Exception as e:
+                    logger.debug(f"Failed to get chunk_ids for entity '{entity_name}': {e}")
+
+            # Also collect chunk_ids from relations being deleted
+            relation_chunk_ids = []
+            if relation_chunks_storage is not None and edges:
+                from .utils import make_relation_chunk_key
+                for src, tgt in edges:
+                    normalized_src, normalized_tgt = sorted([src, tgt])
+                    storage_key = make_relation_chunk_key(normalized_src, normalized_tgt)
+                    try:
+                        rel_data = await relation_chunks_storage.get_by_id(storage_key)
+                        if rel_data:
+                            rel_cids = rel_data.get("chunk_ids", [])
+                            if isinstance(rel_cids, str):
+                                import json
+                                rel_cids = json.loads(rel_cids)
+                            relation_chunk_ids.extend(rel_cids)
+                    except Exception as e:
+                        logger.debug(f"Failed to get chunk_ids for relation '{storage_key}': {e}")
+
+            # Clean up chunk tracking storages
+            if entity_chunks_storage is not None:
                 await entity_chunks_storage.delete([entity_name])
                 logger.info(
                     f"Entity Delete: removed chunk tracking for `{entity_name}`"
                 )
 
             if relation_chunks_storage is not None and edges:
-                # Delete all related relationships from relation_chunks_storage
                 from .utils import make_relation_chunk_key
 
                 relation_keys_to_delete = []
                 for src, tgt in edges:
-                    # Normalize entity order for consistent key generation
                     normalized_src, normalized_tgt = sorted([src, tgt])
                     storage_key = make_relation_chunk_key(
                         normalized_src, normalized_tgt
@@ -125,7 +209,26 @@ async def adelete_by_entity(
             await relationships_vdb.delete_entity_relation(entity_name)
             await chunk_entity_relation_graph.delete_node(entity_name)
 
-            message = f"Entity Delete: remove '{entity_name}' and its {related_relations_count} relations"
+            # Delete orphaned chunks (chunks not referenced by any remaining entity/relation)
+            orphan_count = 0
+            all_candidate_chunk_ids = list(set(entity_chunk_ids + relation_chunk_ids))
+            if all_candidate_chunk_ids and (text_chunks_storage or chunks_vdb):
+                orphan_ids = await _find_orphan_chunks(
+                    all_candidate_chunk_ids,
+                    entity_chunks_storage,
+                    relation_chunks_storage,
+                )
+                if orphan_ids:
+                    orphan_count = len(orphan_ids)
+                    if text_chunks_storage:
+                        await text_chunks_storage.delete(orphan_ids)
+                    if chunks_vdb:
+                        await chunks_vdb.delete(orphan_ids)
+                    logger.info(
+                        f"Entity Delete: removed {orphan_count} orphaned chunks for `{entity_name}`"
+                    )
+
+            message = f"Entity Delete: remove '{entity_name}' and its {related_relations_count} relations, {orphan_count} orphaned chunks"
             logger.info(message)
             await _persist_graph_updates(
                 entities_vdb=entities_vdb,

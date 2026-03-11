@@ -254,7 +254,7 @@ Consider the conversation history if provided to maintain conversational flow an
   - The response MUST be in the same language as the user query.
   - The response MUST utilize Markdown formatting for enhanced clarity and structure (e.g., headings, bold text, bullet points).
   - The response should be presented in {response_type}.
-
+{highlight_instruction}
 4. Inline Citation Format:
   - Place citation tags in the text as [n] where n is the reference_id from the Document Chunks.
   - Place citations immediately after the relevant fact, before sentence-ending punctuation.
@@ -302,7 +302,7 @@ Consider the conversation history if provided to maintain conversational flow an
   - The response MUST be in the same language as the user query.
   - The response MUST utilize Markdown formatting for enhanced clarity and structure (e.g., headings, bold text, bullet points).
   - The response should be presented in {response_type}.
-
+{highlight_instruction}
 4. Inline Citation Format:
   - Place citation tags in the text as [n] where n is the reference_id from the Document Chunks.
   - Place citations immediately after the relevant fact, before sentence-ending punctuation.

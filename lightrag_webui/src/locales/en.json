@@ -213,7 +213,10 @@
       "dateField": "Date Field",
       "authorField": "Author Field",
       "attachmentsField": "Attachments Field",
+      "attachmentUrlField": "Attachment URL Field",
+      "attachmentNameField": "Attachment Name Field",
       "detailUrlTemplate": "Detail URL Template",
+      "detailUrlTemplateTooltip": "{id} is a fixed placeholder. Use {id} exactly — not the actual field name like {_id}. Example: /api/posts/{id}",
       "pagination": "Pagination",
       "paginationType": "Type",
       "pageParam": "Page Parameter",
@@ -242,7 +245,10 @@
       "llmNotes": "AI Notes",
       "rawKeys": "Available Keys",
       "key": "Key",
-      "value": "Value"
+      "value": "Value",
+      "cursorField": "Cursor Field",
+      "processDocuments": "Process Document Attachments (PDF, DOCX, etc.)",
+      "parserSelection": "Document Parser"
     },
     "taskProgress": {
       "status": {
@@ -609,7 +615,14 @@
       "responseFormatOptions": {
         "multipleParagraphs": "Multiple Paragraphs",
         "singleParagraph": "Single Paragraph",
-        "bulletPoints": "Bullet Points"
+        "bulletPoints": "Bullet Points",
+        "numberedList": "Numbered List",
+        "table": "Table",
+        "executiveSummary": "Executive Summary",
+        "faq": "FAQ",
+        "structuredSections": "Structured Sections",
+        "threeLineSummary": "Three-Line Summary",
+        "briefAnswer": "Brief Answer"
       },
       "topK": "KG Top K",
       "topKTooltip": "Number of entities and relations to retrieve. Applicable for non-naive modes.",
@@ -637,6 +650,8 @@
       "userPromptPlaceholder": "Enter custom prompt (optional)",
       "enableRerank": "Enable Rerank",
       "enableRerankTooltip": "Enable reranking for retrieved text chunks. If True but no rerank model is configured, a warning will be issued. Default is True.",
+      "highlightEntities": "Highlight Entities",
+      "highlightEntitiesTooltip": "Highlight entity names in **bold** and relation keywords in *italics* for improved readability",
       "includeReferences": "Include References",
       "includeReferencesTooltip": "Include reference documents (source files, scores) in the query response",
       "includeChunkContent": "Include Chunk Content",
@@ -692,7 +707,8 @@
     "author": "Author",
     "date": "Date",
     "attachments": "Attachments",
-    "close": "Close"
+    "close": "Close",
+    "viewApiJson": "View API JSON"
   },
   "apiSite": {
     "loading": "Loading API Documentation..."
@@ -738,6 +754,8 @@
     "inactive": "Inactive"
   },
   "entityManagement": {
+    "cascadeDelete": "Full delete (recommended)",
+    "graphOnlyDelete": "Graph only delete",
     "tabs": {
       "entities": "Entity Explorer",
       "relations": "Relation Explorer"
@@ -749,6 +767,8 @@
       "refresh": "Refresh",
       "noEntities": "No entities found",
       "confirmDelete": "Are you sure you want to delete the entity '{{entityId}}'? This action cannot be undone.",
+      "confirmDeleteCascade": "Delete '{{entityId}}' with all associated vector embeddings and chunk mappings.",
+      "confirmDeleteGraphOnly": "Delete '{{entityId}}' from graph only. Vector embeddings and chunk mappings will be preserved.",
       "deleteSuccess": "Entity '{{entityId}}' has been deleted",
       "deleteFailed": "Failed to delete entity",
       "columns": {
@@ -764,6 +784,8 @@
       "refresh": "Refresh",
       "noRelations": "No relations found",
       "confirmDelete": "Are you sure you want to delete the relation between '{{sourceId}}' and '{{targetId}}'?",
+      "confirmDeleteCascade": "Delete the relation between '{{sourceId}}' and '{{targetId}}' with all associated vector embeddings and chunk mappings.",
+      "confirmDeleteGraphOnly": "Delete the relation between '{{sourceId}}' and '{{targetId}}' from graph only. Vector embeddings and chunk mappings will be preserved.",
       "deleteSuccess": "Relation has been deleted",
       "deleteFailed": "Failed to delete relation",
       "columns": {

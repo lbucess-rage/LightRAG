@@ -153,8 +153,8 @@ export function BoardPostDialog({
             </div>
             <div className="flex flex-wrap gap-2">
               {data.attachments.map((att: any, idx: number) => {
-                const name = typeof att === 'string' ? att : (att?.name || att?.fileName || att?.file_name || `file-${idx + 1}`)
-                const url = typeof att === 'string' ? att : (att?.url || att?.download_url || att?.link || '')
+                const name = typeof att === 'string' ? att : (att?.name || att?.fileName || att?.file_name || att?.attachFileNm || att?.originalName || `file-${idx + 1}`)
+                const url = typeof att === 'string' ? att : (att?.url || att?.download_url || att?.link || att?.filePath || att?.file_path || att?.path || att?.src || '')
                 return url ? (
                   <a key={idx} href={url} target="_blank" rel="noopener noreferrer"
                     className="inline-flex items-center gap-1 text-xs text-primary hover:underline bg-background px-2 py-1 rounded border">

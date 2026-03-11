@@ -142,6 +142,8 @@ export type QueryRequest = {
   include_references?: boolean
   /** If True, includes chunk content (images, tables, etc.) in the references. */
   include_chunk_content?: boolean
+  /** If True, highlights entity names in bold and relation keywords in italics. */
+  highlight_entities?: boolean
 }
 
 export type StructuredContentItem = {
@@ -167,6 +169,7 @@ export type ReferenceItem = {
   score?: number
   scores?: (number | null)[]
   evidence?: string[]
+  doc_nm?: string
 }
 
 export type QueryResponse = {
@@ -227,6 +230,7 @@ export type DocStatusResponse = {
   error_msg?: string
   metadata?: Record<string, any>
   file_path: string
+  doc_nm?: string
 }
 
 export type DocsStatusesResponse = {
@@ -1179,8 +1183,8 @@ export const getRelationsPaginated = async (request: RelationsRequest): Promise<
  * @param entityId The entity ID to delete
  * @returns Promise with delete response
  */
-export const deleteEntity = async (entityId: string): Promise<DeleteEntityResponse> => {
-  const response = await axiosInstance.delete(`/entities/${encodeURIComponent(entityId)}`)
+export const deleteEntity = async (entityId: string, cascade: boolean = true): Promise<DeleteEntityResponse> => {
+  const response = await axiosInstance.delete(`/entities/${encodeURIComponent(entityId)}?cascade=${cascade}`)
   return response.data
 }
 
@@ -1189,8 +1193,8 @@ export const deleteEntity = async (entityId: string): Promise<DeleteEntityRespon
  * @param request The delete relation request with source and target IDs
  * @returns Promise with delete response
  */
-export const deleteRelation = async (request: DeleteRelationRequest): Promise<DeleteRelationResponse> => {
-  const response = await axiosInstance.delete('/relations', { data: request })
+export const deleteRelation = async (request: DeleteRelationRequest, cascade: boolean = true): Promise<DeleteRelationResponse> => {
+  const response = await axiosInstance.delete(`/relations?cascade=${cascade}`, { data: request })
   return response.data
 }
 
@@ -1492,6 +1496,8 @@ export type BoardFieldMapping = {
   date_field?: string
   author_field?: string
   attachments_field?: string
+  attachment_url_field?: string
+  attachment_name_field?: string
   detail_url_template?: string
   pagination_type?: 'page_param' | 'offset_limit' | 'cursor' | 'none'
   page_param?: string
@@ -1534,10 +1540,11 @@ export type BoardIngestRequest = {
   page_size?: number
   process_images?: boolean
   process_tables?: boolean
+  process_documents?: boolean
+  parser?: 'pymupdf' | 'docling'
   skip_duplicates?: boolean
   update_existing?: boolean
   fetch_detail?: boolean
-  date_filter_from?: string
   base_url?: string
   document_prompt?: string
   image_prompt?: string

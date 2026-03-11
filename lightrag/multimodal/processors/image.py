@@ -24,12 +24,18 @@ class ImageModalProcessor(BaseModalProcessor):
             logger.error(f"Failed to encode image {image_path}: {e}")
             return ""
 
-    async def classify_image(self, image_base64: str, page_idx: int = None) -> str:
+    async def classify_image(
+        self, image_base64: str, page_idx: int = None,
+        alt_text: str = None, context_text: str = None,
+    ) -> str:
         """Stage 1: Classify image as meaningful or decorative.
 
         When pdf_path is available, sends both the page snapshot and the
         extracted image so the VLM can judge the element's role in context.
         Falls back to image-only classification otherwise.
+
+        For URL/board images without pdf_path, alt_text and context_text
+        hints are appended to help the VLM make a more accurate judgment.
         """
         try:
             page_b64 = None
@@ -46,8 +52,18 @@ class ImageModalProcessor(BaseModalProcessor):
                 )
             else:
                 # Fallback: image-only classification (URL images, render failure)
+                prompt = PROMPTS["image_classification_prompt"]
+                # Append alt/context hints for better accuracy without page context
+                hints = []
+                if alt_text:
+                    hints.append(f"Alt text: {alt_text}")
+                if context_text:
+                    hints.append(f"Surrounding context: {context_text[:200]}")
+                if hints:
+                    prompt += "\n\nAdditional hints:\n" + "\n".join(hints)
+
                 response = await self.modal_caption_func(
-                    PROMPTS["image_classification_prompt"],
+                    prompt,
                     image_data=image_base64,
                     system_prompt=PROMPTS["IMAGE_CLASSIFICATION_SYSTEM"],
                 )
@@ -57,8 +73,8 @@ class ImageModalProcessor(BaseModalProcessor):
                 return "decorative"
             return "meaningful"
         except Exception as e:
-            logger.warning(f"Image classification failed, defaulting to meaningful: {e}")
-            return "meaningful"
+            logger.warning(f"Image classification failed, defaulting to decorative: {e}")
+            return "decorative"
 
     async def generate_description_only(
         self,
@@ -104,7 +120,12 @@ class ImageModalProcessor(BaseModalProcessor):
             # === Stage 1: Classification gate ===
             display_path = image_path or content_data.get("alt", "url_image")
             page_idx = item_info.get("page_idx") if item_info else None
-            classification = await self.classify_image(image_base64, page_idx=page_idx)
+            alt_text = content_data.get("alt")
+            context_text = content_data.get("context")
+            classification = await self.classify_image(
+                image_base64, page_idx=page_idx,
+                alt_text=alt_text, context_text=context_text,
+            )
             if classification == "decorative":
                 logger.info(
                     f"Image classified as decorative, skipping: "

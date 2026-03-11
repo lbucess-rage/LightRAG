@@ -63,6 +63,14 @@ const hasActiveDocumentsStatus = (counts: Record<string, number>): boolean =>
   getCountValue(counts, 'PREPROCESSED', 'preprocessed') > 0
 
 const getDisplayFileName = (doc: DocStatusResponse, maxLength: number = 40): string => {
+  // Prefer doc_nm if available (e.g., board post title, page title)
+  const docNm = doc.doc_nm ?? doc.metadata?.doc_nm
+  if (docNm && typeof docNm === 'string' && docNm.trim() !== '') {
+    return docNm.length > maxLength
+      ? docNm.slice(0, maxLength) + '...'
+      : docNm;
+  }
+
   // Check if file_path exists and is a non-empty string
   if (!doc.file_path || typeof doc.file_path !== 'string' || doc.file_path.trim() === '') {
     return doc.id;

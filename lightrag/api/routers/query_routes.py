@@ -77,7 +77,18 @@ class QueryRequest(BaseModel):
     response_type: Optional[str] = Field(
         min_length=1,
         default=None,
-        description="Defines the response format. Examples: 'Multiple Paragraphs', 'Single Paragraph', 'Bullet Points'.",
+        description=(
+            "Defines the response format. Available options: "
+            "'Multiple Paragraphs' (default, detailed multi-paragraph answer), "
+            "'Single Paragraph' (concise single-paragraph summary), "
+            "'Bullet Points' (unordered bullet list), "
+            "'Numbered List' (ordered numbered list), "
+            "'Table' (markdown table format), "
+            "'Executive Summary' (brief high-level overview), "
+            "'FAQ' (question-and-answer pairs), "
+            "'Structured Sections' (organized with headings and subsections). "
+            "Custom strings are also accepted and passed directly to the LLM prompt."
+        ),
     )
 
     top_k: Optional[int] = Field(
@@ -143,6 +154,11 @@ class QueryRequest(BaseModel):
     include_chunk_content: Optional[bool] = Field(
         default=False,
         description="If True, includes actual chunk text content in references. Only applies when include_references=True. Useful for evaluation and debugging.",
+    )
+
+    highlight_entities: Optional[bool] = Field(
+        default=None,
+        description="If True, instructs the LLM to highlight entity names in **bold** and relation keywords in *italics* for improved readability.",
     )
 
     stream: Optional[bool] = Field(
@@ -220,6 +236,10 @@ class ReferenceItem(BaseModel):
         default=None,
         description="Evidence snippets — verbatim quotes from chunks used as citation evidence",
     )
+    doc_nm: Optional[str] = Field(
+        default=None,
+        description="Display name for the document (e.g., board post title)",
+    )
 
 
 class QueryResponse(BaseModel):
@@ -262,7 +282,7 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
     combined_auth = get_combined_auth_dependency(api_key)
 
     async def _enrich_references_with_s3_url(references: List[Dict], target_rag=None) -> List[Dict]:
-        """Add download_url to references from doc_status s3_url field"""
+        """Add download_url and doc_nm to references from doc_status"""
         if not references:
             return references
 
@@ -273,12 +293,14 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             doc_id = ref.get("doc_id", "")
             if doc_id:
                 try:
-                    # Use doc_id to get document data (more reliable than file_path)
                     doc_data = await use_rag.doc_status.get_by_id(doc_id)
-                    if doc_data and doc_data.get("s3_url"):
-                        ref_copy["download_url"] = doc_data["s3_url"]
+                    if doc_data:
+                        if doc_data.get("s3_url"):
+                            ref_copy["download_url"] = doc_data["s3_url"]
+                        if doc_data.get("doc_nm"):
+                            ref_copy["doc_nm"] = doc_data["doc_nm"]
                 except Exception as e:
-                    logger.debug(f"Failed to get s3_url for doc_id {doc_id}: {e}")
+                    logger.debug(f"Failed to get doc data for doc_id {doc_id}: {e}")
             enriched.append(ref_copy)
         return enriched
 
@@ -475,7 +497,7 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                 - **query**: The question or prompt to process (min 3 characters)
                 - **mode**: Query strategy - "mix" recommended for best results
                 - **include_references**: Whether to include source citations
-                - **response_type**: Format preference (e.g., "Multiple Paragraphs")
+                - **response_type**: Response format — "Multiple Paragraphs" (default), "Single Paragraph", "Bullet Points", "Numbered List", "Table", "Executive Summary", "FAQ", "Structured Sections", or custom string
                 - **top_k**: Number of top entities/relations to retrieve
                 - **conversation_history**: Previous dialogue context
                 - **max_total_tokens**: Token budget for the entire response
@@ -763,7 +785,7 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                 - **mode**: Query strategy - "mix" recommended for best results
                 - **stream**: Enable streaming (True) or complete response (False)
                 - **include_references**: Whether to include source citations
-                - **response_type**: Format preference (e.g., "Multiple Paragraphs")
+                - **response_type**: Response format — "Multiple Paragraphs" (default), "Single Paragraph", "Bullet Points", "Numbered List", "Table", "Executive Summary", "FAQ", "Structured Sections", or custom string
                 - **top_k**: Number of top entities/relations to retrieve
                 - **conversation_history**: Previous dialogue context for multi-turn conversations
                 - **max_total_tokens**: Token budget for the entire response

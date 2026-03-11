@@ -8,16 +8,20 @@ Provides endpoints for:
 
 import base64
 import hashlib
+import io
 import json
+import os
 import re
-from typing import Any, Dict, List, Optional, Tuple
+import struct
+import tempfile
+from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import urljoin, urlparse
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from lightrag.utils import logger
+from lightrag.utils import logger, compute_mdhash_id
 
 # ============================================================================
 # Workspace isolation pattern
@@ -89,6 +93,8 @@ class FieldMapping(BaseModel):
     date_field: Optional[str] = None
     author_field: Optional[str] = None
     attachments_field: Optional[str] = None
+    attachment_url_field: Optional[str] = None   # key for file URL/path inside each attachment object
+    attachment_name_field: Optional[str] = None  # key for display name inside each attachment object
     detail_url_template: Optional[str] = None
     pagination_type: Optional[str] = None
     page_param: Optional[str] = None
@@ -131,10 +137,11 @@ class BoardIngestRequest(BaseModel):
     page_size: int = 20
     process_images: bool = True
     process_tables: bool = True
+    process_documents: bool = True
+    parser: str = "docling"
     skip_duplicates: bool = True
     update_existing: bool = False
     fetch_detail: bool = False
-    date_filter_from: Optional[str] = None
     base_url: Optional[str] = None
     document_prompt: Optional[str] = None
     image_prompt: Optional[str] = None
@@ -205,6 +212,217 @@ def _resolve_url(url: str, base_url: Optional[str], api_url: str) -> str:
     parsed = urlparse(api_url)
     effective_base = base_url or f"{parsed.scheme}://{parsed.netloc}"
     return urljoin(effective_base.rstrip("/") + "/", url.lstrip("/"))
+
+
+_ATT_URL_KEYS = ("filePath", "file_path", "url", "download_url", "link", "path", "src")
+_ATT_NAME_KEYS = ("attachFileNm", "fileName", "file_name", "name", "originalName")
+
+_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
+_DOCUMENT_EXTENSIONS = {".pdf", ".docx", ".pptx", ".xlsx", ".html", ".htm", ".md", ".csv"}
+
+
+def _fix_broken_encoding(text: str) -> str:
+    """Fix mojibake caused by UTF-8 bytes decoded as Latin-1.
+
+    Some external APIs store UTF-8 filenames but serve them with wrong charset,
+    producing garbled strings like 'ë\x8f\x84ì\x8b¬í\x98\x95' instead of '도심형'.
+    This attempts latin-1 → bytes → utf-8 recovery; returns original on failure.
+    """
+    try:
+        recovered = text.encode("latin-1").decode("utf-8")
+        # Only accept if it actually changed and looks like valid text
+        if recovered != text:
+            return recovered
+    except (UnicodeDecodeError, UnicodeEncodeError):
+        pass
+    return text
+
+
+def _classify_attachment(filename: str) -> str:
+    """Classify attachment as image/document/other by extension."""
+    ext = ("." + filename.lower().rsplit(".", 1)[-1]) if "." in filename else ""
+    if ext in _IMAGE_EXTENSIONS:
+        return "image"
+    if ext in _DOCUMENT_EXTENSIONS:
+        return "document"
+    return "other"
+
+
+def _get_image_dimensions(data: bytes) -> Tuple[Optional[int], Optional[int]]:
+    """Extract width/height from image bytes without PIL (pure Python).
+
+    Supports PNG, JPEG, GIF, BMP, WebP, SVG.
+    Returns (width, height) or (None, None) on failure.
+    """
+    try:
+        # PNG
+        if data[:8] == b'\x89PNG\r\n\x1a\n':
+            w, h = struct.unpack('>II', data[16:24])
+            return w, h
+        # JPEG
+        if data[:2] == b'\xff\xd8':
+            fh = io.BytesIO(data)
+            fh.seek(2)
+            while True:
+                b = fh.read(2)
+                if len(b) < 2:
+                    break
+                marker, = struct.unpack('>H', b)
+                if marker in (0xFFD9, 0xFFDA):
+                    break
+                b2 = fh.read(2)
+                if len(b2) < 2:
+                    break
+                length, = struct.unpack('>H', b2)
+                if marker in (0xFFC0, 0xFFC2):
+                    fh.read(1)
+                    h, w = struct.unpack('>HH', fh.read(4))
+                    return w, h
+                fh.seek(length - 2, 1)
+        # GIF
+        if data[:6] in (b'GIF87a', b'GIF89a'):
+            w, h = struct.unpack('<HH', data[6:10])
+            return w, h
+        # BMP
+        if data[:2] == b'BM' and len(data) >= 26:
+            w, h = struct.unpack('<ii', data[18:26])
+            return abs(w), abs(h)
+        # WebP
+        if data[:4] == b'RIFF' and data[8:12] == b'WEBP':
+            if data[12:16] == b'VP8 ' and len(data) >= 30:
+                w = (data[26] | (data[27] << 8)) & 0x3FFF
+                h = (data[28] | (data[29] << 8)) & 0x3FFF
+                return w, h
+            elif data[12:16] == b'VP8L' and len(data) >= 25:
+                bits = struct.unpack('<I', data[21:25])[0]
+                w = (bits & 0x3FFF) + 1
+                h = ((bits >> 14) & 0x3FFF) + 1
+                return w, h
+        # SVG — parse width/height or viewBox attributes
+        if data[:5] in (b'<?xml', b'<svg ') or b'<svg' in data[:200]:
+            return _parse_svg_dimensions(data)
+    except Exception:
+        pass
+    return None, None
+
+
+def _parse_svg_dimensions(data: bytes) -> Tuple[Optional[int], Optional[int]]:
+    """Extract width/height from SVG data via regex on attributes."""
+    import re
+    try:
+        text = data[:2000].decode("utf-8", errors="ignore")
+    except Exception:
+        return None, None
+
+    # Try width="..." height="..." attributes first
+    w_match = re.search(r'<svg[^>]*\bwidth\s*=\s*["\'](\d+(?:\.\d+)?)', text)
+    h_match = re.search(r'<svg[^>]*\bheight\s*=\s*["\'](\d+(?:\.\d+)?)', text)
+    if w_match and h_match:
+        return int(float(w_match.group(1))), int(float(h_match.group(1)))
+
+    # Fallback: viewBox="minX minY width height"
+    vb_match = re.search(
+        r'viewBox\s*=\s*["\'][\d.]+\s+[\d.]+\s+([\d.]+)\s+([\d.]+)', text
+    )
+    if vb_match:
+        return int(float(vb_match.group(1))), int(float(vb_match.group(2)))
+
+    return None, None
+
+
+def _should_skip_image(
+    img_bytes: bytes,
+    seen_hashes: Set[str],
+    min_width: int = 100,
+    min_height: int = 100,
+    max_aspect_ratio: float = 10.0,
+) -> Optional[str]:
+    """Check if an image should be skipped based on dimensions, aspect ratio, and duplicates.
+
+    Returns a skip reason string, or None if the image should be processed.
+    """
+    # Duplicate check (MD5 hash)
+    img_hash = hashlib.md5(img_bytes).hexdigest()
+    if img_hash in seen_hashes:
+        return "duplicate"
+    seen_hashes.add(img_hash)
+
+    # Dimension check
+    w, h = _get_image_dimensions(img_bytes)
+    if w is not None and h is not None:
+        if w < min_width or h < min_height:
+            return f"too_small({w}x{h})"
+        if w > 0 and h > 0:
+            aspect = max(w / h, h / w)
+            if aspect > max_aspect_ratio:
+                return f"extreme_aspect_ratio({w}x{h}, ratio={aspect:.1f})"
+    else:
+        # Unknown format: use file size heuristic — icons are typically < 5KB
+        if len(img_bytes) < 5 * 1024:
+            return f"unknown_format_small_file({len(img_bytes)}B)"
+
+    return None
+
+
+def _resolve_attachment_urls(
+    attachments: list,
+    base_url: str,
+    api_url: str,
+    url_field: str = "",
+    name_field: str = "",
+) -> list:
+    """Resolve relative paths in attachment objects to absolute URLs.
+
+    Priority for URL resolution: base_url → domain from api_url.
+    Priority for field lookup: explicit mapping field → fallback candidates.
+    Also normalises each attachment to always contain 'url' and 'name' keys
+    so the frontend can render them consistently.
+    """
+    resolved = []
+    for att in attachments:
+        if isinstance(att, str):
+            resolved.append(att if att.startswith(("http://", "https://")) else _resolve_url(att, base_url, api_url))
+            continue
+        if not isinstance(att, dict):
+            resolved.append(att)
+            continue
+
+        att_copy = dict(att)
+
+        # Find the URL value: mapped field first, then fallback candidates
+        raw_url = ""
+        if url_field and att_copy.get(url_field):
+            raw_url = str(att_copy[url_field])
+        else:
+            for k in _ATT_URL_KEYS:
+                if att_copy.get(k):
+                    raw_url = str(att_copy[k])
+                    break
+
+        # Resolve relative → absolute
+        if raw_url and not raw_url.startswith(("http://", "https://")):
+            raw_url = _resolve_url(raw_url, base_url, api_url)
+
+        # Ensure 'url' key exists for frontend
+        if raw_url:
+            att_copy["url"] = raw_url
+
+        # Ensure 'name' key exists: mapped field first, then fallback candidates
+        if not att_copy.get("name"):
+            if name_field and att_copy.get(name_field):
+                att_copy["name"] = str(att_copy[name_field])
+            else:
+                for k in _ATT_NAME_KEYS:
+                    if att_copy.get(k):
+                        att_copy["name"] = str(att_copy[k])
+                        break
+
+        # Fix mojibake in attachment name (UTF-8 decoded as Latin-1)
+        if att_copy.get("name"):
+            att_copy["name"] = _fix_broken_encoding(att_copy["name"])
+
+        resolved.append(att_copy)
+    return resolved
 
 
 def _get_by_path(data: Any, path: str) -> Any:
@@ -331,14 +549,16 @@ Identify which fields correspond to:
 4. **date_field**: Creation or publication date
 5. **author_field**: Author/writer name
 6. **attachments_field**: Array of attached files (if present)
-7. **detail_url_template**: If body content seems truncated or absent, suggest a detail API URL pattern using {{id}} placeholder
+7. **attachment_url_field**: Inside each attachment object, the key containing the file URL or relative path (e.g., "filePath", "url", "download_url", "src")
+8. **attachment_name_field**: Inside each attachment object, the key containing the display filename (e.g., "attachFileNm", "fileName", "originalName", "name")
+9. **detail_url_template**: If body content seems truncated or absent, suggest a detail API URL pattern using {{id}} placeholder
 
 For pagination, analyze the top-level response structure:
-8. **pagination_type**: "page_param" | "offset_limit" | "cursor" | "none"
-9. **page_param**: Query parameter name for page number
-10. **page_size_param**: Query parameter name for page size
-11. **total_field**: JSON path to total count (e.g., "data.totalCount")
-12. **cursor_field**: Field containing next page cursor/token
+10. **pagination_type**: "page_param" | "offset_limit" | "cursor" | "none"
+11. **page_param**: Query parameter name for page number
+12. **page_size_param**: Query parameter name for page size
+13. **total_field**: JSON path to total count (e.g., "data.totalCount")
+14. **cursor_field**: Field containing next page cursor/token
 
 Respond ONLY in JSON format (no markdown code blocks):
 {{
@@ -348,6 +568,8 @@ Respond ONLY in JSON format (no markdown code blocks):
   "date_field": "..." or null,
   "author_field": "..." or null,
   "attachments_field": "..." or null,
+  "attachment_url_field": "..." or null,
+  "attachment_name_field": "..." or null,
   "detail_url_template": "..." or null,
   "pagination_type": "...",
   "page_param": "..." or null,
@@ -374,6 +596,8 @@ Respond ONLY in JSON format (no markdown code blocks):
             date_field=result.get("date_field"),
             author_field=result.get("author_field"),
             attachments_field=result.get("attachments_field"),
+            attachment_url_field=result.get("attachment_url_field"),
+            attachment_name_field=result.get("attachment_name_field"),
             detail_url_template=result.get("detail_url_template"),
             pagination_type=result.get("pagination_type"),
             page_param=result.get("page_param"),
@@ -664,6 +888,7 @@ async def ingest_board(body: BoardIngestRequest, http_request: Request):
         workspace=workspace,
         metadata={
             "api_url": body.api_url,
+            "base_url": body.base_url or "",
             "domain": domain,
             "headers": body.headers or {},
             "field_mapping": body.field_mapping.model_dump(),
@@ -671,6 +896,8 @@ async def ingest_board(body: BoardIngestRequest, http_request: Request):
             "page_size": body.page_size,
             "process_images": body.process_images,
             "process_tables": body.process_tables,
+            "process_documents": body.process_documents,
+            "parser": body.parser,
             "document_prompt": body.document_prompt or "",
             "image_prompt": body.image_prompt or "",
             "table_prompt": body.table_prompt or "",
@@ -707,8 +934,9 @@ async def _fetch_page(
     mapping: FieldMapping,
     page: int,
     page_size: int,
-) -> Tuple[List[dict], Optional[int]]:
-    """Fetch one page of items and return (items, total_count_or_none)."""
+    cursor_value: Optional[str] = None,
+) -> Tuple[List[dict], Optional[int], Optional[str]]:
+    """Fetch one page of items and return (items, total_count_or_none, next_cursor)."""
     req_params = dict(params or {})
 
     if mapping.pagination_type == "page_param":
@@ -719,6 +947,11 @@ async def _fetch_page(
     elif mapping.pagination_type == "offset_limit":
         if mapping.page_param:
             req_params[mapping.page_param] = str((page - 1) * page_size)
+        if mapping.page_size_param:
+            req_params[mapping.page_size_param] = str(page_size)
+    elif mapping.pagination_type == "cursor":
+        if cursor_value and mapping.cursor_field:
+            req_params[mapping.cursor_field] = cursor_value
         if mapping.page_size_param:
             req_params[mapping.page_size_param] = str(page_size)
 
@@ -746,7 +979,13 @@ async def _fetch_page(
             except (ValueError, TypeError):
                 pass
 
-    return items, total
+    next_cursor = None
+    if mapping.pagination_type == "cursor" and mapping.cursor_field:
+        next_cursor_val = _get_by_path(data, mapping.cursor_field)
+        if next_cursor_val is not None:
+            next_cursor = str(next_cursor_val)
+
+    return items, total, next_cursor
 
 
 async def _fetch_detail(
@@ -768,6 +1007,268 @@ async def _fetch_detail(
         return None
 
 
+async def _process_document_attachment(
+    *,
+    att_bytes: bytes,
+    att_name: str,
+    att_url: str,
+    file_label: str,
+    parent_file_path: str,
+    rag,
+    parser: str = "docling",
+    process_images: bool = True,
+    process_tables: bool = True,
+    document_prompt: str = "",
+    image_prompt: str = "",
+    table_prompt: str = "",
+) -> Dict[str, Any]:
+    """Process a document attachment (PDF, DOCX, etc.) using the multimodal pipeline.
+
+    Follows the same pattern as multimodal_routes._process_multimodal_background().
+    """
+    from lightrag.multimodal.config import MultimodalConfig
+    from lightrag.multimodal.context import ContextConfig, ContextExtractor
+    from lightrag.multimodal.processors import (
+        ImageModalProcessor,
+        TableModalProcessor,
+        EquationModalProcessor,
+    )
+
+    result: Dict[str, Any] = {
+        "success": False,
+        "text_blocks": 0,
+        "multimodal_blocks": 0,
+        "errors": [],
+    }
+
+    tmp_path = None
+    try:
+        # 1. Save to temp file
+        suffix = os.path.splitext(att_name)[1] if "." in att_name else ""
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(att_bytes)
+            tmp_path = tmp.name
+
+        # 2. Parse document
+        content_list = []
+        if parser == "docling":
+            try:
+                from lightrag.multimodal.parsers.docling_parser import DoclingMultimodalParser
+                doc_parser = DoclingMultimodalParser()
+                content_list = doc_parser.parse_document(tmp_path)
+            except Exception as docling_err:
+                logger.warning(f"Docling failed for {att_name}, falling back to PyMuPDF: {docling_err}")
+                from lightrag.multimodal.parsers.pymupdf_parser import PyMuPDFMultimodalParser
+                config = MultimodalConfig()
+                doc_parser = PyMuPDFMultimodalParser(
+                    min_image_width=config.min_image_width,
+                    min_image_height=config.min_image_height,
+                    max_image_aspect_ratio=config.max_image_aspect_ratio,
+                    enable_duplicate_filtering=config.enable_duplicate_filtering,
+                )
+                content_list = doc_parser.parse_document(
+                    tmp_path, extract_images=process_images,
+                )
+        else:
+            from lightrag.multimodal.parsers.pymupdf_parser import PyMuPDFMultimodalParser
+            config = MultimodalConfig()
+            doc_parser = PyMuPDFMultimodalParser(
+                min_image_width=config.min_image_width,
+                min_image_height=config.min_image_height,
+                max_image_aspect_ratio=config.max_image_aspect_ratio,
+                enable_duplicate_filtering=config.enable_duplicate_filtering,
+            )
+            content_list = doc_parser.parse_document(
+                tmp_path, extract_images=process_images,
+            )
+
+        # 3. Separate text and multimodal blocks
+        text_blocks = []
+        multimodal_blocks = []
+        for idx, item_c in enumerate(content_list):
+            item_c["_index"] = idx
+            if item_c.get("type") == "text":
+                text_blocks.append(item_c)
+            elif item_c.get("type") in ("image", "table", "equation"):
+                multimodal_blocks.append(item_c)
+
+        result["text_blocks"] = len(text_blocks)
+        result["multimodal_blocks"] = len(multimodal_blocks)
+
+        # 4. Insert text
+        doc_id = None
+        if text_blocks:
+            combined_text = "\n\n".join(
+                b.get("text", "") for b in text_blocks if b.get("text")
+            )
+            if combined_text.strip():
+                from lightrag.utils import sanitize_text_for_encoding
+                cleaned_text = sanitize_text_for_encoding(combined_text)
+                doc_id = compute_mdhash_id(cleaned_text, prefix="doc-")
+                await rag.ainsert(combined_text, ids=[doc_id], file_paths=[file_label])
+                logger.info(f"Inserted {len(text_blocks)} text blocks from attachment {att_name} (doc_id={doc_id})")
+
+        if not doc_id:
+            doc_id = compute_mdhash_id(att_name + att_url, prefix="doc-")
+            # Create doc_status for multimodal-only documents
+            try:
+                import datetime
+                from datetime import timezone
+                from lightrag.base import DocStatus
+                await rag.doc_status.upsert({doc_id: {
+                    "status": DocStatus.PROCESSING,
+                    "content_summary": f"[Board Attachment] {att_name}",
+                    "content_length": 0,
+                    "created_at": datetime.datetime.now(timezone.utc).isoformat(),
+                    "updated_at": datetime.datetime.now(timezone.utc).isoformat(),
+                    "file_path": file_label,
+                }})
+            except Exception as e:
+                logger.warning(f"Failed to create doc_status for attachment {att_name}: {e}")
+
+        # 5. Update doc_status metadata
+        try:
+            existing = await rag.doc_status.get_by_id(doc_id)
+            if existing:
+                metadata = existing.get("metadata") or {}
+                metadata["parent_file_path"] = parent_file_path
+                metadata["source"] = "board_attachment"
+                metadata["source_url"] = att_url
+                if document_prompt or image_prompt or table_prompt:
+                    metadata["custom_prompts"] = {
+                        "document_prompt": document_prompt,
+                        "image_prompt": image_prompt,
+                        "table_prompt": table_prompt,
+                    }
+                await rag.doc_status.upsert({doc_id: {"metadata": metadata}})
+        except Exception as e:
+            logger.warning(f"Failed to update metadata for attachment {att_name}: {e}")
+
+        # 6. Process multimodal blocks
+        if multimodal_blocks and (_vlm_model_func or _llm_model_func):
+            mm_config = MultimodalConfig()
+            context_config = ContextConfig(
+                context_window=mm_config.context_window,
+                context_mode=mm_config.context_mode,
+                max_context_tokens=mm_config.max_context_tokens,
+                include_headers=mm_config.include_headers,
+                include_captions=mm_config.include_captions,
+                filter_content_types=mm_config.context_filter_content_types,
+            )
+            context_extractor = ContextExtractor(
+                config=context_config,
+                tokenizer=rag.tokenizer,
+            )
+
+            caption_func = _vlm_model_func or _llm_model_func
+            llm_func = _llm_model_func or caption_func
+
+            processors = {}
+            if process_images and mm_config.enable_image_processing:
+                img_proc = ImageModalProcessor(
+                    lightrag=rag,
+                    modal_caption_func=caption_func,
+                    context_extractor=context_extractor,
+                    response_language=mm_config.vlm_response_language,
+                )
+                img_proc.pdf_path = tmp_path
+                processors["image"] = img_proc
+
+            if process_tables and mm_config.enable_table_processing:
+                tbl_proc = TableModalProcessor(
+                    lightrag=rag,
+                    modal_caption_func=llm_func,
+                    context_extractor=context_extractor,
+                    response_language=mm_config.vlm_response_language,
+                    vlm_caption_func=_vlm_model_func,
+                )
+                tbl_proc.pdf_path = tmp_path
+                processors["table"] = tbl_proc
+
+            if mm_config.enable_equation_processing:
+                processors["equation"] = EquationModalProcessor(
+                    lightrag=rag,
+                    modal_caption_func=llm_func,
+                    context_extractor=context_extractor,
+                    response_language=mm_config.vlm_response_language,
+                )
+
+            # Set content source and prompts
+            for proc in processors.values():
+                proc.set_content_source(content_list, mm_config.content_format)
+                proc.set_document_instructions(
+                    document_prompt=document_prompt,
+                    image_prompt=image_prompt,
+                    table_prompt=table_prompt,
+                )
+
+            # Process each multimodal block
+            page_analyses: dict[int, list[dict]] = {}
+            for i, block in enumerate(multimodal_blocks):
+                content_type = block.get("type", "")
+                processor = processors.get(content_type)
+                if not processor:
+                    continue
+
+                try:
+                    current_page = block.get("page_idx", 0)
+                    item_info = {
+                        "page_idx": current_page,
+                        "index": block.get("_index", 0),
+                        "sibling_analyses": page_analyses.get(current_page, []),
+                    }
+                    proc_result = await processor.process_multimodal_content(
+                        modal_content=block,
+                        content_type=content_type,
+                        file_path=file_label,
+                        item_info=item_info,
+                        doc_id=doc_id,
+                        chunk_order_index=block.get("_index", 0),
+                    )
+                    if proc_result is None:
+                        continue
+                    # Accumulate sibling context
+                    entity_info = proc_result[1] if len(proc_result) > 1 else {}
+                    desc_text = proc_result[0] if len(proc_result) > 0 else ""
+                    if desc_text and entity_info.get("entity_name"):
+                        page_analyses.setdefault(current_page, []).append({
+                            "type": content_type,
+                            "entity_name": entity_info.get("entity_name", ""),
+                            "description": desc_text[:300],
+                        })
+                except Exception as e:
+                    result["errors"].append(
+                        f"Multimodal processing failed ({content_type}, page {block.get('page_idx', '?')}): {str(e)}"
+                    )
+
+        # 7. Mark as processed
+        try:
+            import datetime
+            from datetime import timezone
+            from lightrag.base import DocStatus
+            await rag.doc_status.upsert({doc_id: {
+                "status": DocStatus.PROCESSED,
+                "updated_at": datetime.datetime.now(timezone.utc).isoformat(),
+            }})
+        except Exception:
+            pass
+
+        result["success"] = True
+
+    except Exception as e:
+        result["errors"].append(f"Document processing failed: {str(e)}")
+        logger.error(f"Failed to process document attachment {att_name}: {e}", exc_info=True)
+    finally:
+        # Cleanup temp file
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+    return result
+
+
 async def _process_board_item(
     item: dict,
     mapping: FieldMapping,
@@ -778,6 +1279,11 @@ async def _process_board_item(
     base_url: Optional[str],
     api_url: str,
     body_request_headers: Optional[Dict[str, str]] = None,
+    document_prompt: str = "",
+    image_prompt: str = "",
+    table_prompt: str = "",
+    process_documents: bool = True,
+    parser: str = "docling",
 ) -> Dict[str, Any]:
     """Process a single board item: parse HTML body, insert text, handle multimodal + attachments."""
     from lightrag.url.parser import HTMLParser
@@ -801,6 +1307,7 @@ async def _process_board_item(
         "images_processed": 0,
         "tables_processed": 0,
         "attachments_processed": 0,
+        "documents_processed": 0,
         "errors": [],
     }
 
@@ -862,18 +1369,23 @@ async def _process_board_item(
         result["errors"].append("No text content after parsing")
         return result
 
-    # Insert text
+    # Insert text (generate doc_id for multimodal content linkage)
+    doc_id = compute_mdhash_id(full_text[:1000], prefix="doc-")
     try:
-        chunks = _chunk_text(full_text)
-        for chunk in chunks:
-            await rag.ainsert(chunk, file_paths=file_label)
+        await rag.ainsert(full_text, ids=[doc_id], file_paths=[file_label], doc_nms=[title or file_label])
         result["text_inserted"] = True
     except Exception as e:
         result["errors"].append(f"Text insertion failed: {str(e)}")
         return result
 
-    # Process multimodal content + attachments
-    has_multimodal = (parsed_images or parsed_tables or attachments) and (_vlm_model_func or _llm_model_func)
+    # Process multimodal content (inline images/tables + image attachments) — requires VLM/LLM
+    has_image_attachments = attachments and any(
+        _classify_attachment(
+            a.get(mapping.attachment_name_field or "", "") or a.get(mapping.attachment_url_field or "", "")
+        ) == "image"
+        for a in attachments
+    ) if attachments else False
+    has_multimodal = (parsed_images or parsed_tables or has_image_attachments) and (_vlm_model_func or _llm_model_func)
     if has_multimodal:
         try:
             from lightrag.multimodal.config import MultimodalConfig
@@ -948,13 +1460,14 @@ async def _process_board_item(
             for proc in [image_processor, table_processor]:
                 if proc:
                     proc.set_document_instructions(
-                        document_prompt=body.document_prompt or "",
-                        image_prompt=body.image_prompt or "",
-                        table_prompt=body.table_prompt or "",
+                        document_prompt=document_prompt,
+                        image_prompt=image_prompt,
+                        table_prompt=table_prompt,
                     )
 
             # Accumulate per-page analysis results for sibling context
             page_analyses: dict[int, list[dict]] = {}
+            seen_img_hashes: Set[str] = set()  # for duplicate image filtering
 
             # Process inline images
             if parsed_images and image_processor:
@@ -965,6 +1478,12 @@ async def _process_board_item(
                         if not success:
                             continue
                         if len(img_bytes) > 10 * 1024 * 1024:
+                            continue
+
+                        # Dimension / aspect-ratio / duplicate filtering
+                        skip_reason = _should_skip_image(img_bytes, seen_img_hashes)
+                        if skip_reason:
+                            logger.info(f"Skipping inline image ({skip_reason}): {img.src}")
                             continue
 
                         img_b64 = base64.b64encode(img_bytes).decode("utf-8")
@@ -987,7 +1506,7 @@ async def _process_board_item(
                             content_type="image",
                             file_path=file_label,
                             item_info=item_info,
-                            doc_id=None,
+                            doc_id=doc_id,
                             chunk_order_index=idx + 1,
                         )
                         if proc_result is None:
@@ -1027,7 +1546,7 @@ async def _process_board_item(
                             content_type="table",
                             file_path=file_label,
                             item_info=item_info,
-                            doc_id=None,
+                            doc_id=doc_id,
                             chunk_order_index=idx + 1,
                         )
                         result["tables_processed"] += 1
@@ -1043,85 +1562,178 @@ async def _process_board_item(
                     except Exception as e:
                         result["errors"].append(f"Table processing failed: {str(e)}")
 
-            # Process attachments (reuse existing processors)
+            # Process image attachments (requires VLM)
             if attachments and image_processor:
+                att_url_key = mapping.attachment_url_field
+                att_name_key = mapping.attachment_name_field
                 for att_idx, att in enumerate(attachments):
-                    att_path = (att.get("filePath") or att.get("file_path") or
-                                att.get("url") or att.get("path") or att.get("src") or "")
-                    att_name = (att.get("attachFileNm") or att.get("fileName") or
-                                att.get("name") or att.get("originalName") or "")
+                    att_path = ""
+                    if att_url_key and att.get(att_url_key):
+                        att_path = str(att[att_url_key])
+                    else:
+                        for k in _ATT_URL_KEYS:
+                            if att.get(k):
+                                att_path = str(att[k])
+                                break
+                    att_name = ""
+                    if att_name_key and att.get(att_name_key):
+                        att_name = str(att[att_name_key])
+                    else:
+                        for k in _ATT_NAME_KEYS:
+                            if att.get(k):
+                                att_name = str(att[k])
+                                break
 
                     if not att_path:
                         continue
 
+                    # Fix mojibake in attachment names (UTF-8 decoded as Latin-1)
+                    if att_name:
+                        att_name = _fix_broken_encoding(att_name)
+
                     att_url = _resolve_url(att_path, base_url, api_url)
+                    att_type = _classify_attachment(att_name or att_path)
 
-                    lower_path = att_path.lower()
-                    is_image = any(lower_path.endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"])
-
-                    if not is_image:
-                        logger.info(f"Skipping non-image attachment: {att_name} ({att_path})")
-                        continue
-
-                    try:
-                        async with httpx.AsyncClient(timeout=30.0, verify=False) as dl_client:
-                            dl_headers = {}
-                            if body_request_headers:
-                                dl_headers.update(body_request_headers)
-                            resp = await dl_client.get(att_url, headers=dl_headers)
-                            resp.raise_for_status()
-                            img_bytes = resp.content
-                    except Exception as e:
-                        result["errors"].append(f"Attachment download failed ({att_name}): {str(e)}")
-                        continue
-
-                    if len(img_bytes) > 10 * 1024 * 1024:
-                        result["errors"].append(f"Attachment too large: {att_name}")
-                        continue
-
-                    img_b64 = base64.b64encode(img_bytes).decode("utf-8")
-                    modal_content = {
-                        "type": "image",
-                        "img_data": img_b64,
-                        "page_idx": 0,
-                        "_index": att_idx + 100,
-                        "alt": att_name,
-                        "context": f"Attachment: {att_name}",
-                    }
-                    item_info = {
-                        "page_idx": 0,
-                        "index": att_idx + 100,
-                        "source_url": att_url,
-                        "sibling_analyses": page_analyses.get(0, []),
-                    }
-
-                    try:
-                        proc_result = await image_processor.process_multimodal_content(
-                            modal_content=modal_content,
-                            content_type="image",
-                            file_path=file_label,
-                            item_info=item_info,
-                            doc_id=None,
-                            chunk_order_index=att_idx + 100,
-                        )
-                        if proc_result is None:
+                    if att_type == "image":
+                        # === Image attachment: VLM processing ===
+                        try:
+                            async with httpx.AsyncClient(timeout=30.0, verify=False) as dl_client:
+                                dl_headers = {}
+                                if body_request_headers:
+                                    dl_headers.update(body_request_headers)
+                                resp = await dl_client.get(att_url, headers=dl_headers)
+                                resp.raise_for_status()
+                                img_bytes = resp.content
+                        except Exception as e:
+                            result["errors"].append(f"Attachment download failed ({att_name}): {str(e)}")
                             continue
-                        result["attachments_processed"] += 1
-                        logger.info(f"Processed attachment: {att_name} from {att_url}")
-                        # Accumulate sibling analysis
-                        entity_info = proc_result[1] if len(proc_result) > 1 else {}
-                        desc_text = proc_result[0] if len(proc_result) > 0 else ""
-                        if desc_text and entity_info.get("entity_name"):
-                            page_analyses.setdefault(0, []).append({
-                                "type": "image",
-                                "entity_name": entity_info.get("entity_name", ""),
-                                "description": desc_text[:300],
-                            })
-                    except Exception as e:
-                        result["errors"].append(f"Attachment VLM processing failed ({att_name}): {str(e)}")
+
+                        if len(img_bytes) > 10 * 1024 * 1024:
+                            result["errors"].append(f"Attachment too large: {att_name}")
+                            continue
+
+                        # Dimension / aspect-ratio / duplicate filtering
+                        skip_reason = _should_skip_image(img_bytes, seen_img_hashes)
+                        if skip_reason:
+                            logger.info(f"Skipping image attachment ({skip_reason}): {att_name}")
+                            continue
+
+                        img_b64 = base64.b64encode(img_bytes).decode("utf-8")
+                        modal_content = {
+                            "type": "image",
+                            "img_data": img_b64,
+                            "page_idx": 0,
+                            "_index": att_idx + 100,
+                            "alt": att_name,
+                            "context": f"Attachment: {att_name}",
+                        }
+                        item_info_att = {
+                            "page_idx": 0,
+                            "index": att_idx + 100,
+                            "source_url": att_url,
+                            "sibling_analyses": page_analyses.get(0, []),
+                        }
+
+                        try:
+                            att_file_path = f"{title}/att/{att_name}"
+                            proc_result = await image_processor.process_multimodal_content(
+                                modal_content=modal_content,
+                                content_type="image",
+                                file_path=att_file_path,
+                                item_info=item_info_att,
+                                doc_id=doc_id,
+                                chunk_order_index=att_idx + 100,
+                            )
+                            if proc_result is None:
+                                continue
+                            result["attachments_processed"] += 1
+                            logger.info(f"Processed image attachment: {att_name} from {att_url}")
+                            # Accumulate sibling analysis
+                            entity_info = proc_result[1] if len(proc_result) > 1 else {}
+                            desc_text = proc_result[0] if len(proc_result) > 0 else ""
+                            if desc_text and entity_info.get("entity_name"):
+                                page_analyses.setdefault(0, []).append({
+                                    "type": "image",
+                                    "entity_name": entity_info.get("entity_name", ""),
+                                    "description": desc_text[:300],
+                                })
+                        except Exception as e:
+                            result["errors"].append(f"Attachment VLM processing failed ({att_name}): {str(e)}")
 
         except ImportError as e:
             result["errors"].append(f"Multimodal processing not available: {str(e)}")
+
+    # Process document attachments independently (no VLM required)
+    if attachments and process_documents:
+        att_url_key = mapping.attachment_url_field
+        att_name_key = mapping.attachment_name_field
+        for att in attachments:
+            att_path = ""
+            if att_url_key and att.get(att_url_key):
+                att_path = str(att[att_url_key])
+            else:
+                for k in _ATT_URL_KEYS:
+                    if att.get(k):
+                        att_path = str(att[k])
+                        break
+            att_name = ""
+            if att_name_key and att.get(att_name_key):
+                att_name = str(att[att_name_key])
+            else:
+                for k in _ATT_NAME_KEYS:
+                    if att.get(k):
+                        att_name = str(att[k])
+                        break
+
+            if not att_path:
+                continue
+
+            if att_name:
+                att_name = _fix_broken_encoding(att_name)
+
+            att_type = _classify_attachment(att_name or att_path)
+            if att_type != "document":
+                continue
+
+            att_url = _resolve_url(att_path, base_url, api_url)
+            try:
+                async with httpx.AsyncClient(timeout=60.0, verify=False) as dl_client:
+                    dl_headers = {}
+                    if body_request_headers:
+                        dl_headers.update(body_request_headers)
+                    resp = await dl_client.get(att_url, headers=dl_headers)
+                    resp.raise_for_status()
+                    doc_bytes = resp.content
+
+                if len(doc_bytes) > 50 * 1024 * 1024:
+                    result["errors"].append(f"Document too large: {att_name}")
+                    continue
+
+                doc_file_label = f"{title}/att/{att_name}"
+                doc_result = await _process_document_attachment(
+                    att_bytes=doc_bytes,
+                    att_name=att_name,
+                    att_url=att_url,
+                    file_label=doc_file_label,
+                    parent_file_path=file_label,
+                    rag=rag,
+                    parser=parser,
+                    process_images=process_images,
+                    process_tables=process_tables,
+                    document_prompt=document_prompt,
+                    image_prompt=image_prompt,
+                    table_prompt=table_prompt,
+                )
+                if doc_result.get("success"):
+                    result["documents_processed"] += 1
+                    logger.info(
+                        f"Processed document attachment: {att_name} "
+                        f"(text={doc_result['text_blocks']}, multimodal={doc_result['multimodal_blocks']})"
+                    )
+                else:
+                    result["errors"].extend(doc_result.get("errors", []))
+            except Exception as e:
+                result["errors"].append(f"Document processing failed ({att_name}): {str(e)}")
 
     result["success"] = True
     return result
@@ -1155,7 +1767,7 @@ async def _ingest_board_background(
 
         # Fetch first page to validate and get total count
         try:
-            first_items, total_count = await _fetch_page(
+            first_items, total_count, next_cursor = await _fetch_page(
                 api_url, body.method, body.headers, body.params, body.body,
                 mapping, page=1, page_size=body.page_size,
             )
@@ -1175,6 +1787,22 @@ async def _ingest_board_background(
                 f"title_field '{mapping.title_field}' not found. Available: {list(sample.keys())}",
             )
             return
+
+        if mapping.body_field and mapping.body_field not in sample:
+            await service.fail_task(
+                task_id,
+                f"body_field '{mapping.body_field}' not found. Available: {list(sample.keys())}",
+            )
+            return
+
+        # Warn if fetch_detail is enabled but detail_url_template is empty
+        if body.fetch_detail and not mapping.detail_url_template:
+            logger.warning(f"[Task {task_id}] fetch_detail=True but detail_url_template is empty, detail fetching disabled")
+            await service.update_progress(
+                task_id, 4.0,
+                "Warning: fetch_detail enabled but detail_url_template is empty. Detail fetching will be skipped.",
+            )
+            body.fetch_detail = False
 
         # Determine effective max pages based on pagination_type
         no_pagination = not mapping.pagination_type or mapping.pagination_type == "none"
@@ -1203,7 +1831,8 @@ async def _ingest_board_background(
         # === Phase 2: Page iteration (5-85%) ===
         progress_range = 80.0  # 5% -> 85%
         global_item_index = 0
-        prev_page_ids: set[str] | None = None  # duplicate page detection
+        prev_page_ids: set[str] | None = None  # duplicate page detection (id_field)
+        prev_page_hash: str | None = None  # duplicate page detection (content hash fallback)
 
         for page_num in range(1, effective_max_pages + 1):
             task = service.get_task(task_id)
@@ -1215,10 +1844,12 @@ async def _ingest_board_background(
                 page_items = first_items
             else:
                 try:
-                    page_items, _ = await _fetch_page(
+                    page_items, _, page_cursor = await _fetch_page(
                         api_url, body.method, body.headers, body.params, body.body,
                         mapping, page=page_num, page_size=body.page_size,
+                        cursor_value=next_cursor,
                     )
+                    next_cursor = page_cursor
                 except Exception as e:
                     error_msg = f"Page {page_num} fetch failed: {str(e)}"
                     logger.warning(f"[Task {task_id}] {error_msg}")
@@ -1241,6 +1872,24 @@ async def _ingest_board_background(
                     )
                     break
                 prev_page_ids = current_page_ids
+            else:
+                # Fallback: content hash based duplicate detection when id_field is not set
+                import hashlib
+                page_hash = hashlib.md5(
+                    json.dumps(page_items, sort_keys=True, default=str).encode()
+                ).hexdigest()
+                if prev_page_hash is not None and page_hash == prev_page_hash:
+                    logger.info(
+                        f"[Task {task_id}] Page {page_num} content identical to previous, "
+                        f"stopping (API likely ignores pagination)"
+                    )
+                    break
+                prev_page_hash = page_hash
+
+            # Cursor pagination: stop when no next cursor is returned
+            if mapping.pagination_type == "cursor" and page_num > 1 and not next_cursor:
+                logger.info(f"[Task {task_id}] No next cursor on page {page_num}, stopping")
+                break
 
             page_progress_base = 5.0 + (progress_range * ((page_num - 1) / estimated_pages))
             await service.update_progress(
@@ -1261,7 +1910,12 @@ async def _ingest_board_background(
                     item_id = str(global_item_index)
 
                 # Build file_label as a real URL: {scheme}://{host}{api_path}/{item_id}
-                file_label = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path.rstrip('/')}/{item_id}"
+                # Avoid duplicating item_id if api_url already ends with it (single-item URL)
+                api_path = parsed_url.path.rstrip('/')
+                if item_id and api_path.endswith(f"/{item_id}"):
+                    file_label = f"{parsed_url.scheme}://{parsed_url.netloc}{api_path}"
+                else:
+                    file_label = f"{parsed_url.scheme}://{parsed_url.netloc}{api_path}/{item_id}"
 
                 # Update existing: delete old documents then re-ingest
                 if body.update_existing:
@@ -1309,6 +1963,11 @@ async def _ingest_board_background(
                         base_url=body.base_url,
                         api_url=api_url,
                         body_request_headers=body.headers,
+                        document_prompt=body.document_prompt or "",
+                        image_prompt=body.image_prompt or "",
+                        table_prompt=body.table_prompt or "",
+                        process_documents=body.process_documents,
+                        parser=body.parser or "docling",
                     )
 
                     if item_result["success"]:
@@ -1398,7 +2057,11 @@ async def delete_board_items(body: BoardDeleteRequest, http_request: Request):
     errors: List[str] = []
 
     for item_id in body.item_ids:
-        file_label = f"{parsed.scheme}://{parsed.netloc}{parsed.path.rstrip('/')}/{item_id}"
+        api_path = parsed.path.rstrip('/')
+        if item_id and api_path.endswith(f"/{item_id}"):
+            file_label = f"{parsed.scheme}://{parsed.netloc}{api_path}"
+        else:
+            file_label = f"{parsed.scheme}://{parsed.netloc}{api_path}/{item_id}"
         try:
             doc_ids = await rag.doc_status.get_all_doc_ids_by_file_path(file_label)
             if not doc_ids:
@@ -1529,11 +2192,19 @@ async def view_board_post(body: BoardViewRequest, http_request: Request):
         meta = task.metadata or {}
         task_api_url = meta.get("api_url", "")
         # Match: the file_path's base should match the task's api_url base
+        # Also handle cases where task api_url already contains the item_id
         task_parsed = urlparse(task_api_url)
         task_base = f"{task_parsed.scheme}://{task_parsed.netloc}{task_parsed.path.rstrip('/')}"
         if task_base == api_base_url:
             matching_task = task
             break
+        # Fallback: task api_url itself might be a single-item URL ending with item_id
+        task_path_parts = task_parsed.path.rstrip("/").rsplit("/", 1)
+        if len(task_path_parts) >= 2:
+            task_parent_base = f"{task_parsed.scheme}://{task_parsed.netloc}{task_path_parts[0]}"
+            if task_parent_base == api_base_url:
+                matching_task = task
+                break
 
     if not matching_task:
         return BoardViewResponse(
@@ -1548,10 +2219,21 @@ async def view_board_post(body: BoardViewRequest, http_request: Request):
     # Build the detail fetch URL
     detail_url = f"{api_base_url}/{item_id}"
 
-    # Check if there's a detail_url_template
+    # detail_url_template: URL 패턴에서 {placeholder} 부분을 실제 ID 값으로 치환.
+    # placeholder 이름은 무엇이든 상관없음 — {id}, {_id}, {postId} 등 모두 동일하게 처리.
+    # 예: "/api/board/{_id}" → "/api/board/6954e02e..."
+    # 주의: 여기서 사용되는 item_id는 file_path URL의 마지막 path segment에서 추출한 값.
     detail_template = field_mapping_raw.get("detail_url_template")
     if detail_template:
-        detail_url = detail_template.replace("{id}", item_id)
+        detail_url = re.sub(r"\{[^}]+\}", item_id, detail_template)
+        # Ensure absolute URL: relative templates need base_url prefix
+        if not detail_url.startswith(("http://", "https://")):
+            saved_base_url = meta.get("base_url", "")
+            if saved_base_url:
+                detail_url = saved_base_url.rstrip("/") + "/" + detail_url.lstrip("/")
+            else:
+                # Fallback: use scheme+netloc from the original file_path
+                detail_url = f"{parsed.scheme}://{parsed.netloc}/{detail_url.lstrip('/')}"
 
     try:
         async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
@@ -1612,6 +2294,18 @@ async def view_board_post(body: BoardViewRequest, http_request: Request):
 
     if not isinstance(attachments, list):
         attachments = []
+
+    # Resolve relative URLs in attachments
+    if attachments:
+        saved_base_url = meta.get("base_url", "")
+        saved_api_url = meta.get("api_url", "")
+        att_url_field = field_mapping_raw.get("attachment_url_field", "")
+        att_name_field = field_mapping_raw.get("attachment_name_field", "")
+        attachments = _resolve_attachment_urls(
+            attachments, saved_base_url, saved_api_url,
+            url_field=att_url_field or "",
+            name_field=att_name_field or "",
+        )
 
     return BoardViewResponse(
         success=True,

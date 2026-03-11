@@ -550,7 +550,7 @@ async def _ingest_url_background(
             )
 
         for ci, chunk in enumerate(chunks):
-            await rag.ainsert(chunk, file_paths=file_label)
+            await rag.ainsert(chunk, file_paths=file_label, doc_nms=parsed.title or file_label)
             if len(chunks) > 1:
                 chunk_progress = 42.0 + (18.0 * ((ci + 1) / len(chunks)))
                 await service.update_progress(

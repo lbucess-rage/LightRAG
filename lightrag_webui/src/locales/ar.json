@@ -414,7 +414,14 @@
       "responseFormatOptions": {
         "multipleParagraphs": "فقرات متعددة",
         "singleParagraph": "فقرة واحدة",
-        "bulletPoints": "نقاط نقطية"
+        "bulletPoints": "نقاط نقطية",
+        "numberedList": "قائمة مرقمة",
+        "table": "جدول",
+        "executiveSummary": "ملخص تنفيذي",
+        "faq": "أسئلة شائعة",
+        "structuredSections": "أقسام منظمة",
+        "threeLineSummary": "ملخص من ثلاثة أسطر",
+        "briefAnswer": "إجابة مختصرة"
       },
       "topK": "KG أعلى K",
       "topKTooltip": "عدد الكيانات والعلاقات المطلوب استردادها، لا ينطبق على الوضع наивный.",

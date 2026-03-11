@@ -87,8 +87,8 @@ interface EntityManagementState {
   fetchEntityTypes: () => Promise<void>
   fetchRelations: (page?: number) => Promise<void>
 
-  removeEntity: (entityId: string) => Promise<void>
-  removeRelation: (sourceId: string, targetId: string) => Promise<void>
+  removeEntity: (entityId: string, cascade?: boolean) => Promise<void>
+  removeRelation: (sourceId: string, targetId: string, cascade?: boolean) => Promise<void>
 
   reset: () => void
 }
@@ -217,9 +217,9 @@ const useEntityManagementStoreBase = create<EntityManagementState>()((set, get) 
     }
   },
 
-  removeEntity: async (entityId) => {
+  removeEntity: async (entityId, cascade = true) => {
     try {
-      await deleteEntity(entityId)
+      await deleteEntity(entityId, cascade)
       // Refresh entities list
       await get().fetchEntities(get().entitiesPagination.page)
       await get().fetchEntityTypes()
@@ -233,9 +233,9 @@ const useEntityManagementStoreBase = create<EntityManagementState>()((set, get) 
     }
   },
 
-  removeRelation: async (sourceId, targetId) => {
+  removeRelation: async (sourceId, targetId, cascade = true) => {
     try {
-      await deleteRelation({ source_id: sourceId, target_id: targetId })
+      await deleteRelation({ source_id: sourceId, target_id: targetId }, cascade)
       // Refresh relations list
       await get().fetchRelations(get().relationsPagination.page)
     } catch (error) {

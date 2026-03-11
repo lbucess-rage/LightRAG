@@ -3297,11 +3297,18 @@ async def kg_query(
         if query_param.response_type
         else "Multiple Paragraphs"
     )
+    highlight_instruction = (
+        "\n  - When mentioning entity names from the Knowledge Graph, format them in **bold**."
+        "\n  - When mentioning relationship keywords, format them in *italics*."
+        if query_param.highlight_entities
+        else ""
+    )
 
     # Build system prompt
     sys_prompt_temp = system_prompt if system_prompt else PROMPTS["rag_response"]
     sys_prompt = sys_prompt_temp.format(
         response_type=response_type,
+        highlight_instruction=highlight_instruction,
         user_prompt=user_prompt,
         context_data=context_result.context,
     )
@@ -4165,6 +4172,12 @@ async def _build_context_str(
         if query_param.response_type
         else "Multiple Paragraphs"
     )
+    highlight_instruction = (
+        "\n  - When mentioning entity names from the Knowledge Graph, format them in **bold**."
+        "\n  - When mentioning relationship keywords, format them in *italics*."
+        if query_param.highlight_entities
+        else ""
+    )
 
     entities_str = "\n".join(
         json.dumps(entity, ensure_ascii=False) for entity in entities_context
@@ -4186,6 +4199,7 @@ async def _build_context_str(
     pre_sys_prompt = sys_prompt_template.format(
         context_data="",  # Empty for overhead calculation
         response_type=response_type,
+        highlight_instruction=highlight_instruction,
         user_prompt=user_prompt,
     )
     sys_prompt_tokens = len(tokenizer.encode(pre_sys_prompt))
@@ -5076,6 +5090,12 @@ async def naive_query(
         if query_param.response_type
         else "Multiple Paragraphs"
     )
+    highlight_instruction = (
+        "\n  - When mentioning entity names from the Knowledge Graph, format them in **bold**."
+        "\n  - When mentioning relationship keywords, format them in *italics*."
+        if query_param.highlight_entities
+        else ""
+    )
 
     # Use the provided system prompt or default
     sys_prompt_template = (
@@ -5085,6 +5105,7 @@ async def naive_query(
     # Create a preliminary system prompt with empty content_data to calculate overhead
     pre_sys_prompt = sys_prompt_template.format(
         response_type=response_type,
+        highlight_instruction=highlight_instruction,
         user_prompt=user_prompt,
         content_data="",  # Empty for overhead calculation
     )
@@ -5169,6 +5190,7 @@ async def naive_query(
 
     sys_prompt = sys_prompt_template.format(
         response_type=query_param.response_type,
+        highlight_instruction=highlight_instruction,
         user_prompt=user_prompt,
         content_data=context_content,
     )

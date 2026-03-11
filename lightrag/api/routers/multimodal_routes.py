@@ -208,9 +208,25 @@ async def parse_document(
 
         try:
             if parser == "docling":
-                from lightrag.multimodal.parsers.docling_parser import DoclingMultimodalParser
-                doc_parser = DoclingMultimodalParser()
-                content_list = doc_parser.parse_document(tmp_path)
+                try:
+                    from lightrag.multimodal.parsers.docling_parser import DoclingMultimodalParser
+                    doc_parser = DoclingMultimodalParser()
+                    content_list = doc_parser.parse_document(tmp_path)
+                except (RuntimeError, Exception) as docling_err:
+                    logger.warning(
+                        f"Docling failed for {file_name}, falling back to PyMuPDF: {docling_err}"
+                    )
+                    from lightrag.multimodal.parsers.pymupdf_parser import PyMuPDFMultimodalParser
+                    config = _get_config()
+                    doc_parser = PyMuPDFMultimodalParser(
+                        min_image_width=config.min_image_width,
+                        min_image_height=config.min_image_height,
+                        max_image_aspect_ratio=config.max_image_aspect_ratio,
+                        enable_duplicate_filtering=config.enable_duplicate_filtering,
+                    )
+                    content_list = doc_parser.parse_document(
+                        tmp_path, password=password, extract_images=extract_images,
+                    )
             else:
                 from lightrag.multimodal.parsers.pymupdf_parser import PyMuPDFMultimodalParser
                 config = _get_config()
@@ -389,9 +405,28 @@ async def _process_multimodal_background(
             tmp_path = Path(tmp.name)
 
         if parser == "docling":
-            from lightrag.multimodal.parsers.docling_parser import DoclingMultimodalParser
-            doc_parser = DoclingMultimodalParser()
-            content_list = doc_parser.parse_document(tmp_path)
+            try:
+                from lightrag.multimodal.parsers.docling_parser import DoclingMultimodalParser
+                doc_parser = DoclingMultimodalParser()
+                content_list = doc_parser.parse_document(tmp_path)
+            except (RuntimeError, Exception) as docling_err:
+                logger.warning(
+                    f"Docling failed for {file_name}, falling back to PyMuPDF: {docling_err}"
+                )
+                await service.update_progress(
+                    task_id, 10.0,
+                    f"Docling failed, retrying with PyMuPDF...",
+                )
+                from lightrag.multimodal.parsers.pymupdf_parser import PyMuPDFMultimodalParser
+                doc_parser = PyMuPDFMultimodalParser(
+                    min_image_width=config.min_image_width,
+                    min_image_height=config.min_image_height,
+                    max_image_aspect_ratio=config.max_image_aspect_ratio,
+                    enable_duplicate_filtering=config.enable_duplicate_filtering,
+                )
+                content_list = doc_parser.parse_document(
+                    tmp_path, password=password, extract_images=process_images
+                )
         else:
             from lightrag.multimodal.parsers.pymupdf_parser import PyMuPDFMultimodalParser
             doc_parser = PyMuPDFMultimodalParser(

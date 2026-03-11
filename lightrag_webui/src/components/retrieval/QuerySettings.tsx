@@ -167,6 +167,13 @@ export default function QuerySettings() {
                       <SelectItem value="Multiple Paragraphs">{t('retrievePanel.querySettings.responseFormatOptions.multipleParagraphs')}</SelectItem>
                       <SelectItem value="Single Paragraph">{t('retrievePanel.querySettings.responseFormatOptions.singleParagraph')}</SelectItem>
                       <SelectItem value="Bullet Points">{t('retrievePanel.querySettings.responseFormatOptions.bulletPoints')}</SelectItem>
+                      <SelectItem value="Numbered List">{t('retrievePanel.querySettings.responseFormatOptions.numberedList')}</SelectItem>
+                      <SelectItem value="Table">{t('retrievePanel.querySettings.responseFormatOptions.table')}</SelectItem>
+                      <SelectItem value="Executive Summary">{t('retrievePanel.querySettings.responseFormatOptions.executiveSummary')}</SelectItem>
+                      <SelectItem value="FAQ">{t('retrievePanel.querySettings.responseFormatOptions.faq')}</SelectItem>
+                      <SelectItem value="Structured Sections">{t('retrievePanel.querySettings.responseFormatOptions.structuredSections')}</SelectItem>
+                      <SelectItem value="Three-Line Summary (exactly 3 bullet points, each starting with •)">{t('retrievePanel.querySettings.responseFormatOptions.threeLineSummary')}</SelectItem>
+                      <SelectItem value="Brief Answer (maximum 5 bullet points, each starting with •)">{t('retrievePanel.querySettings.responseFormatOptions.briefAnswer')}</SelectItem>
                     </SelectGroup>
                   </SelectContent>
                 </Select>
@@ -441,6 +448,27 @@ export default function QuerySettings() {
                   checked={querySettings.include_chunk_content}
                   onCheckedChange={(checked) => handleChange('include_chunk_content', checked)}
                   disabled={!querySettings.include_references}
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <label htmlFor="highlight_entities" className="flex-1 ml-1 cursor-help">
+                        {t('retrievePanel.querySettings.highlightEntities')}
+                      </label>
+                    </TooltipTrigger>
+                    <TooltipContent side="left">
+                      <p>{t('retrievePanel.querySettings.highlightEntitiesTooltip')}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+                <Checkbox
+                  className="mr-10 cursor-pointer"
+                  id="highlight_entities"
+                  checked={querySettings.highlight_entities}
+                  onCheckedChange={(checked) => handleChange('highlight_entities', checked)}
                 />
               </div>
 

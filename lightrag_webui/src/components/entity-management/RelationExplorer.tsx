@@ -126,14 +126,25 @@ export default function RelationExplorer() {
 
   const handleDelete = useCallback(async (e: React.MouseEvent, sourceId: string, targetId: string) => {
     e.stopPropagation()
-    if (!window.confirm(t('entityManagement.relationExplorer.confirmDelete', { sourceId, targetId }))) {
-      return
+
+    // Ask cascade or graph-only via confirm/cancel pattern
+    const cascadeMsg = t('entityManagement.relationExplorer.confirmDeleteCascade', { sourceId, targetId })
+    const graphOnlyMsg = t('entityManagement.relationExplorer.confirmDeleteGraphOnly', { sourceId, targetId })
+    const cascade = window.confirm(
+      `${cascadeMsg}\n\n[OK] = ${t('entityManagement.cascadeDelete')}\n[Cancel] = ${t('entityManagement.graphOnlyDelete')}`
+    )
+
+    // If user pressed Cancel on cascade prompt, ask if they want graph-only
+    let proceed = true
+    if (!cascade) {
+      proceed = window.confirm(graphOnlyMsg)
+      if (!proceed) return
     }
 
     const key = `${sourceId}-${targetId}`
     setDeleteLoading(key)
     try {
-      await removeRelation(sourceId, targetId)
+      await removeRelation(sourceId, targetId, cascade)
       toast.success(t('entityManagement.relationExplorer.deleteSuccess'))
     } catch (error) {
       toast.error(t('entityManagement.relationExplorer.deleteFailed'))

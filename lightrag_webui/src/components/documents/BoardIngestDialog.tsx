@@ -54,6 +54,8 @@ const EMPTY_MAPPING: BoardFieldMapping = {
   date_field: '',
   author_field: '',
   attachments_field: '',
+  attachment_url_field: '',
+  attachment_name_field: '',
   detail_url_template: '',
   pagination_type: 'page_param',
   page_param: '',
@@ -89,6 +91,8 @@ export default function BoardIngestDialog({ onDocumentsUploaded }: BoardIngestDi
   const [pageSize, setPageSize] = useState(20)
   const [processImages, setProcessImages] = useState(true)
   const [processTables, setProcessTables] = useState(true)
+  const [processDocuments, setProcessDocuments] = useState(true)
+  const [parser, setParser] = useState<'pymupdf' | 'docling'>('docling')
   const [skipDuplicates, setSkipDuplicates] = useState(true)
   const [updateExisting, setUpdateExisting] = useState(false)
   const [fetchDetail, setFetchDetail] = useState(false)
@@ -118,6 +122,8 @@ export default function BoardIngestDialog({ onDocumentsUploaded }: BoardIngestDi
     setPageSize(20)
     setProcessImages(true)
     setProcessTables(true)
+    setProcessDocuments(true)
+    setParser('docling')
     setSkipDuplicates(true)
     setUpdateExisting(false)
     setFetchDetail(false)
@@ -191,6 +197,8 @@ export default function BoardIngestDialog({ onDocumentsUploaded }: BoardIngestDi
         page_size: pageSize,
         process_images: processImages,
         process_tables: processTables,
+        process_documents: processDocuments,
+        parser: processDocuments ? parser : undefined,
         skip_duplicates: skipDuplicates,
         update_existing: updateExisting,
         fetch_detail: fetchDetail,
@@ -206,8 +214,8 @@ export default function BoardIngestDialog({ onDocumentsUploaded }: BoardIngestDi
       setIsSubmitting(false)
     }
   }, [apiUrl, method, buildHeadersObj, buildParamsObj, fieldMapping, maxPages, pageSize,
-      processImages, processTables, skipDuplicates, updateExisting, fetchDetail, baseUrl,
-      documentPrompt, imagePrompt, tablePrompt])
+      processImages, processTables, processDocuments, parser, skipDuplicates, updateExisting,
+      fetchDetail, baseUrl, documentPrompt, imagePrompt, tablePrompt])
 
   const handleTaskComplete = useCallback(() => {
     onDocumentsUploaded?.()
@@ -468,12 +476,34 @@ export default function BoardIngestDialog({ onDocumentsUploaded }: BoardIngestDi
                     />
                   </FieldRow>
 
+                  {fieldMapping.attachments_field && (
+                    <>
+                      <FieldRow label={t('documentPanel.boardIngest.attachmentUrlField')}>
+                        <Input
+                          value={fieldMapping.attachment_url_field || ''}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateMapping('attachment_url_field', e.target.value)}
+                          placeholder="filePath, url, download_url ..."
+                          className="h-8 text-sm"
+                        />
+                      </FieldRow>
+                      <FieldRow label={t('documentPanel.boardIngest.attachmentNameField')}>
+                        <Input
+                          value={fieldMapping.attachment_name_field || ''}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateMapping('attachment_name_field', e.target.value)}
+                          placeholder="attachFileNm, fileName, name ..."
+                          className="h-8 text-sm"
+                        />
+                      </FieldRow>
+                    </>
+                  )}
+
                   <FieldRow label={t('documentPanel.boardIngest.detailUrlTemplate')}>
                     <Input
                       value={fieldMapping.detail_url_template || ''}
                       onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateMapping('detail_url_template', e.target.value)}
                       placeholder="/api/posts/{id}"
                       className="h-8 text-sm"
+                      title={t('documentPanel.boardIngest.detailUrlTemplateTooltip')}
                     />
                   </FieldRow>
                 </div>
@@ -634,6 +664,39 @@ export default function BoardIngestDialog({ onDocumentsUploaded }: BoardIngestDi
                     <Label htmlFor="board-fetch-detail">{t('documentPanel.boardIngest.fetchDetail')}</Label>
                     <Info className="h-3 w-3 text-muted-foreground" title={t('documentPanel.boardIngest.fetchDetailTooltip')} />
                   </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      id="board-process-documents"
+                      checked={processDocuments}
+                      onCheckedChange={(v) => setProcessDocuments(v === true)}
+                    />
+                    <Label htmlFor="board-process-documents">{t('documentPanel.boardIngest.processDocuments')}</Label>
+                  </div>
+                  {processDocuments && (
+                    <div className="flex items-center gap-2 text-sm ml-6">
+                      <Label className="text-xs text-muted-foreground">{t('documentPanel.boardIngest.parserSelection')}:</Label>
+                      <div className="flex gap-1">
+                        <Button
+                          variant={parser === 'pymupdf' ? 'default' : 'outline'}
+                          size="sm"
+                          className="h-6 text-xs px-2"
+                          onClick={() => setParser('docling')}
+                        >
+                          PyMuPDF
+                          <span className="ml-1 text-[10px] opacity-70">({t('documentPanel.multimodalUpload.pymupdfDesc')})</span>
+                        </Button>
+                        <Button
+                          variant={parser === 'docling' ? 'default' : 'outline'}
+                          size="sm"
+                          className="h-6 text-xs px-2"
+                          onClick={() => setParser('docling')}
+                        >
+                          Docling
+                          <span className="ml-1 text-[10px] opacity-70">({t('documentPanel.multimodalUpload.doclingDesc')})</span>
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Custom Prompts */}
@@ -869,6 +932,53 @@ function MappingInputs({
           value={mapping.total_field || ''}
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange('total_field', e.target.value)}
           placeholder="data.totalCount"
+          className="h-7 text-xs"
+        />
+      </FieldRow>
+      {mapping.pagination_type === 'cursor' && (
+        <FieldRow label={t('documentPanel.boardIngest.cursorField')}>
+          <Input
+            value={mapping.cursor_field || ''}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange('cursor_field', e.target.value)}
+            placeholder="nextCursor, cursor ..."
+            className="h-7 text-xs"
+          />
+        </FieldRow>
+      )}
+      <FieldRow label={t('documentPanel.boardIngest.attachmentsField')}>
+        <Input
+          value={mapping.attachments_field || ''}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange('attachments_field', e.target.value)}
+          placeholder="attachFiles, files ..."
+          className="h-7 text-xs"
+        />
+      </FieldRow>
+      {mapping.attachments_field && (
+        <>
+          <FieldRow label={t('documentPanel.boardIngest.attachmentUrlField')}>
+            <Input
+              value={mapping.attachment_url_field || ''}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange('attachment_url_field', e.target.value)}
+              placeholder="filePath, url ..."
+              className="h-7 text-xs"
+            />
+          </FieldRow>
+          <FieldRow label={t('documentPanel.boardIngest.attachmentNameField')}>
+            <Input
+              value={mapping.attachment_name_field || ''}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange('attachment_name_field', e.target.value)}
+              placeholder="attachFileNm, fileName ..."
+              className="h-7 text-xs"
+            />
+          </FieldRow>
+        </>
+      )}
+      <FieldRow label={t('documentPanel.boardIngest.detailUrlTemplate')}>
+        <Input
+          value={mapping.detail_url_template || ''}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange('detail_url_template', e.target.value)}
+          placeholder="/api/board/{id}"
+          title={t('documentPanel.boardIngest.detailUrlTemplateTooltip')}
           className="h-7 text-xs"
         />
       </FieldRow>

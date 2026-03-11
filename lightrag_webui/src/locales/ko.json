@@ -213,7 +213,10 @@
       "dateField": "날짜 필드",
       "authorField": "작성자 필드",
       "attachmentsField": "첨부파일 필드",
+      "attachmentUrlField": "첨부 URL 필드",
+      "attachmentNameField": "첨부 파일명 필드",
       "detailUrlTemplate": "상세 API URL 템플릿",
+      "detailUrlTemplateTooltip": "{id}는 고정 문법입니다. API 응답의 실제 필드명(_id 등)이 아닌 반드시 {id}를 사용하세요. 예: /api/posts/{id}",
       "pagination": "페이지네이션",
       "paginationType": "타입",
       "pageParam": "페이지 파라미터",
@@ -242,7 +245,10 @@
       "llmNotes": "AI 분석 노트",
       "rawKeys": "사용 가능한 키",
       "key": "키",
-      "value": "값"
+      "value": "값",
+      "cursorField": "커서 필드",
+      "processDocuments": "문서 첨부파일 처리 (PDF, DOCX 등)",
+      "parserSelection": "문서 파서"
     },
     "taskProgress": {
       "status": {
@@ -609,7 +615,14 @@
       "responseFormatOptions": {
         "multipleParagraphs": "여러 단락",
         "singleParagraph": "단일 단락",
-        "bulletPoints": "글머리 기호"
+        "bulletPoints": "글머리 기호",
+        "numberedList": "번호 목록",
+        "table": "테이블",
+        "executiveSummary": "요약 보고서",
+        "faq": "FAQ (질문과 답변)",
+        "structuredSections": "구조화 섹션",
+        "threeLineSummary": "세줄 요약",
+        "briefAnswer": "간단한 답변"
       },
       "topK": "KG Top K",
       "topKTooltip": "검색할 엔티티 및 관계 수. non-naive 모드에 적용됩니다.",
@@ -637,6 +650,8 @@
       "userPromptPlaceholder": "사용자 정의 프롬프트 입력 (선택사항)",
       "enableRerank": "리랭크 활성화",
       "enableRerankTooltip": "검색된 텍스트 청크에 대한 리랭킹을 활성화합니다. True이지만 리랭크 모델이 설정되지 않은 경우 경고가 표시됩니다. 기본값은 True입니다.",
+      "highlightEntities": "엔티티 강조",
+      "highlightEntitiesTooltip": "엔티티명을 **굵게**, 관계 키워드를 *기울임*으로 표시하여 가독성을 높입니다",
       "includeReferences": "참조 문서 포함",
       "includeReferencesTooltip": "쿼리 응답에 참조 문서(소스 파일, 점수)를 포함합니다",
       "includeChunkContent": "청크 콘텐츠 포함",
@@ -692,7 +707,8 @@
     "author": "작성자",
     "date": "작성일",
     "attachments": "첨부파일",
-    "close": "닫기"
+    "close": "닫기",
+    "viewApiJson": "API JSON 보기"
   },
   "apiSite": {
     "loading": "API 문서 로딩 중..."
@@ -738,6 +754,8 @@
     "inactive": "비활성"
   },
   "entityManagement": {
+    "cascadeDelete": "완전 삭제 (권장)",
+    "graphOnlyDelete": "그래프만 삭제",
     "tabs": {
       "entities": "엔티티 탐색",
       "relations": "관계 탐색"
@@ -749,6 +767,8 @@
       "refresh": "새로고침",
       "noEntities": "엔티티가 없습니다",
       "confirmDelete": "정말로 '{{entityId}}' 엔티티를 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.",
+      "confirmDeleteCascade": "'{{entityId}}'를 삭제합니다. 연관 벡터·청크 매핑도 함께 삭제됩니다.",
+      "confirmDeleteGraphOnly": "'{{entityId}}'를 그래프에서만 삭제합니다. 벡터·청크 매핑은 유지됩니다.",
       "deleteSuccess": "'{{entityId}}' 엔티티가 삭제되었습니다",
       "deleteFailed": "엔티티 삭제에 실패했습니다",
       "columns": {
@@ -764,6 +784,8 @@
       "refresh": "새로고침",
       "noRelations": "관계가 없습니다",
       "confirmDelete": "'{{sourceId}}'와 '{{targetId}}' 사이의 관계를 삭제하시겠습니까?",
+      "confirmDeleteCascade": "'{{sourceId}}'와 '{{targetId}}' 사이의 관계를 삭제합니다. 연관 벡터·청크 매핑도 함께 삭제됩니다.",
+      "confirmDeleteGraphOnly": "'{{sourceId}}'와 '{{targetId}}' 사이의 관계를 그래프에서만 삭제합니다. 벡터·청크 매핑은 유지됩니다.",
       "deleteSuccess": "관계가 삭제되었습니다",
       "deleteFailed": "관계 삭제에 실패했습니다",
       "columns": {
