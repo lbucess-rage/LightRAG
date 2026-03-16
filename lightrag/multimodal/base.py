@@ -102,8 +102,9 @@ class BaseModalProcessor:
             return ""
 
         lines = ["[Seed Entity Naming Guide]",
-                 "When naming entities, use the following canonical names "
-                 "if the content relates to any of these domain terms:"]
+                 "Below are canonical entity names in this domain. "
+                 "Only use a canonical name if the content specifically mentions or depicts that entity. "
+                 "Do NOT list entities that are not present in the content:"]
         for seed in seed_entities:
             keyword = seed.get("keyword", "")
             if not keyword:
@@ -119,7 +120,8 @@ class BaseModalProcessor:
             lines.append(line)
             if description:
                 lines.append(f"  {description}")
-        lines.append("Prefer these exact canonical names over generic or abbreviated alternatives.")
+        lines.append("Use only the relevant canonical name(s) that actually appear in the content. "
+                      "Do NOT include all seed entities — only those actually present.")
         return "\n".join(lines)
 
     def _get_context_for_item(self, item_info: Dict[str, Any]) -> str:
