@@ -1264,12 +1264,22 @@ async def _rebuild_single_entity(
     description_list = list(dict.fromkeys(descriptions))
     entity_types = list(dict.fromkeys(entity_types))
 
-    # Get most common entity type
-    entity_type = (
-        max(set(entity_types), key=entity_types.count)
-        if entity_types
-        else current_entity.get("entity_type", "UNKNOWN")
-    )
+    # Get most common entity type, protecting domain types from content-source types
+    _CONTENT_SOURCE_TYPES = {"image", "table", "equation"}
+    existing_type = current_entity.get("entity_type", "UNKNOWN")
+
+    if entity_types:
+        # Prefer domain types over content-source types
+        domain_types = [t for t in entity_types if t.lower() not in _CONTENT_SOURCE_TYPES]
+        if domain_types:
+            entity_type = max(set(domain_types), key=domain_types.count)
+        elif existing_type.lower() not in _CONTENT_SOURCE_TYPES and existing_type != "UNKNOWN":
+            # Keep existing domain type if all new types are content-source types
+            entity_type = existing_type
+        else:
+            entity_type = max(set(entity_types), key=entity_types.count)
+    else:
+        entity_type = existing_type
 
     # Generate final description from entities or fallback to current
     if description_list:
@@ -1692,14 +1702,25 @@ async def _merge_nodes_then_upsert(
     # 6.1 Finalize source_id
     source_id = GRAPH_FIELD_SEP.join(source_ids)
 
-    # 6.2 Finalize entity type by highest count
-    entity_type = sorted(
-        Counter(
-            [dp["entity_type"] for dp in nodes_data] + already_entity_types
-        ).items(),
-        key=lambda x: x[1],
-        reverse=True,
-    )[0][0]
+    # 6.2 Finalize entity type by highest count, protecting domain types from content-source types
+    _CONTENT_SOURCE_TYPES = {"image", "table", "equation"}
+    all_types = [dp["entity_type"] for dp in nodes_data] + already_entity_types
+    domain_types = [t for t in all_types if t.lower() not in _CONTENT_SOURCE_TYPES]
+
+    if domain_types:
+        entity_type = sorted(
+            Counter(domain_types).items(),
+            key=lambda x: x[1],
+            reverse=True,
+        )[0][0]
+    elif already_entity_types and already_entity_types[0].lower() not in _CONTENT_SOURCE_TYPES:
+        entity_type = already_entity_types[0]
+    else:
+        entity_type = sorted(
+            Counter(all_types).items(),
+            key=lambda x: x[1],
+            reverse=True,
+        )[0][0]
 
     # 7. Deduplicate nodes by description, keeping first occurrence in the same document
     unique_nodes = {}

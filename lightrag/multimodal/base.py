@@ -227,6 +227,22 @@ class BaseModalProcessor:
         # Store chunk in vector DB (reuse chunk_data to include structured_content)
         await self.chunks_vdb.upsert({chunk_id: chunk_data})
 
+        # Register chunk_id in doc_status.chunks_list for proper cleanup on document deletion
+        if actual_doc_id and hasattr(self.lightrag, 'doc_status') and hasattr(self.lightrag.doc_status, 'db'):
+            try:
+                sql = """UPDATE LIGHTRAG_DOC_STATUS
+                         SET chunks_list = chunks_list || $3::jsonb,
+                             chunks_count = jsonb_array_length(chunks_list || $3::jsonb)
+                         WHERE workspace=$1 AND id=$2
+                         AND NOT chunks_list @> $3::jsonb"""
+                await self.lightrag.doc_status.db.execute(
+                    sql, {"workspace": self.lightrag.doc_status.workspace,
+                          "id": actual_doc_id,
+                          "chunk_id_json": json.dumps([chunk_id])}
+                )
+            except Exception as e:
+                logger.warning(f"Failed to update doc_status chunks_list for {actual_doc_id}: {e}")
+
         # Create entity node in graph
         node_data = {
             "entity_id": entity_info["entity_name"],
@@ -250,6 +266,18 @@ class BaseModalProcessor:
                 "file_path": file_path,
             }
         })
+
+        # Register entity-chunk mapping for proper deletion tracking
+        if hasattr(self.lightrag, 'entity_chunks') and self.lightrag.entity_chunks:
+            try:
+                await self.lightrag.entity_chunks.upsert({
+                    entity_info["entity_name"]: {
+                        "chunk_ids": [chunk_id],
+                        "count": 1,
+                    }
+                })
+            except Exception as e:
+                logger.debug(f"Failed to register entity_chunks for '{entity_info['entity_name']}': {e}")
 
         # Process entity and relationship extraction
         chunk_results = await self._process_chunk_for_extraction(
@@ -325,15 +353,21 @@ class BaseModalProcessor:
 
         if not batch_mode:
             file_path = chunk_data.get("file_path", "manual_creation")
+            doc_id = chunk_data.get("full_doc_id")
             await merge_nodes_and_edges(
                 chunk_results=chunk_results,
                 knowledge_graph_inst=self.knowledge_graph_inst,
                 entity_vdb=self.entities_vdb,
                 relationships_vdb=self.relationships_vdb,
                 global_config=self.global_config,
+                full_entities_storage=self.lightrag.full_entities,
+                full_relations_storage=self.lightrag.full_relations,
+                doc_id=doc_id,
                 pipeline_status=pipeline_status,
                 pipeline_status_lock=pipeline_status_lock,
                 llm_response_cache=self.hashing_kv,
+                entity_chunks_storage=self.lightrag.entity_chunks,
+                relation_chunks_storage=self.lightrag.relation_chunks,
                 current_file_number=1,
                 total_files=1,
                 file_path=file_path,

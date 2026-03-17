@@ -13,7 +13,8 @@ import {
   TableRow
 } from '@/components/ui/Table'
 import PaginationControls from '@/components/ui/PaginationControls'
-import { SearchIcon, RefreshCwIcon, ArrowUpIcon, ArrowDownIcon, Trash2Icon, Loader2Icon } from 'lucide-react'
+import { SearchIcon, RefreshCwIcon, ArrowUpIcon, ArrowDownIcon, Trash2Icon, Loader2Icon, AlertTriangleIcon, Network } from 'lucide-react'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/Dialog'
 import { toast } from 'sonner'
 
 // Debounce hook
@@ -37,6 +38,7 @@ export default function RelationExplorer() {
   const { t } = useTranslation()
   const [searchInput, setSearchInput] = useState('')
   const [deleteLoading, setDeleteLoading] = useState<string | null>(null)
+  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; sourceId: string | null; targetId: string | null }>({ open: false, sourceId: null, targetId: null })
 
   // Store state
   const relations = useEntityManagementStore.use.relations()
@@ -124,23 +126,15 @@ export default function RelationExplorer() {
     setGraphSelectedEdge(edgeData)
   }, [setGraphSelectedEdge])
 
-  const handleDelete = useCallback(async (e: React.MouseEvent, sourceId: string, targetId: string) => {
+  const handleDelete = useCallback((e: React.MouseEvent, sourceId: string, targetId: string) => {
     e.stopPropagation()
+    setDeleteDialog({ open: true, sourceId, targetId })
+  }, [])
 
-    // Ask cascade or graph-only via confirm/cancel pattern
-    const cascadeMsg = t('entityManagement.relationExplorer.confirmDeleteCascade', { sourceId, targetId })
-    const graphOnlyMsg = t('entityManagement.relationExplorer.confirmDeleteGraphOnly', { sourceId, targetId })
-    const cascade = window.confirm(
-      `${cascadeMsg}\n\n[OK] = ${t('entityManagement.cascadeDelete')}\n[Cancel] = ${t('entityManagement.graphOnlyDelete')}`
-    )
-
-    // If user pressed Cancel on cascade prompt, ask if they want graph-only
-    let proceed = true
-    if (!cascade) {
-      proceed = window.confirm(graphOnlyMsg)
-      if (!proceed) return
-    }
-
+  const executeDelete = useCallback(async (cascade: boolean) => {
+    const { sourceId, targetId } = deleteDialog
+    if (!sourceId || !targetId) return
+    setDeleteDialog({ open: false, sourceId: null, targetId: null })
     const key = `${sourceId}-${targetId}`
     setDeleteLoading(key)
     try {
@@ -151,7 +145,7 @@ export default function RelationExplorer() {
     } finally {
       setDeleteLoading(null)
     }
-  }, [removeRelation, t])
+  }, [deleteDialog, removeRelation, t])
 
   const SortIcon = ({ field }: { field: string }) => {
     if (sortField !== field) return null
@@ -309,6 +303,49 @@ export default function RelationExplorer() {
           compact
         />
       </div>
+
+      <Dialog open={deleteDialog.open} onOpenChange={(open) => !open && setDeleteDialog({ open: false, sourceId: null, targetId: null })}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangleIcon className="h-5 w-5 text-destructive" />
+              {t('entityManagement.deleteDialog.title')}
+            </DialogTitle>
+            <DialogDescription className="pt-2">
+              {t('entityManagement.deleteDialog.relationDescription', { sourceId: deleteDialog.sourceId, targetId: deleteDialog.targetId })}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-3 py-2">
+            <Button
+              variant="destructive"
+              className="w-full justify-start gap-3 h-auto py-3 px-4"
+              onClick={() => executeDelete(true)}
+            >
+              <Trash2Icon className="h-5 w-5 shrink-0" />
+              <div className="text-left">
+                <div className="font-semibold">{t('entityManagement.deleteDialog.cascadeButton')}</div>
+                <div className="text-xs font-normal opacity-80">{t('entityManagement.deleteDialog.cascadeDescription')}</div>
+              </div>
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full justify-start gap-3 h-auto py-3 px-4"
+              onClick={() => executeDelete(false)}
+            >
+              <Network className="h-5 w-5 shrink-0" />
+              <div className="text-left">
+                <div className="font-semibold">{t('entityManagement.deleteDialog.graphOnlyButton')}</div>
+                <div className="text-xs font-normal opacity-70">{t('entityManagement.deleteDialog.graphOnlyDescription')}</div>
+              </div>
+            </Button>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setDeleteDialog({ open: false, sourceId: null, targetId: null })}>
+              {t('common.cancel')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

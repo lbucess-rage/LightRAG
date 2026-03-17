@@ -1189,6 +1189,41 @@ export const deleteEntity = async (entityId: string, cascade: boolean = true): P
 }
 
 /**
+ * Get related entities (similar names) for batch deletion
+ */
+export type RelatedEntityItem = {
+  entity_id: string
+  entity_type?: string
+  description?: string
+  degree: number
+}
+
+export type RelatedEntitiesResponse = {
+  related: RelatedEntityItem[]
+  total: number
+}
+
+export const getRelatedEntities = async (entityId: string): Promise<RelatedEntitiesResponse> => {
+  const response = await axiosInstance.get(`/entities/${encodeURIComponent(entityId)}/related`)
+  return response.data
+}
+
+/**
+ * Batch delete multiple entities
+ */
+export type BatchDeleteResponse = {
+  status: string
+  message: string
+  deleted: number
+  failed: number
+}
+
+export const batchDeleteEntities = async (entityIds: string[], cascade: boolean = true): Promise<BatchDeleteResponse> => {
+  const response = await axiosInstance.post('/entities/batch-delete', { entity_ids: entityIds, cascade })
+  return response.data
+}
+
+/**
  * Delete a relation between two entities
  * @param request The delete relation request with source and target IDs
  * @returns Promise with delete response

@@ -39,6 +39,7 @@
   },
   "common": {
     "cancel": "취소",
+    "back": "뒤로가기",
     "save": "저장",
     "saving": "저장 중...",
     "saveFailed": "저장 실패",
@@ -63,6 +64,16 @@
       "cacheClearFailed": "캐시 삭제 실패:\n{{error}}",
       "failed": "문서 초기화 실패:\n{{message}}",
       "error": "문서 초기화 실패:\n{{error}}"
+    },
+    "clearLLMCache": {
+      "button": "캐시 삭제",
+      "tooltip": "LLM 응답 캐시를 삭제합니다",
+      "title": "LLM 캐시 삭제",
+      "description": "캐시된 LLM 응답을 모두 삭제합니다. 삭제 후 동일한 쿼리를 실행하면 LLM이 새로 응답을 생성합니다.",
+      "confirmButton": "삭제",
+      "clearing": "삭제 중...",
+      "success": "LLM 캐시가 삭제되었습니다",
+      "error": "캐시 삭제 실패: {{error}}"
     },
     "deleteDocuments": {
       "button": "삭제",
@@ -756,6 +767,20 @@
   "entityManagement": {
     "cascadeDelete": "완전 삭제 (권장)",
     "graphOnlyDelete": "그래프만 삭제",
+    "deleteDialog": {
+      "title": "삭제 범위 선택",
+      "entityDescription": "'{{entityId}}' 엔티티를 삭제합니다. 삭제 범위를 선택하세요.",
+      "relationDescription": "'{{sourceId}}' → '{{targetId}}' 관계를 삭제합니다. 삭제 범위를 선택하세요.",
+      "cascadeButton": "완전 삭제 (권장)",
+      "cascadeDescription": "그래프, 벡터 임베딩, 청크 매핑을 모두 삭제하고 관련 캐시를 초기화합니다.",
+      "graphOnlyButton": "그래프만 삭제",
+      "graphOnlyDescription": "그래프 노드/관계만 삭제합니다. 벡터 임베딩과 청크 매핑은 유지됩니다.",
+      "loadingRelated": "관련 엔티티 검색 중...",
+      "relatedFound": "유사한 이름의 엔티티 {{count}}건이 발견되었습니다. 함께 삭제할 항목을 선택하세요.",
+      "noRelated": "관련 엔티티가 없습니다. 선택한 엔티티만 삭제됩니다.",
+      "selectAll": "전체 선택",
+      "confirmDelete": "{{count}}건 삭제"
+    },
     "tabs": {
       "entities": "엔티티 탐색",
       "relations": "관계 탐색"
@@ -770,6 +795,7 @@
       "confirmDeleteCascade": "'{{entityId}}'를 삭제합니다. 연관 벡터·청크 매핑도 함께 삭제됩니다.",
       "confirmDeleteGraphOnly": "'{{entityId}}'를 그래프에서만 삭제합니다. 벡터·청크 매핑은 유지됩니다.",
       "deleteSuccess": "'{{entityId}}' 엔티티가 삭제되었습니다",
+      "batchDeleteSuccess": "{{deleted}}/{{total}}건의 엔티티가 삭제되었습니다",
       "deleteFailed": "엔티티 삭제에 실패했습니다",
       "columns": {
         "entityId": "엔티티",

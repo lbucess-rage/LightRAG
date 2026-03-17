@@ -3708,6 +3708,7 @@ class LightRAG:
             relation_chunks_storage=self.relation_chunks,
             text_chunks_storage=self.text_chunks,
             chunks_vdb=self.chunks_vdb,
+            llm_response_cache=self.llm_response_cache,
         )
 
     def delete_by_entity(self, entity_name: str) -> DeletionResult:
@@ -3741,6 +3742,11 @@ class LightRAG:
             self.relationships_vdb,
             source_entity,
             target_entity,
+            relation_chunks_storage=self.relation_chunks,
+            entity_chunks_storage=self.entity_chunks,
+            text_chunks_storage=self.text_chunks,
+            chunks_vdb=self.chunks_vdb,
+            llm_response_cache=self.llm_response_cache,
         )
 
     def delete_by_relation(

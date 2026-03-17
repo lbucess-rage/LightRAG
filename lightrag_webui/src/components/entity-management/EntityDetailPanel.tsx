@@ -532,6 +532,7 @@ export default function EntityDetailPanel() {
                 <div className="flex items-center gap-4 p-3 bg-muted/30 rounded-lg">
                   <div className="relative w-20 h-20 flex-shrink-0 rounded overflow-hidden border">
                     <img
+                      key={imageUrl}
                       src={imageUrl}
                       alt={activeEntityId || 'Image'}
                       className="w-full h-full object-cover cursor-pointer hover:opacity-80 transition-opacity"
@@ -570,9 +571,11 @@ export default function EntityDetailPanel() {
                     value={graphSelectedNodeData.labels.join(', ')}
                   />
                 )}
-                <PropertyRow
+                <EditableField
                   label={t('entityManagement.detailPanel.fields.entity_type')}
-                  value={graphSelectedNodeData?.properties?.entity_type || selectedEntity?.entity_type || '-'}
+                  value={getValue('entity_type', graphSelectedNodeData?.properties?.entity_type || selectedEntity?.entity_type)}
+                  isEditable={true}
+                  onChange={(value) => handleFieldChange('entity_type', value)}
                 />
                 <PropertyRow
                   label={t('entityManagement.detailPanel.fields.degree')}

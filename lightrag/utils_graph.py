@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 import asyncio
 from typing import Any, cast
@@ -105,6 +106,108 @@ async def _find_orphan_chunks(
     return orphans
 
 
+async def _scrub_entity_from_chunks(
+    entity_name: str,
+    chunk_ids: list[str],
+    text_chunks_storage,
+    chunks_vdb,
+    entity_type: str | None = None,
+) -> dict[str, str]:
+    """Scrub entity name from shared chunk text content and re-embed.
+
+    For image/table type entities, also removes structured_content (S3 image URL, table data)
+    from the chunk so the visual element no longer appears in query results.
+
+    Args:
+        entity_name: The entity name to remove from chunk text
+        chunk_ids: List of chunk IDs to scrub
+        text_chunks_storage: KV storage for text chunks (doc_chunks)
+        chunks_vdb: Vector storage for chunk embeddings
+        entity_type: Optional entity type (e.g., "image", "table") for structured_content cleanup
+
+    Returns:
+        dict mapping chunk_id -> new_content for chunks that were modified
+    """
+    if not chunk_ids or not text_chunks_storage:
+        return {}
+
+    import json as _json
+
+    pattern = re.compile(re.escape(entity_name), re.IGNORECASE)
+    is_visual_entity = entity_type and entity_type.lower() in ("image", "table", "equation")
+    chunk_updates: dict[str, str] = {}
+
+    for chunk_id in chunk_ids:
+        try:
+            chunk_data = await text_chunks_storage.get_by_id(chunk_id)
+            if not chunk_data:
+                continue
+
+            modified = False
+            content = chunk_data.get("content", "")
+
+            # Scrub entity name from text content
+            if content and pattern.search(content):
+                new_content = pattern.sub('', content)
+                new_content = re.sub(r'  +', ' ', new_content)
+                new_content = re.sub(r'\n\s*\n\s*\n', '\n\n', new_content)
+                new_content = new_content.strip()
+                if new_content != content:
+                    chunk_data["content"] = new_content
+                    modified = True
+
+            # For image/table entities: clear structured_content if it belongs to this entity
+            if is_visual_entity:
+                sc = chunk_data.get("structured_content")
+                if sc:
+                    # Parse if string
+                    if isinstance(sc, str):
+                        try:
+                            sc = _json.loads(sc)
+                        except _json.JSONDecodeError:
+                            sc = None
+
+                    if isinstance(sc, dict):
+                        sc_entity_name = sc.get("entity", {}).get("name", "")
+                        # Clear structured_content if it matches the deleted entity
+                        if sc_entity_name and (
+                            sc_entity_name == entity_name
+                            or pattern.search(sc_entity_name)
+                        ):
+                            chunk_data["structured_content"] = None
+                            modified = True
+                            logger.debug(f"Cleared structured_content for entity '{entity_name}' from chunk {chunk_id}")
+
+                            # Also clear structured_content in VDB_CHUNKS via direct SQL
+                            if chunks_vdb and hasattr(chunks_vdb, 'db'):
+                                try:
+                                    sql = """UPDATE LIGHTRAG_VDB_CHUNKS
+                                             SET structured_content = NULL
+                                             WHERE workspace=$1 AND id=$2"""
+                                    await chunks_vdb.db.execute(
+                                        sql, {"workspace": chunks_vdb.workspace, "id": chunk_id}
+                                    )
+                                except Exception as e:
+                                    logger.debug(f"Failed to clear VDB_CHUNKS structured_content: {e}")
+
+            if not modified:
+                continue
+
+            await text_chunks_storage.upsert({chunk_id: chunk_data})
+            chunk_updates[chunk_id] = chunk_data.get("content", "")
+            logger.debug(f"Scrubbed entity '{entity_name}' from chunk {chunk_id}")
+
+        except Exception as e:
+            logger.error(f"Failed to scrub entity '{entity_name}' from chunk {chunk_id}: {e}")
+
+    if chunk_updates:
+        logger.info(
+            f"Entity Scrub: scrubbed '{entity_name}' from {len(chunk_updates)} shared chunks"
+        )
+
+    return chunk_updates
+
+
 async def adelete_by_entity(
     chunk_entity_relation_graph,
     entities_vdb,
@@ -114,6 +217,7 @@ async def adelete_by_entity(
     relation_chunks_storage=None,
     text_chunks_storage=None,
     chunks_vdb=None,
+    llm_response_cache=None,
 ) -> DeletionResult:
     """Asynchronously delete an entity and all its relationships.
 
@@ -146,6 +250,10 @@ async def adelete_by_entity(
                     message=f"Entity '{entity_name}' not found.",
                     status_code=404,
                 )
+            # Get entity type for structured_content cleanup (image/table)
+            node_data = await chunk_entity_relation_graph.get_node(entity_name)
+            entity_type = node_data.get("entity_type") if node_data else None
+
             # Retrieve related relationships before deleting the node
             edges = await chunk_entity_relation_graph.get_node_edges(entity_name)
             related_relations_count = len(edges) if edges else 0
@@ -163,23 +271,52 @@ async def adelete_by_entity(
                 except Exception as e:
                     logger.debug(f"Failed to get chunk_ids for entity '{entity_name}': {e}")
 
+            # Fallback: if entity_chunks mapping is missing, get chunk_ids from graph node's source_id
+            if not entity_chunk_ids:
+                try:
+                    node_data = await chunk_entity_relation_graph.get_node(entity_name)
+                    if node_data:
+                        source_id = node_data.get("source_id", "")
+                        if source_id:
+                            entity_chunk_ids = [cid for cid in source_id.split(GRAPH_FIELD_SEP) if cid]
+                            if entity_chunk_ids:
+                                logger.info(f"Entity Delete: recovered {len(entity_chunk_ids)} chunk_ids from graph node source_id")
+                except Exception as e:
+                    logger.debug(f"Failed to get source_id from graph node '{entity_name}': {e}")
+
             # Also collect chunk_ids from relations being deleted
             relation_chunk_ids = []
-            if relation_chunks_storage is not None and edges:
+            if edges:
                 from .utils import make_relation_chunk_key
                 for src, tgt in edges:
                     normalized_src, normalized_tgt = sorted([src, tgt])
-                    storage_key = make_relation_chunk_key(normalized_src, normalized_tgt)
-                    try:
-                        rel_data = await relation_chunks_storage.get_by_id(storage_key)
-                        if rel_data:
-                            rel_cids = rel_data.get("chunk_ids", [])
-                            if isinstance(rel_cids, str):
-                                import json
-                                rel_cids = json.loads(rel_cids)
-                            relation_chunk_ids.extend(rel_cids)
-                    except Exception as e:
-                        logger.debug(f"Failed to get chunk_ids for relation '{storage_key}': {e}")
+                    rel_cids = []
+
+                    # Try relation_chunks_storage first
+                    if relation_chunks_storage is not None:
+                        storage_key = make_relation_chunk_key(normalized_src, normalized_tgt)
+                        try:
+                            rel_data = await relation_chunks_storage.get_by_id(storage_key)
+                            if rel_data:
+                                rel_cids = rel_data.get("chunk_ids", [])
+                                if isinstance(rel_cids, str):
+                                    import json
+                                    rel_cids = json.loads(rel_cids)
+                        except Exception as e:
+                            logger.debug(f"Failed to get chunk_ids for relation '{storage_key}': {e}")
+
+                    # Fallback: get chunk_ids from graph edge's source_id
+                    if not rel_cids:
+                        try:
+                            edge_data = await chunk_entity_relation_graph.get_edge(src, tgt)
+                            if edge_data:
+                                edge_source_id = edge_data.get("source_id", "")
+                                if edge_source_id:
+                                    rel_cids = [cid for cid in edge_source_id.split(GRAPH_FIELD_SEP) if cid]
+                        except Exception as e:
+                            logger.debug(f"Failed to get source_id from graph edge '{src}'-'{tgt}': {e}")
+
+                    relation_chunk_ids.extend(rel_cids)
 
             # Clean up chunk tracking storages
             if entity_chunks_storage is not None:
@@ -228,7 +365,36 @@ async def adelete_by_entity(
                         f"Entity Delete: removed {orphan_count} orphaned chunks for `{entity_name}`"
                     )
 
-            message = f"Entity Delete: remove '{entity_name}' and its {related_relations_count} relations, {orphan_count} orphaned chunks"
+            # Scrub entity name from remaining shared chunks and re-embed
+            scrub_count = 0
+            orphan_id_set = set(orphan_ids) if orphan_count > 0 else set()
+            if all_candidate_chunk_ids and text_chunks_storage:
+                shared_chunk_ids = [cid for cid in all_candidate_chunk_ids if cid not in orphan_id_set]
+                if shared_chunk_ids:
+                    chunk_updates = await _scrub_entity_from_chunks(
+                        entity_name, shared_chunk_ids, text_chunks_storage, chunks_vdb,
+                        entity_type=entity_type,
+                    )
+                    scrub_count = len(chunk_updates)
+                    if chunk_updates and chunks_vdb:
+                        try:
+                            updated = await chunks_vdb.update_chunk_content(chunk_updates)
+                            logger.info(
+                                f"Entity Delete: re-embedded {updated} scrubbed chunks in VDB"
+                            )
+                        except Exception as e:
+                            logger.error(f"Entity Delete: failed to re-embed scrubbed chunks: {e}")
+
+            # Invalidate LLM query cache
+            if llm_response_cache is not None:
+                try:
+                    await llm_response_cache.drop()
+                    await llm_response_cache.index_done_callback()
+                    logger.info("Entity Delete: invalidated LLM query cache for workspace")
+                except Exception as e:
+                    logger.error(f"Entity Delete: failed to invalidate LLM cache: {e}")
+
+            message = f"Entity Delete: remove '{entity_name}' and its {related_relations_count} relations, {orphan_count} orphaned chunks, {scrub_count} scrubbed chunks"
             logger.info(message)
             await _persist_graph_updates(
                 entities_vdb=entities_vdb,
@@ -260,10 +426,15 @@ async def adelete_by_relation(
     source_entity: str,
     target_entity: str,
     relation_chunks_storage=None,
+    entity_chunks_storage=None,
+    text_chunks_storage=None,
+    chunks_vdb=None,
+    llm_response_cache=None,
 ) -> DeletionResult:
     """Asynchronously delete a relation between two entities.
 
-    Also cleans up relation_chunks_storage to remove chunk tracking.
+    Also cleans up relation_chunks_storage to remove chunk tracking,
+    and deletes orphaned chunks from text_chunks and chunks_vdb.
 
     Args:
         chunk_entity_relation_graph: Graph storage instance
@@ -271,6 +442,9 @@ async def adelete_by_relation(
         source_entity: Name of the source entity
         target_entity: Name of the target entity
         relation_chunks_storage: Optional KV storage for tracking chunks that reference this relation
+        entity_chunks_storage: Optional KV storage for entity-chunk tracking (used for orphan detection)
+        text_chunks_storage: Optional KV storage for text chunks (doc_chunks)
+        chunks_vdb: Optional vector storage for chunk embeddings
     """
     relation_str = f"{source_entity} -> {target_entity}"
     # Normalize entity order for undirected graph (ensures consistent key generation)
@@ -299,18 +473,42 @@ async def adelete_by_relation(
                     status_code=404,
                 )
 
-            # Clean up chunk tracking storage before deletion
+            # Collect chunk_ids BEFORE deleting relation_chunks mapping
+            relation_chunk_ids = []
+            normalized_src, normalized_tgt = sorted([source_entity, target_entity])
+
             if relation_chunks_storage is not None:
                 from .utils import make_relation_chunk_key
-
-                # Normalize entity order for consistent key generation
-                normalized_src, normalized_tgt = sorted([source_entity, target_entity])
                 storage_key = make_relation_chunk_key(normalized_src, normalized_tgt)
 
+                try:
+                    rel_data = await relation_chunks_storage.get_by_id(storage_key)
+                    if rel_data:
+                        relation_chunk_ids = rel_data.get("chunk_ids", [])
+                        if isinstance(relation_chunk_ids, str):
+                            import json
+                            relation_chunk_ids = json.loads(relation_chunk_ids)
+                except Exception as e:
+                    logger.debug(f"Failed to get chunk_ids for relation '{storage_key}': {e}")
+
+                # Now delete the chunk tracking entry
                 await relation_chunks_storage.delete([storage_key])
                 logger.info(
                     f"Relation Delete: removed chunk tracking for `{source_entity}`~`{target_entity}`"
                 )
+
+            # Fallback: if relation_chunks mapping is missing, get chunk_ids from graph edge's source_id
+            if not relation_chunk_ids:
+                try:
+                    edge_data = await chunk_entity_relation_graph.get_edge(source_entity, target_entity)
+                    if edge_data:
+                        edge_source_id = edge_data.get("source_id", "")
+                        if edge_source_id:
+                            relation_chunk_ids = [cid for cid in edge_source_id.split(GRAPH_FIELD_SEP) if cid]
+                            if relation_chunk_ids:
+                                logger.info(f"Relation Delete: recovered {len(relation_chunk_ids)} chunk_ids from graph edge source_id")
+                except Exception as e:
+                    logger.debug(f"Failed to get source_id from graph edge: {e}")
 
             # Delete relation from vector database
             rel_ids_to_delete = [
@@ -325,7 +523,34 @@ async def adelete_by_relation(
                 [(source_entity, target_entity)]
             )
 
-            message = f"Relation Delete: `{source_entity}`~`{target_entity}` deleted successfully"
+            # Delete orphaned chunks (chunks not referenced by any remaining entity/relation)
+            orphan_count = 0
+            if relation_chunk_ids and (text_chunks_storage or chunks_vdb):
+                orphan_ids = await _find_orphan_chunks(
+                    list(set(relation_chunk_ids)),
+                    entity_chunks_storage,
+                    relation_chunks_storage,
+                )
+                if orphan_ids:
+                    orphan_count = len(orphan_ids)
+                    if text_chunks_storage:
+                        await text_chunks_storage.delete(orphan_ids)
+                    if chunks_vdb:
+                        await chunks_vdb.delete(orphan_ids)
+                    logger.info(
+                        f"Relation Delete: removed {orphan_count} orphaned chunks for `{source_entity}`~`{target_entity}`"
+                    )
+
+            # Invalidate LLM query cache
+            if llm_response_cache is not None:
+                try:
+                    await llm_response_cache.drop()
+                    await llm_response_cache.index_done_callback()
+                    logger.info("Relation Delete: invalidated LLM query cache for workspace")
+                except Exception as e:
+                    logger.error(f"Relation Delete: failed to invalidate LLM cache: {e}")
+
+            message = f"Relation Delete: `{source_entity}`~`{target_entity}` deleted successfully, {orphan_count} orphaned chunks removed"
             logger.info(message)
             await _persist_graph_updates(
                 relationships_vdb=relationships_vdb,

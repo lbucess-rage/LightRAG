@@ -3045,6 +3045,42 @@ class PGVectorStorage(BaseVectorStorage):
         # PG handles persistence automatically
         pass
 
+    async def update_chunk_content(self, chunk_updates: dict[str, str]) -> int:
+        """Update chunk content and re-embed vectors for modified chunks.
+
+        Args:
+            chunk_updates: dict mapping chunk_id -> new_content
+
+        Returns:
+            Number of chunks updated
+        """
+        if not chunk_updates:
+            return 0
+
+        updated = 0
+        for chunk_id, new_content in chunk_updates.items():
+            try:
+                # Re-embed the new content
+                embeddings = await self.embedding_func([new_content])
+                new_vector = embeddings[0]
+                vector_json = json.dumps(new_vector.tolist())
+
+                # Update VDB_CHUNKS
+                update_sql = """UPDATE LIGHTRAG_VDB_CHUNKS
+                              SET content=$1, content_vector=$2, update_time=CURRENT_TIMESTAMP
+                              WHERE workspace=$3 AND id=$4"""
+                await self.db.execute(update_sql, {
+                    "content": new_content,
+                    "vector": vector_json,
+                    "workspace": self.workspace,
+                    "id": chunk_id,
+                })
+                updated += 1
+            except Exception as e:
+                logger.error(f"Failed to update chunk {chunk_id}: {e}")
+
+        return updated
+
     async def delete(self, ids: list[str]) -> None:
         """Delete vectors with specified IDs from the storage.
 
@@ -3105,7 +3141,7 @@ class PGVectorStorage(BaseVectorStorage):
                             WHERE workspace=$1 AND (source_id=$2 OR target_id=$2)"""
 
             await self.db.execute(
-                delete_sql, {"workspace": self.workspace, "entity_name": entity_name}
+                delete_sql, {"workspace": self.workspace, "entity": entity_name}
             )
             logger.debug(
                 f"[{self.workspace}] Successfully deleted relations for entity {entity_name}"

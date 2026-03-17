@@ -8,7 +8,7 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 VENV_DIR="$PROJECT_DIR/.venv"
 LOG_FILE="/tmp/lightrag-server.log"
 PID_FILE="/tmp/lightrag-server.pid"
-HEALTH_URL="http://localhost:9621/health"
+HEALTH_URL="http://localhost:9422/health"
 MAX_WAIT=60  # Maximum seconds to wait for server startup
 
 cd "$PROJECT_DIR"

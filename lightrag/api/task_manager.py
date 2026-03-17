@@ -184,16 +184,22 @@ class TaskService:
     async def update_progress(
         self,
         task_id: str,
-        progress: float,
+        progress: Optional[float] = None,
         message: str = "",
         detail: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Update task progress and notify subscribers."""
+        """Update task progress and notify subscribers.
+
+        Args:
+            progress: If None, keep current progress value (message-only update).
+        """
         task = self._registry.get_task(task_id)
         if not task:
             return
 
-        task.progress = min(progress, 100.0)
+        if progress is not None:
+            task.progress = min(progress, 100.0)
+        progress = task.progress  # Use current value for logging
         task.message = message
         if task.status == TaskStatus.PENDING:
             task.status = TaskStatus.RUNNING

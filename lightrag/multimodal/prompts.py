@@ -24,11 +24,18 @@ PROMPTS["image_classification_prompt"] = """Classify this image into one of two 
 
 **meaningful**: Technical diagrams, photographs, charts, graphs, schematics,
 annotated images, screenshots with content, warning signs, procedure illustrations,
-or any image that conveys substantive information.
+or any image that conveys substantive technical information unique to a specific section.
 
 **decorative**: Bullet points, list markers, divider lines, header/footer bars,
 logos, brand icons, page numbers, version labels, location pin icons,
-arrows used as list markers, or any small decorative/navigational element.
+arrows used as list markers, document title images, cover page images,
+section title banners, chapter heading images, organization logos,
+document version/revision labels, or any small decorative/navigational element.
+
+Key rules:
+- An image that primarily shows a document title or heading text → decorative
+- An image showing only an organization name/logo → decorative
+- An image repeated across multiple pages (e.g., page headers) → decorative
 
 Respond with ONLY one word: meaningful or decorative"""
 
@@ -38,19 +45,25 @@ PROMPTS["image_classification_with_page_prompt"] = """You are given two images:
 
 Based on the element's role and context within the document page, classify it:
 
-**meaningful**: Technical diagrams, photographs, charts, graphs, schematics,
-annotated images, screenshots with content, procedure illustrations,
-or any image that conveys substantive information worth indexing.
+**meaningful**: Technical diagrams, photographs showing equipment/procedures,
+charts, graphs, schematics, annotated images with technical details,
+procedure illustrations with step-by-step instructions,
+or any image that conveys substantive technical information unique to a specific section.
 
 **decorative**: Bullet points, list markers, divider lines, header/footer bars,
 logos, brand icons, page numbers, version labels, small icons used as
 list markers or navigation aids, position indicator icons, arrows used
-as list markers, or any small decorative/layout element.
+as list markers, document title/cover images, section heading banners,
+chapter title images, organization logos, document version labels,
+or any small decorative/layout element.
 
 Key judgment criteria:
 - Small icons repeated across pages in the same position → decorative
 - Tiny elements used alongside text as markers or indicators → decorative
-- Large images that illustrate procedures, components, or data → meaningful
+- Images showing only a document title, heading text, or cover design → decorative
+- Images showing only an organization name or logo → decorative
+- Images at the very top of a page that serve as page banners → decorative
+- Large images that illustrate specific procedures, components, or data → meaningful
 
 Respond with ONLY one word: meaningful or decorative"""
 

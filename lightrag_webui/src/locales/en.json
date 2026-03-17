@@ -39,6 +39,7 @@
   },
   "common": {
     "cancel": "Cancel",
+    "back": "Back",
     "save": "Save",
     "saving": "Saving...",
     "saveFailed": "Save failed",
@@ -63,6 +64,16 @@
       "cacheClearFailed": "Failed to clear cache:\n{{error}}",
       "failed": "Clear Documents Failed:\n{{message}}",
       "error": "Clear Documents Failed:\n{{error}}"
+    },
+    "clearLLMCache": {
+      "button": "Clear Cache",
+      "tooltip": "Clear LLM response cache",
+      "title": "Clear LLM Cache",
+      "description": "This will delete all cached LLM responses. After clearing, the same queries will generate fresh responses from the LLM.",
+      "confirmButton": "Clear",
+      "clearing": "Clearing...",
+      "success": "LLM cache cleared successfully",
+      "error": "Failed to clear cache: {{error}}"
     },
     "deleteDocuments": {
       "button": "Delete",
@@ -756,6 +767,20 @@
   "entityManagement": {
     "cascadeDelete": "Full delete (recommended)",
     "graphOnlyDelete": "Graph only delete",
+    "deleteDialog": {
+      "title": "Select Delete Scope",
+      "entityDescription": "Delete entity '{{entityId}}'. Choose the deletion scope.",
+      "relationDescription": "Delete relation '{{sourceId}}' → '{{targetId}}'. Choose the deletion scope.",
+      "cascadeButton": "Full Delete (Recommended)",
+      "cascadeDescription": "Delete graph nodes, vector embeddings, chunk mappings, and invalidate related cache.",
+      "graphOnlyButton": "Graph Only",
+      "graphOnlyDescription": "Only remove from graph. Vector embeddings and chunk mappings are preserved.",
+      "loadingRelated": "Searching related entities...",
+      "relatedFound": "Found {{count}} entities with similar names. Select items to delete together.",
+      "noRelated": "No related entities found. Only the selected entity will be deleted.",
+      "selectAll": "Select All",
+      "confirmDelete": "Delete {{count}} items"
+    },
     "tabs": {
       "entities": "Entity Explorer",
       "relations": "Relation Explorer"
@@ -770,6 +795,7 @@
       "confirmDeleteCascade": "Delete '{{entityId}}' with all associated vector embeddings and chunk mappings.",
       "confirmDeleteGraphOnly": "Delete '{{entityId}}' from graph only. Vector embeddings and chunk mappings will be preserved.",
       "deleteSuccess": "Entity '{{entityId}}' has been deleted",
+      "batchDeleteSuccess": "{{deleted}}/{{total}} entities have been deleted",
       "deleteFailed": "Failed to delete entity",
       "columns": {
         "entityId": "Entity",

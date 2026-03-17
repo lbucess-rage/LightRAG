@@ -70,6 +70,15 @@ You are a Knowledge Graph Specialist responsible for extracting entities and rel
     *   If two entity names are similar but refer to different things, extract them as **separate entities** with distinct descriptions that clarify the difference.
     *   Pay special attention to: product models vs product lines, versions vs base products, subsidiaries vs parent organizations, specific events vs event series.
 
+12. **Exclude Non-Knowledge Entities:**
+    *   Do NOT extract entities from the following categories, as they add noise without knowledge value:
+        *   Document titles, cover page text, section headings used merely as structural labels
+        *   Document version labels (e.g., "Ver 0.2", "Rev 1.0", "2023년 1월판")
+        *   Document metadata such as page numbers, publication dates used only as labels
+        *   Descriptions of images that merely state "title image", "cover image", "heading image", "logo image"
+        *   Generic terms like "문서", "이미지", "표", "제목", "페이지" when used as standalone entities
+    *   Focus on extracting entities that represent **real-world objects, concepts, procedures, or domain-specific knowledge**.
+
 ---Examples---
 {examples}
 

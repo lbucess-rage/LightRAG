@@ -76,6 +76,81 @@ class ImageModalProcessor(BaseModalProcessor):
             logger.warning(f"Image classification failed, defaulting to decorative: {e}")
             return "decorative"
 
+    @staticmethod
+    def _is_non_knowledge_image(entity_info: Dict[str, Any], description: str) -> bool:
+        """Check if VLM analysis result indicates a non-knowledge image.
+
+        Filters out images that VLM classified as meaningful but are actually
+        logos, title images, icons, headings, or other non-informational content.
+
+        Args:
+            entity_info: Dict with entity_name, entity_type, summary
+            description: VLM-generated description text
+
+        Returns:
+            True if the image should be skipped (non-knowledge content)
+        """
+        entity_name = (entity_info.get("entity_name") or "").lower()
+        summary = (entity_info.get("summary") or "").lower()
+
+        # Patterns that indicate non-knowledge images
+        # Check entity name for explicit non-knowledge indicators
+        skip_name_patterns = [
+            "로고",           # logo
+            "아이콘",         # icon
+            "제목 이미지",    # title image
+            "제목이미지",
+            "제목 (",         # title followed by type marker e.g. "메뉴얼 제목 (image)"
+            "표지",           # cover page
+            "헤더",           # header
+            "푸터",           # footer
+            "워터마크",       # watermark
+            "브랜드",         # brand
+            "배너",           # banner
+            "레이블",         # label (e.g. version label, model label)
+            "라벨",           # label (alternate spelling)
+            "식별 마커",      # identification marker
+            "위치 마커",      # location marker
+            "logo",
+            "icon",
+            "title image",
+            "title (",
+            "cover image",
+            "heading image",
+            "brand",
+            "watermark",
+            "banner",
+            "label (",
+            "marker",
+        ]
+
+        for pattern in skip_name_patterns:
+            if pattern in entity_name:
+                return True
+
+        # Check if entity name ends with common non-knowledge suffixes
+        # e.g., "한국자동차환경협회 로고 (image)" → contains "로고"
+        # Already covered above
+
+        # Check summary for non-knowledge indicators
+        skip_summary_patterns = [
+            "식별 로고",       # identification logo
+            "기업 로고",       # company logo
+            "기관 로고",       # organization logo
+            "브랜드 로고",     # brand logo
+            "문서의 제목을 나타",  # represents document title
+            "문서 제목 이미지",
+            "장식적 요소",     # decorative element
+            "위치 표시 아이콘",  # location indicator icon
+            "탐색 아이콘",     # navigation icon
+        ]
+
+        for pattern in skip_summary_patterns:
+            if pattern in summary:
+                return True
+
+        return False
+
     async def generate_description_only(
         self,
         modal_content,
@@ -275,6 +350,25 @@ class ImageModalProcessor(BaseModalProcessor):
                 return None  # Propagate skip signal (decorative image)
 
             enhanced_caption, entity_info = result
+
+            # === Stage 2: Post-VLM content filter ===
+            # Skip images whose VLM analysis indicates non-knowledge content
+            # (logos, title images, icons, decorative headings)
+            if self._is_non_knowledge_image(entity_info, enhanced_caption):
+                display_path = ""
+                if isinstance(modal_content, dict):
+                    display_path = modal_content.get("img_path", "")
+                elif isinstance(modal_content, str):
+                    try:
+                        display_path = json.loads(modal_content).get("img_path", "")
+                    except (json.JSONDecodeError, AttributeError):
+                        pass
+                logger.info(
+                    f"Image filtered as non-knowledge content, skipping: "
+                    f"{entity_info.get('entity_name', '?')} "
+                    f"(page {item_info.get('page_idx') if item_info else '?'}, path: {display_path})"
+                )
+                return None
 
             if isinstance(modal_content, str):
                 try:

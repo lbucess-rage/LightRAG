@@ -124,9 +124,33 @@ class RelationsResponse(BaseModel):
     pagination: PaginationInfo
 
 
+class RelatedEntityItem(BaseModel):
+    entity_id: str
+    entity_type: Optional[str] = None
+    description: Optional[str] = None
+    degree: int = 0
+
+
+class RelatedEntitiesResponse(BaseModel):
+    related: List[RelatedEntityItem]
+    total: int
+
+
 class DeleteEntityResponse(BaseModel):
     status: str
     message: str
+
+
+class BatchDeleteRequest(BaseModel):
+    entity_ids: List[str] = Field(..., description="List of entity IDs to delete")
+    cascade: bool = Field(default=True, description="If true, also delete vector embeddings and chunk mappings")
+
+
+class BatchDeleteResponse(BaseModel):
+    status: str
+    message: str
+    deleted: int
+    failed: int
 
 
 class DeleteRelationRequest(BaseModel):
@@ -252,6 +276,119 @@ def create_entity_management_routes(rag, api_key: Optional[str] = None):
                 status_code=500, detail=f"Error getting relations: {str(e)}"
             )
 
+    @router.get("/entities/{entity_id}/related", dependencies=[Depends(combined_auth)])
+    async def get_related_entities(
+        http_request: Request,
+        entity_id: str,
+    ):
+        """
+        Find entities with similar names to the given entity.
+        Used to suggest related entities for batch deletion.
+        """
+        try:
+            workspace = _get_workspace_from_request(http_request)
+            workspace_rag = await get_workspace_rag(workspace)
+            if workspace_rag is None:
+                workspace_rag = rag
+
+            graph_storage = workspace_rag.chunk_entity_relation_graph
+
+            # Extract core keywords from entity name (remove common suffixes like (image), (table))
+            import re
+            core_name = re.sub(r'\s*\((?:image|table|equation)\)\s*$', '', entity_id, flags=re.IGNORECASE).strip()
+            # Use the longest meaningful segment (at least 4 chars)
+            if len(core_name) < 4:
+                core_name = entity_id
+
+            # Search for entities containing the core name
+            result = await graph_storage.get_entities_paginated(
+                page=1,
+                page_size=50,
+                search=core_name,
+            )
+
+            related = []
+            for entity in result.get("entities", []):
+                eid = entity.get("entity_id", "")
+                if eid != entity_id:  # Exclude the entity itself
+                    related.append(RelatedEntityItem(
+                        entity_id=eid,
+                        entity_type=entity.get("entity_type"),
+                        description=entity.get("description", "")[:100] if entity.get("description") else None,
+                        degree=entity.get("degree", 0),
+                    ))
+
+            return RelatedEntitiesResponse(related=related, total=len(related))
+        except Exception as e:
+            logger.error(f"Error finding related entities for '{entity_id}': {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @router.post("/entities/batch-delete", dependencies=[Depends(combined_auth)])
+    async def batch_delete_entities(
+        http_request: Request,
+        request: BatchDeleteRequest,
+    ):
+        """
+        Delete multiple entities in batch.
+        """
+        try:
+            workspace = _get_workspace_from_request(http_request)
+            workspace_rag = await get_workspace_rag(workspace)
+            if workspace_rag is None:
+                workspace_rag = rag
+
+            deleted = 0
+            failed = 0
+            messages = []
+
+            for entity_id in request.entity_ids:
+                try:
+                    if request.cascade:
+                        from lightrag.utils_graph import adelete_by_entity
+
+                        result = await adelete_by_entity(
+                            chunk_entity_relation_graph=workspace_rag.chunk_entity_relation_graph,
+                            entities_vdb=workspace_rag.entities_vdb,
+                            relationships_vdb=workspace_rag.relationships_vdb,
+                            entity_name=entity_id,
+                            entity_chunks_storage=workspace_rag.entity_chunks,
+                            relation_chunks_storage=workspace_rag.relation_chunks,
+                            text_chunks_storage=workspace_rag.text_chunks,
+                            chunks_vdb=workspace_rag.chunks_vdb,
+                            llm_response_cache=workspace_rag.llm_response_cache,
+                        )
+                        if result.status_code == 200:
+                            deleted += 1
+                            messages.append(result.message)
+                        else:
+                            failed += 1
+                            messages.append(f"Failed: {entity_id} - {result.message}")
+                    else:
+                        graph_storage = workspace_rag.chunk_entity_relation_graph
+                        if await graph_storage.has_node(entity_id):
+                            await graph_storage.delete_node(entity_id)
+                            deleted += 1
+                        else:
+                            failed += 1
+                            messages.append(f"Not found: {entity_id}")
+                except Exception as e:
+                    failed += 1
+                    messages.append(f"Error: {entity_id} - {str(e)}")
+                    logger.error(f"Batch delete error for '{entity_id}': {str(e)}")
+
+            summary = f"Batch delete: {deleted} deleted, {failed} failed out of {len(request.entity_ids)}"
+            logger.info(summary)
+            return BatchDeleteResponse(
+                status="success" if failed == 0 else "partial",
+                message=summary,
+                deleted=deleted,
+                failed=failed,
+            )
+        except Exception as e:
+            logger.error(f"Error in batch delete: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+
     @router.delete("/entities/{entity_id}", dependencies=[Depends(combined_auth)])
     async def delete_entity(
         http_request: Request,
@@ -299,6 +436,7 @@ def create_entity_management_routes(rag, api_key: Optional[str] = None):
                     relation_chunks_storage=workspace_rag.relation_chunks,
                     text_chunks_storage=workspace_rag.text_chunks,
                     chunks_vdb=workspace_rag.chunks_vdb,
+                    llm_response_cache=workspace_rag.llm_response_cache,
                 )
                 if result.status_code != 200:
                     raise HTTPException(status_code=result.status_code, detail=result.message)
@@ -363,6 +501,10 @@ def create_entity_management_routes(rag, api_key: Optional[str] = None):
                     source_entity=request.source_id,
                     target_entity=request.target_id,
                     relation_chunks_storage=workspace_rag.relation_chunks,
+                    entity_chunks_storage=workspace_rag.entity_chunks,
+                    text_chunks_storage=workspace_rag.text_chunks,
+                    chunks_vdb=workspace_rag.chunks_vdb,
+                    llm_response_cache=workspace_rag.llm_response_cache,
                 )
                 if result.status_code != 200:
                     raise HTTPException(status_code=result.status_code, detail=result.message)

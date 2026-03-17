@@ -16,6 +16,7 @@ import EmptyCard from '@/components/ui/EmptyCard'
 import Checkbox from '@/components/ui/Checkbox'
 import UploadDocumentsDialog from '@/components/documents/UploadDocumentsDialog'
 import ClearDocumentsDialog from '@/components/documents/ClearDocumentsDialog'
+import ClearLLMCacheDialog from '@/components/documents/ClearLLMCacheDialog'
 import DeleteDocumentsDialog from '@/components/documents/DeleteDocumentsDialog'
 import PaginationControls from '@/components/ui/PaginationControls'
 
@@ -1348,6 +1349,7 @@ export default function DocumentManager() {
             ) : !isSelectionMode ? (
               <ClearDocumentsDialog onDocumentsCleared={handleDocumentsCleared} />
             ) : null}
+            <ClearLLMCacheDialog />
             <URLIngestDialog onDocumentsUploaded={fetchDocuments} />
             <BoardIngestDialog onDocumentsUploaded={fetchDocuments} />
             <MultimodalUploadDialog onDocumentsUploaded={fetchDocuments} />

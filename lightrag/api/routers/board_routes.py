@@ -1021,6 +1021,8 @@ async def _process_document_attachment(
     document_prompt: str = "",
     image_prompt: str = "",
     table_prompt: str = "",
+    task_id: str = None,
+    task_service=None,
 ) -> Dict[str, Any]:
     """Process a document attachment (PDF, DOCX, etc.) using the multimodal pipeline.
 
@@ -1095,6 +1097,16 @@ async def _process_document_attachment(
         result["text_blocks"] = len(text_blocks)
         result["multimodal_blocks"] = len(multimodal_blocks)
 
+        # Update task: parsing complete
+        if task_id and task_service:
+            try:
+                await task_service.update_progress(
+                    task_id, None,
+                    f"Parsed {att_name}: {len(text_blocks)} text + {len(multimodal_blocks)} multimodal blocks",
+                )
+            except Exception:
+                pass
+
         # 4. Insert text
         doc_id = None
         if text_blocks:
@@ -1107,6 +1119,21 @@ async def _process_document_attachment(
                 doc_id = compute_mdhash_id(cleaned_text, prefix="doc-")
                 await rag.ainsert(combined_text, ids=[doc_id], file_paths=[file_label])
                 logger.info(f"Inserted {len(text_blocks)} text blocks from attachment {att_name} (doc_id={doc_id})")
+
+                # If multimodal blocks exist, revert status to PROCESSING
+                # (ainsert marks it PROCESSED, but multimodal processing is not done yet)
+                # Use direct SQL since doc_status.upsert() requires all fields
+                if multimodal_blocks and hasattr(rag.doc_status, 'db'):
+                    try:
+                        sql = """UPDATE LIGHTRAG_DOC_STATUS
+                                 SET status='processing', updated_at=CURRENT_TIMESTAMP
+                                 WHERE workspace=$1 AND id=$2"""
+                        await rag.doc_status.db.execute(
+                            sql, {"workspace": rag.doc_status.workspace, "id": doc_id}
+                        )
+                        logger.info(f"Reverted doc_status to PROCESSING for multimodal: {doc_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to revert doc_status to PROCESSING: {e}")
 
         if not doc_id:
             doc_id = compute_mdhash_id(att_name + att_url, prefix="doc-")
@@ -1203,12 +1230,23 @@ async def _process_document_attachment(
                 )
 
             # Process each multimodal block
+            total_blocks = len(multimodal_blocks)
             page_analyses: dict[int, list[dict]] = {}
             for i, block in enumerate(multimodal_blocks):
                 content_type = block.get("type", "")
                 processor = processors.get(content_type)
                 if not processor:
                     continue
+
+                # Update task progress for multimodal processing
+                if task_id and task_service:
+                    try:
+                        await task_service.update_progress(
+                            task_id, None,
+                            f"Multimodal: {content_type} {i+1}/{total_blocks} (page {block.get('page_idx', '?')}) - {att_name}",
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to update task progress: {e}")
 
                 try:
                     current_page = block.get("page_idx", 0)
@@ -1241,17 +1279,18 @@ async def _process_document_attachment(
                         f"Multimodal processing failed ({content_type}, page {block.get('page_idx', '?')}): {str(e)}"
                     )
 
-        # 7. Mark as processed
-        try:
-            import datetime
-            from datetime import timezone
-            from lightrag.base import DocStatus
-            await rag.doc_status.upsert({doc_id: {
-                "status": DocStatus.PROCESSED,
-                "updated_at": datetime.datetime.now(timezone.utc).isoformat(),
-            }})
-        except Exception:
-            pass
+        # 7. Mark as processed (use direct SQL since upsert requires all fields)
+        if doc_id and hasattr(rag.doc_status, 'db'):
+            try:
+                sql = """UPDATE LIGHTRAG_DOC_STATUS
+                         SET status='processed', updated_at=CURRENT_TIMESTAMP
+                         WHERE workspace=$1 AND id=$2"""
+                await rag.doc_status.db.execute(
+                    sql, {"workspace": rag.doc_status.workspace, "id": doc_id}
+                )
+                logger.info(f"Document attachment marked as processed: {doc_id}")
+            except Exception as e:
+                logger.warning(f"Failed to mark document as processed: {e}")
 
         result["success"] = True
 
@@ -1284,6 +1323,8 @@ async def _process_board_item(
     table_prompt: str = "",
     process_documents: bool = True,
     parser: str = "docling",
+    task_id: str = None,
+    task_service=None,
 ) -> Dict[str, Any]:
     """Process a single board item: parse HTML body, insert text, handle multimodal + attachments."""
     from lightrag.url.parser import HTMLParser
@@ -1723,6 +1764,8 @@ async def _process_board_item(
                     document_prompt=document_prompt,
                     image_prompt=image_prompt,
                     table_prompt=table_prompt,
+                    task_id=task_id,
+                    task_service=task_service,
                 )
                 if doc_result.get("success"):
                     result["documents_processed"] += 1
@@ -1968,6 +2011,8 @@ async def _ingest_board_background(
                         table_prompt=body.table_prompt or "",
                         process_documents=body.process_documents,
                         parser=body.parser or "docling",
+                        task_id=task_id,
+                        task_service=service,
                     )
 
                     if item_result["success"]:

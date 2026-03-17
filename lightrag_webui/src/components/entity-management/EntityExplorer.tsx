@@ -14,8 +14,11 @@ import {
   TableRow
 } from '@/components/ui/Table'
 import PaginationControls from '@/components/ui/PaginationControls'
-import { SearchIcon, RefreshCwIcon, ArrowUpIcon, ArrowDownIcon, Trash2Icon, Loader2Icon } from 'lucide-react'
+import Checkbox from '@/components/ui/Checkbox'
+import { SearchIcon, RefreshCwIcon, ArrowUpIcon, ArrowDownIcon, Trash2Icon, Loader2Icon, AlertTriangleIcon, Network } from 'lucide-react'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/Dialog'
 import { toast } from 'sonner'
+import { getRelatedEntities, batchDeleteEntities, RelatedEntityItem } from '@/api/lightrag'
 
 // Debounce hook
 function useDebounce<T>(value: T, delay: number): T {
@@ -38,6 +41,15 @@ export default function EntityExplorer() {
   const { t } = useTranslation()
   const [searchInput, setSearchInput] = useState('')
   const [deleteLoading, setDeleteLoading] = useState<string | null>(null)
+  const [deleteDialog, setDeleteDialog] = useState<{
+    open: boolean
+    entityId: string | null
+    step: 'choose' | 'related'
+    cascade: boolean
+    relatedEntities: RelatedEntityItem[]
+    selectedRelated: Set<string>
+    loadingRelated: boolean
+  }>({ open: false, entityId: null, step: 'choose', cascade: true, relatedEntities: [], selectedRelated: new Set(), loadingRelated: false })
 
   // Store state
   const entities = useEntityManagementStore.use.entities()
@@ -106,33 +118,86 @@ export default function EntityExplorer() {
     selectEntity(entityId)
   }, [selectEntity])
 
-  const handleDelete = useCallback(async (e: React.MouseEvent, entityId: string) => {
+  const handleDelete = useCallback((e: React.MouseEvent, entityId: string) => {
     e.stopPropagation()
+    setDeleteDialog({ open: true, entityId, step: 'choose', cascade: true, relatedEntities: [], selectedRelated: new Set(), loadingRelated: false })
+  }, [])
 
-    // Ask cascade or graph-only via confirm/cancel pattern
-    const cascadeMsg = t('entityManagement.entityExplorer.confirmDeleteCascade', { entityId })
-    const graphOnlyMsg = t('entityManagement.entityExplorer.confirmDeleteGraphOnly', { entityId })
-    const cascade = window.confirm(
-      `${cascadeMsg}\n\n[OK] = ${t('entityManagement.cascadeDelete')}\n[Cancel] = ${t('entityManagement.graphOnlyDelete')}`
-    )
+  const handleChooseScope = useCallback(async (cascade: boolean) => {
+    const entityId = deleteDialog.entityId
+    if (!entityId) return
 
-    // If user pressed Cancel on cascade prompt, ask if they want graph-only
-    let proceed = true
     if (!cascade) {
-      proceed = window.confirm(graphOnlyMsg)
-      if (!proceed) return
+      // Graph-only: just delete directly, no need to check related
+      setDeleteDialog(prev => ({ ...prev, open: false }))
+      setDeleteLoading(entityId)
+      try {
+        await removeEntity(entityId, false)
+        toast.success(t('entityManagement.entityExplorer.deleteSuccess', { entityId }))
+      } catch (error) {
+        toast.error(t('entityManagement.entityExplorer.deleteFailed'))
+      } finally {
+        setDeleteLoading(null)
+      }
+      return
     }
 
+    // Cascade: fetch related entities first
+    setDeleteDialog(prev => ({ ...prev, cascade: true, loadingRelated: true, step: 'related' }))
+    try {
+      const result = await getRelatedEntities(entityId)
+      setDeleteDialog(prev => ({
+        ...prev,
+        relatedEntities: result.related,
+        selectedRelated: new Set(), // none selected by default
+        loadingRelated: false,
+      }))
+    } catch {
+      // If related fetch fails, proceed with single delete
+      setDeleteDialog(prev => ({ ...prev, relatedEntities: [], loadingRelated: false }))
+    }
+  }, [deleteDialog.entityId, removeEntity, t])
+
+  const toggleRelatedEntity = useCallback((eid: string) => {
+    setDeleteDialog(prev => {
+      const next = new Set(prev.selectedRelated)
+      if (next.has(eid)) next.delete(eid)
+      else next.add(eid)
+      return { ...prev, selectedRelated: next }
+    })
+  }, [])
+
+  const toggleAllRelated = useCallback((checked: boolean) => {
+    setDeleteDialog(prev => ({
+      ...prev,
+      selectedRelated: checked ? new Set(prev.relatedEntities.map(e => e.entity_id)) : new Set(),
+    }))
+  }, [])
+
+  const executeDelete = useCallback(async () => {
+    const entityId = deleteDialog.entityId
+    if (!entityId) return
+
+    const idsToDelete = [entityId, ...Array.from(deleteDialog.selectedRelated)]
+    setDeleteDialog(prev => ({ ...prev, open: false }))
     setDeleteLoading(entityId)
     try {
-      await removeEntity(entityId, cascade)
-      toast.success(t('entityManagement.entityExplorer.deleteSuccess', { entityId }))
+      if (idsToDelete.length === 1) {
+        await removeEntity(entityId, deleteDialog.cascade)
+        toast.success(t('entityManagement.entityExplorer.deleteSuccess', { entityId }))
+      } else {
+        const result = await batchDeleteEntities(idsToDelete, deleteDialog.cascade)
+        toast.success(t('entityManagement.entityExplorer.batchDeleteSuccess', { deleted: result.deleted, total: idsToDelete.length }))
+        // Refresh after batch delete
+        await fetchEntities(pagination.page)
+        await fetchEntityTypes()
+      }
     } catch (error) {
       toast.error(t('entityManagement.entityExplorer.deleteFailed'))
     } finally {
       setDeleteLoading(null)
     }
-  }, [removeEntity, t])
+  }, [deleteDialog, removeEntity, t, fetchEntities, fetchEntityTypes, pagination.page])
 
   const SortIcon = ({ field }: { field: string }) => {
     if (sortField !== field) return null
@@ -286,6 +351,114 @@ export default function EntityExplorer() {
           compact
         />
       </div>
+
+      <Dialog open={deleteDialog.open} onOpenChange={(open) => !open && setDeleteDialog(prev => ({ ...prev, open: false }))}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangleIcon className="h-5 w-5 text-destructive" />
+              {t('entityManagement.deleteDialog.title')}
+            </DialogTitle>
+            <DialogDescription className="pt-2">
+              {t('entityManagement.deleteDialog.entityDescription', { entityId: deleteDialog.entityId })}
+            </DialogDescription>
+          </DialogHeader>
+
+          {deleteDialog.step === 'choose' && (
+            <div className="flex flex-col gap-3 py-2">
+              <Button
+                variant="destructive"
+                className="w-full justify-start gap-3 h-auto py-3 px-4"
+                onClick={() => handleChooseScope(true)}
+              >
+                <Trash2Icon className="h-5 w-5 shrink-0" />
+                <div className="text-left">
+                  <div className="font-semibold">{t('entityManagement.deleteDialog.cascadeButton')}</div>
+                  <div className="text-xs font-normal opacity-80">{t('entityManagement.deleteDialog.cascadeDescription')}</div>
+                </div>
+              </Button>
+              <Button
+                variant="outline"
+                className="w-full justify-start gap-3 h-auto py-3 px-4"
+                onClick={() => handleChooseScope(false)}
+              >
+                <Network className="h-5 w-5 shrink-0" />
+                <div className="text-left">
+                  <div className="font-semibold">{t('entityManagement.deleteDialog.graphOnlyButton')}</div>
+                  <div className="text-xs font-normal opacity-70">{t('entityManagement.deleteDialog.graphOnlyDescription')}</div>
+                </div>
+              </Button>
+            </div>
+          )}
+
+          {deleteDialog.step === 'related' && (
+            <div className="flex flex-col gap-3 py-2">
+              {deleteDialog.loadingRelated ? (
+                <div className="flex items-center justify-center py-4">
+                  <Loader2Icon className="h-5 w-5 animate-spin mr-2" />
+                  {t('entityManagement.deleteDialog.loadingRelated')}
+                </div>
+              ) : deleteDialog.relatedEntities.length > 0 ? (
+                <>
+                  <div className="text-sm text-muted-foreground">
+                    {t('entityManagement.deleteDialog.relatedFound', { count: deleteDialog.relatedEntities.length })}
+                  </div>
+                  <div className="border rounded-md max-h-[240px] overflow-auto">
+                    <div className="flex items-center gap-2 px-3 py-2 border-b bg-muted/50">
+                      <Checkbox
+                        checked={deleteDialog.selectedRelated.size === deleteDialog.relatedEntities.length && deleteDialog.relatedEntities.length > 0}
+                        onCheckedChange={(checked: boolean | 'indeterminate') => toggleAllRelated(checked === true)}
+                      />
+                      <span className="text-xs font-medium text-muted-foreground">
+                        {t('entityManagement.deleteDialog.selectAll')} ({deleteDialog.selectedRelated.size}/{deleteDialog.relatedEntities.length})
+                      </span>
+                    </div>
+                    {deleteDialog.relatedEntities.map((entity) => (
+                      <div
+                        key={entity.entity_id}
+                        className="flex items-start gap-2 px-3 py-2 border-b last:border-b-0 hover:bg-muted/30 cursor-pointer"
+                        onClick={() => toggleRelatedEntity(entity.entity_id)}
+                      >
+                        <Checkbox
+                          checked={deleteDialog.selectedRelated.has(entity.entity_id)}
+                          onCheckedChange={() => toggleRelatedEntity(entity.entity_id)}
+                          className="mt-0.5"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium truncate">{entity.entity_id}</div>
+                          <div className="text-xs text-muted-foreground truncate">{entity.description || '-'}</div>
+                        </div>
+                        <span className="px-1.5 py-0.5 rounded text-xs bg-muted shrink-0">{entity.entity_type || '-'}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="text-sm text-muted-foreground py-2">
+                  {t('entityManagement.deleteDialog.noRelated')}
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter className="gap-2">
+            {deleteDialog.step === 'related' && (
+              <Button variant="ghost" onClick={() => setDeleteDialog(prev => ({ ...prev, step: 'choose' }))}>
+                {t('common.back')}
+              </Button>
+            )}
+            <div className="flex-1" />
+            <Button variant="ghost" onClick={() => setDeleteDialog(prev => ({ ...prev, open: false }))}>
+              {t('common.cancel')}
+            </Button>
+            {deleteDialog.step === 'related' && (
+              <Button variant="destructive" onClick={executeDelete}>
+                {t('entityManagement.deleteDialog.confirmDelete', { count: 1 + deleteDialog.selectedRelated.size })}
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
