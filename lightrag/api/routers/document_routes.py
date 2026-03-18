@@ -17,6 +17,7 @@ from fastapi import (
     BackgroundTasks,
     Depends,
     File,
+    Form,
     HTTPException,
     Request,
     UploadFile,
@@ -76,6 +77,23 @@ def _get_workspace_from_request(request: Request) -> str:
         return workspace
     # Fall back to server default workspace
     return get_default_workspace() or "base"
+
+
+# VLM/LLM model functions (set by lightrag_server.py at startup)
+_vlm_model_func = None
+_llm_model_func = None
+
+
+def set_vlm_model_func(func):
+    """Set the VLM model function for image analysis."""
+    global _vlm_model_func
+    _vlm_model_func = func
+
+
+def set_llm_model_func(func):
+    """Set the LLM model function."""
+    global _llm_model_func
+    _llm_model_func = func
 
 
 @lru_cache(maxsize=1)
@@ -2605,6 +2623,134 @@ def create_document_routes(
             )
         except Exception as e:
             logger.error(f"Error /documents/texts: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @router.post(
+        "/quick-image",
+        dependencies=[Depends(combined_auth)],
+    )
+    async def quick_ingest_image(
+        http_request: Request,
+        file: UploadFile = File(...),
+        title: str = Form(""),
+        image_prompt: str = Form(""),
+    ):
+        """
+        Quick ingest a single image via multimodal processing pipeline.
+        Processes the image through VLM analysis and creates KG entities directly.
+        """
+        try:
+            workspace = _get_workspace_from_request(http_request)
+            workspace_rag = await get_workspace_rag(workspace)
+            if workspace_rag is None:
+                workspace_rag = rag
+
+            # Validate image type
+            content_type = file.content_type or ""
+            if not content_type.startswith("image/"):
+                raise HTTPException(status_code=400, detail=f"Unsupported file type: {content_type}. Only image files are accepted.")
+
+            # Read image data
+            image_bytes = await file.read()
+            import base64
+            image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+
+            # Create doc_id and entity name
+            entity_name = title.strip() if title.strip() else (file.filename or "clipboard_image")
+            file_source = f"quick-image/{entity_name}"
+            doc_id = compute_mdhash_id(file_source, prefix="doc-")
+
+            # Upload to S3 if enabled
+            s3_url = None
+            try:
+                from lightrag.api.utils_s3 import get_s3_client
+                s3_client = get_s3_client()
+                if s3_client.is_enabled():
+                    s3_key = f"lightrag/images/{workspace}/{doc_id}/{file.filename or 'image.png'}"
+                    s3_url = s3_client.upload_bytes(image_bytes, s3_key, content_type=content_type)
+                    logger.info(f"Quick image uploaded to S3: {s3_key}")
+            except Exception as e:
+                logger.debug(f"S3 upload skipped: {e}")
+
+            # Create doc_status entry
+            import datetime as _dt
+            from datetime import timezone as _tz
+            from lightrag.base import DocStatus
+            await workspace_rag.doc_status.upsert({doc_id: {
+                "status": DocStatus.PROCESSING,
+                "content_summary": f"[Quick Image] {entity_name}",
+                "content_length": len(image_bytes),
+                "chunks_count": 0,
+                "chunks_list": [],
+                "file_path": file_source,
+                "s3_url": s3_url,
+                "created_at": _dt.datetime.now(_tz.utc).isoformat(),
+                "updated_at": _dt.datetime.now(_tz.utc).isoformat(),
+            }})
+
+            # Process image through multimodal pipeline (same pattern as board_routes)
+            from lightrag.multimodal.config import MultimodalConfig
+            from lightrag.multimodal.processors import ImageModalProcessor
+
+            caption_func = _vlm_model_func or _llm_model_func
+            if not caption_func:
+                raise HTTPException(status_code=503, detail="VLM/LLM model not configured")
+
+            mm_config = MultimodalConfig()
+            processor = ImageModalProcessor(
+                lightrag=workspace_rag,
+                modal_caption_func=caption_func,
+                response_language=mm_config.vlm_response_language,
+            )
+            if image_prompt:
+                processor.set_document_instructions(image_prompt=image_prompt)
+
+            modal_content = {
+                "type": "image",
+                "img_data": image_base64,
+                "img_path": "",
+            }
+            item_info = {"page_idx": 0, "index": 0}
+
+            result = await processor.process_multimodal_content(
+                modal_content=modal_content,
+                content_type="image",
+                file_path=file_source,
+                entity_name=entity_name,
+                item_info=item_info,
+                doc_id=doc_id,
+                chunk_order_index=0,
+            )
+
+            # Mark as processed
+            if hasattr(workspace_rag.doc_status, 'db'):
+                try:
+                    sql = """UPDATE LIGHTRAG_DOC_STATUS
+                             SET status='processed', updated_at=CURRENT_TIMESTAMP
+                             WHERE workspace=$1 AND id=$2"""
+                    await workspace_rag.doc_status.db.execute(
+                        sql, {"workspace": workspace_rag.doc_status.workspace, "id": doc_id}
+                    )
+                except Exception:
+                    pass
+
+            if result is None:
+                return {"status": "skipped", "message": "Image classified as decorative/non-knowledge content", "doc_id": doc_id}
+
+            entity_info = result[1] if len(result) > 1 else {}
+            return {
+                "status": "success",
+                "message": f"Image processed: {entity_info.get('entity_name', entity_name)}",
+                "doc_id": doc_id,
+                "entity_name": entity_info.get("entity_name"),
+                "s3_url": entity_info.get("s3_url") or s3_url,
+            }
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error quick-ingest-image: {str(e)}")
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=str(e))
 

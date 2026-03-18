@@ -49,6 +49,8 @@ from lightrag.api.routers.document_routes import (
     DocumentManager,
     create_document_routes,
     set_rag_workspace_getter as set_document_rag_workspace_getter,
+    set_vlm_model_func as set_document_vlm_model_func,
+    set_llm_model_func as set_document_llm_model_func,
 )
 from lightrag.api.routers.query_routes import (
     create_query_routes,
@@ -1353,6 +1355,7 @@ def create_app(args):
         set_multimodal_llm_func(multimodal_llm_func)
         set_url_llm_model_func(multimodal_llm_func)
         set_board_llm_model_func(multimodal_llm_func)
+        set_document_llm_model_func(multimodal_llm_func)
 
         # Initialize VLM if configured
         if mm_config.vlm_api_base and mm_config.vlm_model:
@@ -1400,6 +1403,7 @@ def create_app(args):
                 set_vlm_model_func(vlm_model_func)
                 set_url_vlm_model_func(vlm_model_func)
                 set_board_vlm_model_func(vlm_model_func)
+                set_document_vlm_model_func(vlm_model_func)
                 logger.info(
                     f"Multimodal VLM initialized: {mm_config.vlm_model} at {mm_config.vlm_api_base}"
                 )

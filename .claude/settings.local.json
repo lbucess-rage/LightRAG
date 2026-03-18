@@ -47,7 +47,8 @@
       "Skill(db-admin)",
       "Bash(head:*)",
       "Bash(find:*)",
-      "Bash(tail:*)"
+      "Bash(tail:*)",
+      "Bash(python:*)"
     ],
     "deny": [],
     "ask": []

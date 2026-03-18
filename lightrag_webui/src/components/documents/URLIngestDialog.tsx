@@ -13,7 +13,7 @@ import Input from '@/components/ui/Input'
 import Textarea from '@/components/ui/Textarea'
 import Checkbox from '@/components/ui/Checkbox'
 import { Label } from '@/components/ui/Label'
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs'
+import { cn } from '@/lib/utils'
 import Badge from '@/components/ui/Badge'
 import TaskProgressPanel from './TaskProgressPanel'
 import {
@@ -34,6 +34,7 @@ interface URLIngestDialogProps {
 export default function URLIngestDialog({ onDocumentsUploaded }: URLIngestDialogProps) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
+  const [activeTab, setActiveTab] = useState<'single' | 'batch'>('single')
 
   // Single URL state
   const [singleUrl, setSingleUrl] = useState('')
@@ -211,17 +212,32 @@ export default function URLIngestDialog({ onDocumentsUploaded }: URLIngestDialog
             </Button>
           </div>
         ) : (
-          <Tabs defaultValue="single" className="w-full">
-            <TabsList className="w-full">
-              <TabsTrigger value="single" className="flex-1">
+          <div className="w-full">
+            <div className="grid grid-cols-2 gap-1 p-1 bg-muted rounded-lg">
+              <button
+                type="button"
+                className={cn(
+                  'px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
+                  activeTab === 'single' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                )}
+                onClick={() => setActiveTab('single')}
+              >
                 {t('documentPanel.urlIngest.singleTab')}
-              </TabsTrigger>
-              <TabsTrigger value="batch" className="flex-1">
+              </button>
+              <button
+                type="button"
+                className={cn(
+                  'px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
+                  activeTab === 'batch' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                )}
+                onClick={() => setActiveTab('batch')}
+              >
                 {t('documentPanel.urlIngest.batchTab')}
-              </TabsTrigger>
-            </TabsList>
+              </button>
+            </div>
 
-            <TabsContent value="single" className="mt-4 space-y-3 h-auto">
+            {activeTab === 'single' && (
+            <div className="mt-4 space-y-3">
               {/* URL Input with validate button */}
               <div className="flex gap-2">
                 <Input
@@ -298,9 +314,11 @@ export default function URLIngestDialog({ onDocumentsUploaded }: URLIngestDialog
                 {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                 {t('documentPanel.urlIngest.ingest')}
               </Button>
-            </TabsContent>
+            </div>
+            )}
 
-            <TabsContent value="batch" className="mt-4 space-y-3 h-auto">
+            {activeTab === 'batch' && (
+            <div className="mt-4 space-y-3">
               {/* Batch URL textarea */}
               <Textarea
                 placeholder={t('documentPanel.urlIngest.batchPlaceholder')}
@@ -360,8 +378,9 @@ export default function URLIngestDialog({ onDocumentsUploaded }: URLIngestDialog
                 {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                 {t('documentPanel.urlIngest.ingestBatch')}
               </Button>
-            </TabsContent>
-          </Tabs>
+            </div>
+            )}
+          </div>
         )}
       </DialogContent>
     </Dialog>

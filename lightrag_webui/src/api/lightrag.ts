@@ -641,6 +641,18 @@ export const insertText = async (text: string): Promise<DocActionResponse> => {
   return response.data
 }
 
+export const insertTextWithSource = async (
+  text: string,
+  fileSource?: string
+): Promise<DocActionResponse> => {
+  const payload: Record<string, string> = { text }
+  if (fileSource) {
+    payload.file_source = fileSource
+  }
+  const response = await axiosInstance.post('/documents/text', payload)
+  return response.data
+}
+
 export const insertTexts = async (texts: string[]): Promise<DocActionResponse> => {
   const response = await axiosInstance.post('/documents/texts', { texts })
   return response.data
@@ -1216,6 +1228,24 @@ export type BatchDeleteResponse = {
   message: string
   deleted: number
   failed: number
+}
+
+/**
+ * Quick ingest a single image through multimodal processing
+ */
+export const quickIngestImage = async (
+  file: File,
+  title: string,
+  imagePrompt?: string,
+): Promise<{ status: string; message: string; doc_id?: string; entity_name?: string }> => {
+  const formData = new FormData()
+  formData.append('file', file)
+  formData.append('title', title)
+  if (imagePrompt) formData.append('image_prompt', imagePrompt)
+  const response = await axiosInstance.post('/documents/quick-image', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return response.data
 }
 
 export const batchDeleteEntities = async (entityIds: string[], cascade: boolean = true): Promise<BatchDeleteResponse> => {

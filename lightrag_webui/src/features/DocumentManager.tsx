@@ -41,6 +41,7 @@ import PipelineStatusDialog from '@/components/documents/PipelineStatusDialog'
 import URLIngestDialog from '@/components/documents/URLIngestDialog'
 import BoardIngestDialog from '@/components/documents/BoardIngestDialog'
 import MultimodalUploadDialog from '@/components/documents/MultimodalUploadDialog'
+import QuickIngestDialog from '@/components/documents/QuickIngestDialog'
 import ActiveTasksPanel from '@/components/documents/ActiveTasksPanel'
 import TaskResultDialog from '@/components/documents/TaskResultDialog'
 import { BoardPostDialog, useBoardPostView } from '@/components/board/BoardPostDialog'
@@ -1353,6 +1354,7 @@ export default function DocumentManager() {
             <URLIngestDialog onDocumentsUploaded={fetchDocuments} />
             <BoardIngestDialog onDocumentsUploaded={fetchDocuments} />
             <MultimodalUploadDialog onDocumentsUploaded={fetchDocuments} />
+            <QuickIngestDialog onDocumentsUploaded={fetchDocuments} />
             <UploadDocumentsDialog onDocumentsUploaded={fetchDocuments} />
             <PipelineStatusDialog
               open={showPipelineStatus}
