@@ -164,16 +164,16 @@ export default function QuerySettings() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectGroup>
-                      <SelectItem value="Multiple Paragraphs">{t('retrievePanel.querySettings.responseFormatOptions.multipleParagraphs')}</SelectItem>
-                      <SelectItem value="Single Paragraph">{t('retrievePanel.querySettings.responseFormatOptions.singleParagraph')}</SelectItem>
-                      <SelectItem value="Bullet Points">{t('retrievePanel.querySettings.responseFormatOptions.bulletPoints')}</SelectItem>
-                      <SelectItem value="Numbered List">{t('retrievePanel.querySettings.responseFormatOptions.numberedList')}</SelectItem>
-                      <SelectItem value="Table">{t('retrievePanel.querySettings.responseFormatOptions.table')}</SelectItem>
-                      <SelectItem value="Executive Summary">{t('retrievePanel.querySettings.responseFormatOptions.executiveSummary')}</SelectItem>
-                      <SelectItem value="FAQ">{t('retrievePanel.querySettings.responseFormatOptions.faq')}</SelectItem>
-                      <SelectItem value="Structured Sections">{t('retrievePanel.querySettings.responseFormatOptions.structuredSections')}</SelectItem>
-                      <SelectItem value="Three-Line Summary (exactly 3 bullet points, each starting with •)">{t('retrievePanel.querySettings.responseFormatOptions.threeLineSummary')}</SelectItem>
-                      <SelectItem value="Brief Answer (maximum 5 bullet points, each starting with •)">{t('retrievePanel.querySettings.responseFormatOptions.briefAnswer')}</SelectItem>
+                      <SelectItem value="Multiple paragraphs using markdown '- ' bullet lists. Each paragraph covers one subtopic with a bold heading.">{t('retrievePanel.querySettings.responseFormatOptions.multipleParagraphs')}</SelectItem>
+                      <SelectItem value="A single short paragraph, maximum 3 sentences. No bullet points.">{t('retrievePanel.querySettings.responseFormatOptions.singleParagraph')}</SelectItem>
+                      <SelectItem value="Markdown bullet list using '- ' (hyphen+space). One fact per line. Maximum 10 items.">{t('retrievePanel.querySettings.responseFormatOptions.bulletPoints')}</SelectItem>
+                      <SelectItem value="Numbered list using '1. ', '2. ', etc. One fact per line.">{t('retrievePanel.querySettings.responseFormatOptions.numberedList')}</SelectItem>
+                      <SelectItem value="Markdown table with columns separated by '|'. Include a header row.">{t('retrievePanel.querySettings.responseFormatOptions.table')}</SelectItem>
+                      <SelectItem value="Executive summary: 2-3 sentences covering the most critical points only.">{t('retrievePanel.querySettings.responseFormatOptions.executiveSummary')}</SelectItem>
+                      <SelectItem value="FAQ format: each item starts with '**Q:**' question then '**A:**' answer on the next line.">{t('retrievePanel.querySettings.responseFormatOptions.faq')}</SelectItem>
+                      <SelectItem value="Structured sections with '##' markdown headings. Each section has 2-3 bullet points using '- '.">{t('retrievePanel.querySettings.responseFormatOptions.structuredSections')}</SelectItem>
+                      <SelectItem value="EXACTLY 3 bullet points using '- ' (hyphen+space). Each point is one line. Do NOT exceed 3 lines. Select only the 3 most important facts.">{t('retrievePanel.querySettings.responseFormatOptions.threeLineSummary')}</SelectItem>
+                      <SelectItem value="Brief answer: MAXIMUM 5 bullet points using '- ' (hyphen+space). Each point is one concise line. Fewer is better.">{t('retrievePanel.querySettings.responseFormatOptions.briefAnswer')}</SelectItem>
                     </SelectGroup>
                   </SelectContent>
                 </Select>
