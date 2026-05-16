@@ -1335,6 +1335,13 @@ async def _process_board_item(
 
     # Extract attachments
     attachments = []
+    raw_files_field = item.get(mapping.attachments_field) if mapping.attachments_field else None
+    logger.info(
+        f"[board-debug-item task={task_id}] item_id={item_id} item_keys={list(item.keys())} "
+        f"attachments_field={mapping.attachments_field!r} "
+        f"raw_files_type={type(raw_files_field).__name__} "
+        f"raw_files_value={raw_files_field!r}"
+    )
     if mapping.attachments_field and item.get(mapping.attachments_field):
         raw_attachments = item[mapping.attachments_field]
         if isinstance(raw_attachments, list):
@@ -1427,6 +1434,16 @@ async def _process_board_item(
         for a in attachments
     ) if attachments else False
     has_multimodal = (parsed_images or parsed_tables or has_image_attachments) and (_vlm_model_func or _llm_model_func)
+    logger.info(
+        f"[board-debug task={task_id}] item_id={item_id} file_label={file_label} "
+        f"attachments_field={mapping.attachments_field!r} "
+        f"attachments_count={len(attachments) if attachments else 0} "
+        f"attachment_names={[a.get(mapping.attachment_name_field or '', '') or a.get(mapping.attachment_url_field or '', '') for a in (attachments or [])]} "
+        f"parsed_images={len(parsed_images)} parsed_tables={len(parsed_tables)} "
+        f"has_image_attachments={bool(has_image_attachments)} "
+        f"vlm_func_set={_vlm_model_func is not None} llm_func_set={_llm_model_func is not None} "
+        f"has_multimodal={bool(has_multimodal)} process_images={process_images} process_documents={process_documents}"
+    )
     if has_multimodal:
         try:
             from lightrag.multimodal.config import MultimodalConfig

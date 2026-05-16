@@ -98,18 +98,12 @@ class SchemaDiscoveryEngine:
 
         logger.info(f"Discovering schema from {len(samples)} documents")
 
-        # LLM 호출
-        try:
-            response = await self.llm_func(
-                user_prompt,
-                system_prompt=SCHEMA_DISCOVERY_SYSTEM_PROMPT,
-            )
-        except Exception as e:
-            logger.error(f"LLM call failed: {e}")
-            raise RuntimeError(f"Schema discovery failed: {e}")
-
-        # 결과 파싱
-        result = self._parse_llm_response(response)
+        # LLM 호출 + 파싱 (파싱 실패 시 1회 재시도)
+        result = await self._call_and_parse(
+            user_prompt,
+            SCHEMA_DISCOVERY_SYSTEM_PROMPT,
+            context="documents",
+        )
         result.source_type = "document"
 
         # 유사 템플릿 검색
@@ -189,17 +183,12 @@ class SchemaDiscoveryEngine:
 
         logger.debug(f"Calling LLM for domain keyword discovery...")
 
-        try:
-            response = await self.llm_func(
-                user_prompt,
-                system_prompt=DOMAIN_KEYWORD_DISCOVERY_SYSTEM_PROMPT,
-            )
-        except Exception as e:
-            logger.error(f"LLM call failed: {e}")
-            raise RuntimeError(f"Schema discovery from domain keywords failed: {e}")
-
-        # 결과 파싱
-        result = self._parse_llm_response(response)
+        # LLM 호출 + 파싱 (파싱 실패 시 1회 재시도)
+        result = await self._call_and_parse(
+            user_prompt,
+            DOMAIN_KEYWORD_DISCOVERY_SYSTEM_PROMPT,
+            context="domain keywords",
+        )
         result.source_type = "domain_keyword"
         result.similar_templates = similar_templates
 
@@ -351,6 +340,55 @@ class SchemaDiscoveryEngine:
             logger.warning(f"Failed to parse refinement result: {e}")
             return initial_result
 
+    async def _call_and_parse(
+        self,
+        user_prompt: str,
+        system_prompt: str,
+        context: str,
+    ) -> SchemaDiscoveryResult:
+        """LLM 호출 후 응답을 파싱한다. 파싱 실패 시 1회 재시도.
+
+        재시도 시에는 "유효한 JSON만 반환하라"는 강화 지시를 덧붙여 호출한다.
+        """
+        # 1차 호출
+        try:
+            response = await self.llm_func(user_prompt, system_prompt=system_prompt)
+        except Exception as e:
+            logger.error(f"LLM call failed ({context}): {e}")
+            raise RuntimeError(f"Schema discovery failed: {e}")
+
+        try:
+            return self._parse_llm_response(response)
+        except ValueError as parse_err:
+            logger.warning(
+                f"First parse attempt failed ({context}): {parse_err}. Retrying with stricter prompt..."
+            )
+
+        # 2차 호출 (강화 지시)
+        retry_prompt = (
+            user_prompt
+            + "\n\n[매우 중요] 응답은 반드시 **유효한 JSON 객체만** 포함해야 합니다. "
+            "앞뒤에 설명, 주석, 코드 블록 표기(```) 없이 순수 JSON만 출력하세요. "
+            "모든 문자열은 쌍따옴표(\")를 사용하고, 마지막 항목 뒤에 쉼표를 넣지 마세요."
+        )
+        try:
+            response = await self.llm_func(retry_prompt, system_prompt=system_prompt)
+        except Exception as e:
+            logger.error(f"LLM retry call failed ({context}): {e}")
+            raise RuntimeError(f"Schema discovery retry failed: {e}")
+
+        try:
+            return self._parse_llm_response(response)
+        except ValueError as parse_err:
+            logger.error(
+                f"Schema discovery failed after retry ({context}): {parse_err}"
+            )
+            raise ValueError(
+                "LLM이 유효한 JSON 스키마를 반환하지 못했습니다. "
+                "문서 양이 너무 많거나 형식이 복잡할 수 있습니다. "
+                "문서를 분할하거나 다시 시도해 주세요."
+            )
+
     def _parse_llm_response(self, response: str) -> SchemaDiscoveryResult:
         """LLM 응답 파싱
 
@@ -425,18 +463,129 @@ class SchemaDiscoveryEngine:
         )
 
     def _extract_json(self, text: str) -> dict:
-        """텍스트에서 JSON 추출"""
-        # 코드 블록 내 JSON 찾기
-        json_match = re.search(r"```json?\s*([\s\S]*?)\s*```", text)
-        if json_match:
-            return json.loads(json_match.group(1))
+        """텍스트에서 JSON 추출
 
-        # 직접 JSON 객체 찾기
-        json_match = re.search(r"\{[\s\S]*\}", text)
-        if json_match:
-            return json.loads(json_match.group(0))
+        파싱 전략:
+        1) ```json ... ``` 코드 블록 우선
+        2) brace-counting으로 첫 균형 잡힌 {...} 블록 추출
+        3) (1)/(2) 실패 시 공통 오류(trailing comma, 끝 누락, 홑따옴표 등) 복구 재시도
+        """
+        candidates: list[str] = []
 
-        raise ValueError("JSON not found in response")
+        # 1) 코드 블록 내 JSON
+        code_block_match = re.search(r"```json?\s*([\s\S]*?)\s*```", text, re.IGNORECASE)
+        if code_block_match:
+            candidates.append(code_block_match.group(1).strip())
+
+        # 2) brace-counting으로 균형 잡힌 JSON 블록 추출
+        balanced = self._find_balanced_json(text)
+        if balanced:
+            candidates.append(balanced)
+
+        # 3) fallback: 탐욕적 매칭
+        greedy_match = re.search(r"\{[\s\S]*\}", text)
+        if greedy_match:
+            candidates.append(greedy_match.group(0))
+
+        last_error: Optional[Exception] = None
+        for idx, candidate in enumerate(candidates):
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError as e:
+                last_error = e
+                # 공통 오류 복구 시도
+                repaired = self._repair_json(candidate)
+                if repaired is not None and repaired != candidate:
+                    try:
+                        result = json.loads(repaired)
+                        logger.info(
+                            f"JSON repaired successfully (candidate {idx}, error: {e.msg})"
+                        )
+                        return result
+                    except json.JSONDecodeError as e2:
+                        last_error = e2
+
+        if last_error is not None:
+            # 실패 시 응답 샘플을 로그에 남겨 디버깅에 사용
+            preview_head = text[:500]
+            preview_tail = text[-500:] if len(text) > 500 else ""
+            logger.warning(
+                f"Failed to parse JSON from LLM response ({len(text)} chars). "
+                f"Error: {last_error}. Head: {preview_head!r} ... Tail: {preview_tail!r}"
+            )
+            raise ValueError(
+                f"LLM 응답에서 유효한 JSON을 찾지 못했습니다 ({last_error})"
+            )
+
+        raise ValueError("LLM 응답에 JSON 구조가 포함되지 않았습니다")
+
+    @staticmethod
+    def _find_balanced_json(text: str) -> Optional[str]:
+        """brace-counting으로 첫 번째 균형 잡힌 {...} 블록을 찾는다.
+
+        문자열 리터럴 내부의 중괄호를 올바르게 건너뛰며,
+        이스케이프 문자(`\\"`)도 처리한다.
+        """
+        start = text.find("{")
+        if start == -1:
+            return None
+
+        depth = 0
+        in_string = False
+        escape = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if escape:
+                escape = False
+                continue
+            if ch == "\\":
+                escape = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start : i + 1]
+        return None
+
+    @staticmethod
+    def _repair_json(text: str) -> Optional[str]:
+        """흔한 JSON 형식 오류를 자동 복구한다.
+
+        - trailing comma 제거: `,}` / `,]`
+        - 끝부분 누락된 닫는 괄호 보충
+        - 홑따옴표로 감싼 문자열을 쌍따옴표로 변환 (제한적)
+        """
+        repaired = text
+
+        # 1) trailing comma 제거
+        repaired = re.sub(r",\s*([}\]])", r"\1", repaired)
+
+        # 2) 끝 부분 닫는 괄호 보충 (open-count > close-count인 경우)
+        open_curly = repaired.count("{")
+        close_curly = repaired.count("}")
+        open_square = repaired.count("[")
+        close_square = repaired.count("]")
+
+        # 문자열 내부 중괄호는 카운트에서 제외 (대략적 추정)
+        # 단순 보정: 부족한 만큼 끝에 추가
+        if open_curly > close_curly:
+            repaired = repaired.rstrip().rstrip(",")
+            repaired += "}" * (open_curly - close_curly)
+        if open_square > close_square:
+            repaired = repaired.rstrip().rstrip(",")
+            repaired += "]" * (open_square - close_square)
+
+        # 3) 홑따옴표 키/값을 쌍따옴표로 (키 패턴만 제한적으로)
+        repaired = re.sub(r"(?<=[{,])\s*'([^']+)'\s*:", r'"\1":', repaired)
+
+        return repaired if repaired != text else None
 
     def _validate_and_fix_schema(
         self,

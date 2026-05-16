@@ -475,8 +475,11 @@ async def discover_from_files(
     except HTTPException:
         raise
     except ValueError as e:
-        logger.warning(f"Schema discovery validation error: {e}")
+        logger.warning(f"Schema discovery parse error (from-files): {e}")
         raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        logger.error(f"Schema discovery runtime error (from-files): {e}")
+        raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:
         logger.error(f"Schema discovery from files failed: {e}")
         raise HTTPException(status_code=500, detail=f"Discovery failed: {str(e)}")
@@ -514,9 +517,14 @@ async def discover_from_document(request: DiscoverFromDocumentRequest):
 
         return ApiResponse(success=True, data=result.to_dict())
 
+    except HTTPException:
+        raise
     except ValueError as e:
-        logger.warning(f"Schema discovery validation error: {e}")
+        logger.warning(f"Schema discovery parse error (from-document): {e}")
         raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        logger.error(f"Schema discovery runtime error (from-document): {e}")
+        raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:
         logger.error(f"Schema discovery failed: {e}")
         raise HTTPException(status_code=500, detail=f"Discovery failed: {str(e)}")
