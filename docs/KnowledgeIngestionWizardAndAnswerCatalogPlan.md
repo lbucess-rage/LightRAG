@@ -664,3 +664,80 @@ Remaining implementation notes:
   - Verified structured query preview and execute for `category = Billing`, returning one matching row.
   - Verified lookup logs show both preview and execute rows with pseudo SQL and latency.
   - Browser verified the preserved FAQ workspace, answer-oriented navigation, `Structured Data` tab, mode selector, selected dataset, and recent lookup logs. Browser console error list was empty.
+
+### Pre-Connector Stage Regression Test - 2026-05-18
+
+Before starting connector implementation, a preserved workspace was created for each implemented FAQ phase and 10 or more checks were executed per phase. These workspaces were intentionally not deleted so their data can be inspected from the WebUI.
+
+Passing regression run:
+
+| Phase | Workspace ID | Tests | Result |
+|---|---|---:|---|
+| Phase A/B | `faq_reg_ab_20260518_235014` | 18 | 18 passed |
+| Phase C | `faq_reg_c_20260518_235014` | 15 | 15 passed |
+| Phase D | `faq_reg_d_20260518_235014` | 13 | 13 passed |
+| Phase D+ | `faq_reg_dplus_20260518_235014` | 17 | 17 passed |
+
+Total result: 63 passed, 0 failed.
+
+Test coverage by phase:
+
+- Phase A/B:
+  - workspace creation and lookup
+  - answer draft creation
+  - answer list and detail lookup
+  - guidance creation/list/delete
+  - draft-inclusive search
+  - publish and resolve
+  - answer update and revision history
+  - view and feedback event writes
+  - stats summary
+  - archive and default search exclusion
+- Phase C:
+  - `source-draft` for plain source
+  - snapshot and source link response validation
+  - snapshot list, source-type filter, answer-id filter, and text search
+  - answer source link lookup
+  - lineage-backed answer search
+  - `source-draft` for HTML source
+  - multi-snapshot visibility
+  - search and stats after source-backed answers
+- Phase D:
+  - CSV profiling
+  - JSON profiling
+  - invalid JSON validation
+  - `table_as_dataset` materialization
+  - structured dataset listing
+  - safe query preview and execute
+  - contains/equality filters
+  - unknown-field validation
+  - structured source snapshot lookup
+  - guidance-driven search
+  - lookup log creation
+- Phase D+:
+  - `row_per_answer` materialization
+  - generated answer count validation
+  - answer list/search for individual rows
+  - row answers excluded from structured dataset list
+  - source-row metadata and source-link lookup
+  - row answer single-row structured query
+  - separate `table_as_dataset` creation for lookup logs
+  - preview/execute lookup logs by dataset and all datasets
+  - search event stats
+
+Browser verification:
+
+- Opened `faq_reg_dplus_20260518_235014` from the workspace selector.
+- Confirmed answer-catalog navigation is shown.
+- Confirmed 4 answers are visible in the Answer Library.
+- Confirmed the `Structured Data` tab shows one queryable dataset, safe lookup controls, and recent preview/execute lookup logs.
+- Browser console error list was empty.
+
+Preserved intermediate workspaces from earlier failed test-script attempts:
+
+- `faq_reg_ab_20260518_234804`
+- `faq_reg_ab_20260518_234900`
+- `faq_reg_c_20260518_234900`
+- `faq_reg_d_20260518_234900`
+
+The final JSON test output was written locally to `/tmp/faq_stage_regression_results_20260518_235014.json`.
