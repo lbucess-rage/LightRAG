@@ -566,3 +566,35 @@ Remaining implementation notes:
   - View and feedback event writes succeeded, and summary stats reported `searches=1`, `views=1`, `feedback=1` for the test workspace.
   - Created a temporary FAQ workspace, copied answer catalog data into it through `copy-data`, confirmed 5 answer rows were visible, then deleted the temporary workspace with `delete_data=true`.
   - Created another temporary FAQ workspace, used `/api/answers/source-draft` to create one structured-source draft plus two guidance rows, searched it with `include_drafts=true`, and deleted the temporary workspace.
+
+### Phase C Source Lineage Status - 2026-05-18
+
+- Added source snapshot and lineage persistence for FAQ/answer-catalog workspaces:
+  - `LIGHTRAG_ANSWER_SOURCE_SNAPSHOTS`
+  - `LIGHTRAG_ANSWER_SOURCE_LINKS`
+- `POST /api/answers/source-draft` now records:
+  - immutable source snapshot metadata
+  - raw source content hash and preview
+  - source profile such as structured columns and row count
+  - answer-to-source lineage link for the created answer version
+  - `source_snapshot_id` and `source_content_hash` in answer metadata
+- Added API endpoints:
+  - `GET /api/answers/sources/snapshots`
+  - `GET /api/answers/{answer_id}/sources`
+- Workspace data lifecycle now includes source snapshots and source links:
+  - `copy-data` copies answer source snapshots and links with remapped IDs.
+  - workspace deletion cleans source links and snapshots.
+- Frontend updates:
+  - `Sources` tab shows a source snapshot history panel with source type, preview, linked answer count, structured kind, timestamp, and content hash.
+  - Answer detail dialog now has a `Sources` section showing linked snapshots, source URI, profile columns, preview, answer version, and hash.
+  - Korean and English i18n keys were added for the new UI copy.
+- Verification:
+  - Python compile passed for `answer_routes.py`, `workspace_routes.py`, and `postgres_impl.py`.
+  - WebUI `bun run build` succeeded.
+  - Server restarted on port `9422`, health check returned healthy.
+  - Created temporary workspace `faq_phase_c_smoke_20260518`.
+  - Created `ANS-PHASE-C-SMOKE-01` through `/api/answers/source-draft`; response included snapshot and source link.
+  - Verified `/api/answers/sources/snapshots`, `/api/answers/{answer_id}/sources`, and `/api/answers/search`.
+  - Browser verified the `Sources` snapshot history and answer-detail `Sources` section.
+  - Copied the temporary workspace data into `faq_phase_c_copy_20260518` and confirmed snapshots/links were copied with remapped IDs.
+  - Deleted both temporary workspaces with `delete_data=true`.

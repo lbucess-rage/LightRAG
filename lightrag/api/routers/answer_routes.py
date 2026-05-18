@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import csv
+import hashlib
 import io
 import re
 import time
@@ -207,10 +208,45 @@ async def _ensure_tables(db) -> None:
             create_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS LIGHTRAG_ANSWER_SOURCE_SNAPSHOTS (
+            snapshot_id TEXT PRIMARY KEY,
+            workspace TEXT NOT NULL,
+            source_type TEXT NOT NULL,
+            source_uri TEXT,
+            file_name TEXT,
+            title TEXT,
+            raw_content TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            content_length INTEGER NOT NULL DEFAULT 0,
+            profile JSONB NOT NULL DEFAULT '{}'::jsonb,
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_answer_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+            status TEXT NOT NULL DEFAULT 'captured',
+            task_id TEXT,
+            create_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS LIGHTRAG_ANSWER_SOURCE_LINKS (
+            link_id TEXT PRIMARY KEY,
+            workspace TEXT NOT NULL,
+            answer_id TEXT NOT NULL,
+            answer_version INTEGER NOT NULL DEFAULT 1,
+            snapshot_id TEXT NOT NULL,
+            link_type TEXT NOT NULL DEFAULT 'created_from',
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            create_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
         "CREATE INDEX IF NOT EXISTS IDX_ANSWERS_WORKSPACE_STATUS ON LIGHTRAG_ANSWER_ITEMS(workspace, status)",
         "CREATE INDEX IF NOT EXISTS IDX_ANSWERS_WORKSPACE_UPDATE ON LIGHTRAG_ANSWER_ITEMS(workspace, update_time DESC)",
         "CREATE INDEX IF NOT EXISTS IDX_ANSWER_GUIDANCE_WORKSPACE_ANSWER ON LIGHTRAG_ANSWER_GUIDANCE(workspace, answer_id)",
         "CREATE INDEX IF NOT EXISTS IDX_ANSWER_EVENTS_WORKSPACE_TIME ON LIGHTRAG_ANSWER_EVENTS(workspace, create_time DESC)",
+        "CREATE INDEX IF NOT EXISTS IDX_ANSWER_SOURCE_SNAPSHOTS_WORKSPACE_TIME ON LIGHTRAG_ANSWER_SOURCE_SNAPSHOTS(workspace, create_time DESC)",
+        "CREATE INDEX IF NOT EXISTS IDX_ANSWER_SOURCE_SNAPSHOTS_WORKSPACE_HASH ON LIGHTRAG_ANSWER_SOURCE_SNAPSHOTS(workspace, content_hash)",
+        "CREATE INDEX IF NOT EXISTS IDX_ANSWER_SOURCE_LINKS_WORKSPACE_ANSWER ON LIGHTRAG_ANSWER_SOURCE_LINKS(workspace, answer_id)",
+        "CREATE INDEX IF NOT EXISTS IDX_ANSWER_SOURCE_LINKS_WORKSPACE_SNAPSHOT ON LIGHTRAG_ANSWER_SOURCE_LINKS(workspace, snapshot_id)",
     ]
     for statement in statements:
         await db.execute(statement)
@@ -411,6 +447,38 @@ class AnswerSourceDraftRequest(BaseModel):
 class AnswerSourceDraftResponse(BaseModel):
     answer: AnswerItem
     guidance: list[AnswerGuidance] = Field(default_factory=list)
+    snapshot: Optional["AnswerSourceSnapshot"] = None
+    source_link: Optional["AnswerSourceLink"] = None
+
+
+class AnswerSourceSnapshot(BaseModel):
+    snapshot_id: str
+    workspace: str
+    source_type: str
+    source_uri: Optional[str] = None
+    file_name: Optional[str] = None
+    title: Optional[str] = None
+    content_hash: str
+    content_length: int = 0
+    content_preview: Optional[str] = None
+    profile: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_answer_ids: list[str] = Field(default_factory=list)
+    status: str = "captured"
+    task_id: Optional[str] = None
+    create_time: Optional[str] = None
+
+
+class AnswerSourceLink(BaseModel):
+    link_id: str
+    workspace: str
+    answer_id: str
+    answer_version: int = 1
+    snapshot_id: str
+    link_type: str = "created_from"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    create_time: Optional[str] = None
+    snapshot: Optional[AnswerSourceSnapshot] = None
 
 
 class StructuredDataset(BaseModel):
@@ -515,6 +583,62 @@ def _event_from_row(row: dict[str, Any]) -> AnswerEvent:
         scores={str(key): float(value) for key, value in scores.items() if isinstance(value, (int, float))},
         metadata=metadata,
         create_time=_iso(row.get("create_time")),
+    )
+
+
+def _content_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _source_snapshot_from_row(row: dict[str, Any]) -> AnswerSourceSnapshot:
+    profile = _coerce_json(row.get("profile"), {})
+    if not isinstance(profile, dict):
+        profile = {}
+    metadata = _coerce_json(row.get("metadata"), {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+    created_answer_ids = _coerce_json(row.get("created_answer_ids"), [])
+    if not isinstance(created_answer_ids, list):
+        created_answer_ids = []
+    preview = row.get("content_preview")
+    if preview is None and row.get("raw_content") is not None:
+        preview = str(row.get("raw_content"))[:600]
+    return AnswerSourceSnapshot(
+        snapshot_id=str(row["snapshot_id"]),
+        workspace=str(row["workspace"]),
+        source_type=str(row.get("source_type") or "plain"),
+        source_uri=row.get("source_uri"),
+        file_name=row.get("file_name"),
+        title=row.get("title"),
+        content_hash=str(row.get("content_hash") or ""),
+        content_length=int(row.get("content_length") or 0),
+        content_preview=preview,
+        profile=profile,
+        metadata=metadata,
+        created_answer_ids=[str(item) for item in created_answer_ids],
+        status=str(row.get("status") or "captured"),
+        task_id=row.get("task_id"),
+        create_time=_iso(row.get("create_time")),
+    )
+
+
+def _source_link_from_row(
+    row: dict[str, Any],
+    snapshot: Optional[AnswerSourceSnapshot] = None,
+) -> AnswerSourceLink:
+    metadata = _coerce_json(row.get("metadata"), {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+    return AnswerSourceLink(
+        link_id=str(row["link_id"]),
+        workspace=str(row["workspace"]),
+        answer_id=str(row["answer_id"]),
+        answer_version=int(row.get("answer_version") or 1),
+        snapshot_id=str(row["snapshot_id"]),
+        link_type=str(row.get("link_type") or "created_from"),
+        metadata=metadata,
+        create_time=_iso(row.get("create_time")),
+        snapshot=snapshot,
     )
 
 
@@ -762,6 +886,91 @@ async def _log_event(
     return event_id
 
 
+async def _record_source_snapshot(
+    db,
+    workspace: str,
+    *,
+    source_type: str,
+    source_uri: Optional[str],
+    file_name: Optional[str],
+    title: Optional[str],
+    raw_content: str,
+    profile: dict[str, Any],
+    metadata: dict[str, Any],
+    created_answer_ids: list[str],
+    status: str = "captured",
+    task_id: Optional[str] = None,
+) -> AnswerSourceSnapshot:
+    snapshot_id = f"src-{uuid.uuid4().hex}"
+    content = raw_content or ""
+    row = await db.query(
+        """
+        INSERT INTO LIGHTRAG_ANSWER_SOURCE_SNAPSHOTS
+            (snapshot_id, workspace, source_type, source_uri, file_name, title,
+             raw_content, content_hash, content_length, profile, metadata,
+             created_answer_ids, status, task_id)
+        VALUES
+            ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb,
+             $12::jsonb, $13, $14)
+        RETURNING snapshot_id, workspace, source_type, source_uri, file_name, title,
+                  LEFT(raw_content, 600) AS content_preview, content_hash, content_length,
+                  profile, metadata, created_answer_ids, status, task_id, create_time
+        """,
+        [
+            snapshot_id,
+            workspace,
+            source_type,
+            source_uri,
+            file_name,
+            title,
+            content,
+            _content_hash(content),
+            len(content),
+            _json(profile),
+            _json(metadata),
+            _json_list(created_answer_ids),
+            status,
+            task_id,
+        ],
+    )
+    if not row:
+        raise HTTPException(status_code=500, detail="Failed to record source snapshot")
+    return _source_snapshot_from_row(dict(row))
+
+
+async def _record_source_link(
+    db,
+    workspace: str,
+    *,
+    answer_id: str,
+    answer_version: int,
+    snapshot_id: str,
+    link_type: str = "created_from",
+    metadata: Optional[dict[str, Any]] = None,
+) -> AnswerSourceLink:
+    row = await db.query(
+        """
+        INSERT INTO LIGHTRAG_ANSWER_SOURCE_LINKS
+            (link_id, workspace, answer_id, answer_version, snapshot_id, link_type, metadata)
+        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+        RETURNING link_id, workspace, answer_id, answer_version, snapshot_id,
+                  link_type, metadata, create_time
+        """,
+        [
+            f"asl-{uuid.uuid4().hex}",
+            workspace,
+            answer_id,
+            answer_version,
+            snapshot_id,
+            link_type,
+            _json(metadata or {}),
+        ],
+    )
+    if not row:
+        raise HTTPException(status_code=500, detail="Failed to record source link")
+    return _source_link_from_row(dict(row))
+
+
 def _score_candidate(
     answer: AnswerItem,
     guidance: list[AnswerGuidance],
@@ -991,6 +1200,26 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
     async def create_answer_source_draft(request: Request, payload: AnswerSourceDraftRequest):
         workspace, db = await db_for_request(request)
         answer_id = payload.answer_id or f"ANS-{uuid.uuid4().hex[:12]}"
+        snapshot_metadata = {
+            **payload.metadata,
+            "created_from": payload.metadata.get("created_from") or "answer_source_wizard",
+            "content_format": payload.content_format,
+            "tags": payload.tags,
+        }
+        snapshot = await _record_source_snapshot(
+            db,
+            workspace,
+            source_type=payload.source_type,
+            source_uri=payload.source_uri,
+            file_name=payload.file_name,
+            title=payload.title,
+            raw_content=payload.body,
+            profile=payload.source_profile,
+            metadata=snapshot_metadata,
+            created_answer_ids=[answer_id],
+            status="materialized",
+            task_id=payload.metadata.get("task_id"),
+        )
         source_metadata = {
             **payload.metadata,
             "created_from": payload.metadata.get("created_from") or "answer_source_wizard",
@@ -998,6 +1227,8 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             "source_uri": payload.source_uri,
             "file_name": payload.file_name,
             "source_profile": payload.source_profile,
+            "source_snapshot_id": snapshot.snapshot_id,
+            "source_content_hash": snapshot.content_hash,
         }
         try:
             row = await db.query(
@@ -1030,6 +1261,20 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             if not row:
                 raise HTTPException(status_code=500, detail="Failed to create answer draft")
             await _record_revision(db, dict(row))
+            source_link = await _record_source_link(
+                db,
+                workspace,
+                answer_id=answer_id,
+                answer_version=int(row.get("version") or 1),
+                snapshot_id=snapshot.snapshot_id,
+                link_type="created_from",
+                metadata={
+                    "created_from": "answer_source_wizard",
+                    "source_type": payload.source_type,
+                    "source_uri": payload.source_uri,
+                    "file_name": payload.file_name,
+                },
+            )
 
             created_guidance: list[AnswerGuidance] = []
             for item in payload.guidance:
@@ -1063,10 +1308,19 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             return AnswerSourceDraftResponse(
                 answer=_answer_from_row(dict(row)),
                 guidance=created_guidance,
+                snapshot=snapshot,
+                source_link=source_link,
             )
         except HTTPException:
             raise
         except Exception as e:
+            try:
+                await db.execute(
+                    "DELETE FROM LIGHTRAG_ANSWER_SOURCE_SNAPSHOTS WHERE workspace = $1 AND snapshot_id = $2",
+                    [workspace, snapshot.snapshot_id],
+                )
+            except Exception:
+                pass
             message = str(e)
             if "duplicate" in message.lower() or "unique" in message.lower():
                 raise HTTPException(status_code=409, detail=f"Answer '{answer_id}' already exists")
@@ -1169,11 +1423,104 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             preview_only=payload.preview_only,
         )
 
+    @router.get("/sources/snapshots", response_model=list[AnswerSourceSnapshot], dependencies=[Depends(combined_auth)])
+    async def list_source_snapshots(
+        request: Request,
+        source_type: Optional[str] = Query(default=None),
+        answer_id: Optional[str] = Query(default=None),
+        search: Optional[str] = Query(default=None),
+        limit: int = Query(default=50, ge=1, le=200),
+    ):
+        workspace, db = await db_for_request(request)
+        params: list[Any] = [workspace]
+        where = ["s.workspace = $1"]
+        join_sql = ""
+        if answer_id:
+            join_sql = """
+            JOIN LIGHTRAG_ANSWER_SOURCE_LINKS l
+              ON l.workspace = s.workspace AND l.snapshot_id = s.snapshot_id
+            """
+            params.append(answer_id)
+            where.append(f"l.answer_id = ${len(params)}")
+        if source_type and source_type != "all":
+            params.append(source_type)
+            where.append(f"s.source_type = ${len(params)}")
+        if search:
+            params.append(f"%{search}%")
+            p = f"${len(params)}"
+            where.append(f"(s.title ILIKE {p} OR s.source_uri ILIKE {p} OR s.file_name ILIKE {p} OR s.raw_content ILIKE {p})")
+        params.append(limit)
+        rows = await db.query(
+            f"""
+            SELECT DISTINCT s.snapshot_id, s.workspace, s.source_type, s.source_uri,
+                   s.file_name, s.title, LEFT(s.raw_content, 600) AS content_preview,
+                   s.content_hash, s.content_length, s.profile, s.metadata,
+                   s.created_answer_ids, s.status, s.task_id, s.create_time
+            FROM LIGHTRAG_ANSWER_SOURCE_SNAPSHOTS s
+            {join_sql}
+            WHERE {' AND '.join(where)}
+            ORDER BY s.create_time DESC
+            LIMIT ${len(params)}
+            """,
+            params,
+            multirows=True,
+        )
+        return [_source_snapshot_from_row(dict(row)) for row in rows or []]
+
     @router.get("/{answer_id}", response_model=AnswerItem, dependencies=[Depends(combined_auth)])
     async def get_answer(request: Request, answer_id: str):
         workspace, db = await db_for_request(request)
         row = await _get_answer_row(db, workspace, answer_id)
         return _answer_from_row(dict(row))
+
+    @router.get("/{answer_id}/sources", response_model=list[AnswerSourceLink], dependencies=[Depends(combined_auth)])
+    async def list_answer_sources(request: Request, answer_id: str):
+        workspace, db = await db_for_request(request)
+        await _get_answer_row(db, workspace, answer_id)
+        rows = await db.query(
+            """
+            SELECT l.link_id, l.workspace, l.answer_id, l.answer_version, l.snapshot_id,
+                   l.link_type, l.metadata, l.create_time,
+                   s.source_type, s.source_uri, s.file_name, s.title,
+                   LEFT(s.raw_content, 600) AS content_preview,
+                   s.content_hash, s.content_length, s.profile AS snapshot_profile,
+                   s.metadata AS snapshot_metadata, s.created_answer_ids, s.status,
+                   s.task_id, s.create_time AS snapshot_create_time
+            FROM LIGHTRAG_ANSWER_SOURCE_LINKS l
+            LEFT JOIN LIGHTRAG_ANSWER_SOURCE_SNAPSHOTS s
+              ON s.workspace = l.workspace AND s.snapshot_id = l.snapshot_id
+            WHERE l.workspace = $1 AND l.answer_id = $2
+            ORDER BY l.create_time DESC
+            """,
+            [workspace, answer_id],
+            multirows=True,
+        )
+        links: list[AnswerSourceLink] = []
+        for row in rows or []:
+            row_dict = dict(row)
+            snapshot = None
+            if row_dict.get("source_type"):
+                snapshot = _source_snapshot_from_row(
+                    {
+                        "snapshot_id": row_dict["snapshot_id"],
+                        "workspace": row_dict["workspace"],
+                        "source_type": row_dict.get("source_type"),
+                        "source_uri": row_dict.get("source_uri"),
+                        "file_name": row_dict.get("file_name"),
+                        "title": row_dict.get("title"),
+                        "content_preview": row_dict.get("content_preview"),
+                        "content_hash": row_dict.get("content_hash"),
+                        "content_length": row_dict.get("content_length"),
+                        "profile": row_dict.get("snapshot_profile"),
+                        "metadata": row_dict.get("snapshot_metadata"),
+                        "created_answer_ids": row_dict.get("created_answer_ids"),
+                        "status": row_dict.get("status"),
+                        "task_id": row_dict.get("task_id"),
+                        "create_time": row_dict.get("snapshot_create_time"),
+                    }
+                )
+            links.append(_source_link_from_row(row_dict, snapshot=snapshot))
+        return links
 
     @router.post("/{answer_id}/view", dependencies=[Depends(combined_auth)])
     async def record_answer_view(

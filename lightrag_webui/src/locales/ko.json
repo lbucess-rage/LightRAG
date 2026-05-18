@@ -1554,6 +1554,7 @@
       "detailTitle": "답변 상세",
       "contentSection": "본문",
       "guidanceSection": "가이던스",
+      "sourcesSection": "출처",
       "revisionsSection": "리비전",
       "answerTitle": "제목",
       "status": "상태",
@@ -1575,6 +1576,8 @@
       "guidanceDeleted": "가이던스가 삭제되었습니다.",
       "noGuidance": "등록된 가이던스가 없습니다.",
       "revisionDesc": "저장할 때마다 복구 가능한 답변 스냅샷이 생성됩니다.",
+      "sourcesDesc": "소스 스냅샷은 이 답변 버전이 어떤 원본에서 만들어졌는지 보여줍니다.",
+      "noSources": "이 답변에 연결된 소스 스냅샷이 없습니다.",
       "noRevisions": "기록된 리비전이 없습니다.",
       "restoreRevision": "복구",
       "revisionRestored": "리비전이 복구되었습니다."
@@ -1629,6 +1632,9 @@
       "detectedKeywords": "감지된 키워드",
       "structuredProfile": "구조화 프로파일",
       "guidanceCandidates": "가이던스 후보",
+      "snapshotHistory": "소스 스냅샷 이력",
+      "noSnapshots": "아직 기록된 소스 스냅샷이 없습니다.",
+      "answers": "답변",
       "types": {
         "plain": "일반 텍스트",
         "markdown": "마크다운",

@@ -1554,6 +1554,7 @@
       "detailTitle": "Answer Details",
       "contentSection": "Content",
       "guidanceSection": "Guidance",
+      "sourcesSection": "Sources",
       "revisionsSection": "Revisions",
       "answerTitle": "Title",
       "status": "Status",
@@ -1575,6 +1576,8 @@
       "guidanceDeleted": "Guidance deleted.",
       "noGuidance": "No guidance is registered.",
       "revisionDesc": "Every save creates a restorable answer snapshot.",
+      "sourcesDesc": "Source snapshots show where this answer version came from.",
+      "noSources": "No source snapshots are linked to this answer.",
       "noRevisions": "No revisions were recorded.",
       "restoreRevision": "Restore",
       "revisionRestored": "Revision restored."
@@ -1629,6 +1632,9 @@
       "detectedKeywords": "Detected Keywords",
       "structuredProfile": "Structured Profile",
       "guidanceCandidates": "Guidance Candidates",
+      "snapshotHistory": "Source Snapshot History",
+      "noSnapshots": "No source snapshots have been recorded yet.",
+      "answers": "answers",
       "types": {
         "plain": "Plain Text",
         "markdown": "Markdown",

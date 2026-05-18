@@ -6,6 +6,7 @@ import {
   BookOpenIcon,
   Edit3Icon,
   HistoryIcon,
+  LinkIcon,
   Loader2Icon,
   PlusIcon,
   RefreshCwIcon,
@@ -22,11 +23,13 @@ import {
   AnswerGuidanceType,
   AnswerItem,
   AnswerRevision,
+  AnswerSourceLink,
   AnswerStatus,
   addAnswerGuidance,
   archiveAnswer,
   createAnswer,
   deleteAnswerGuidance,
+  listAnswerSourceLinks,
   listAnswerGuidance,
   listAnswerRevisions,
   listAnswers,
@@ -286,7 +289,7 @@ function AnswerDetailDialog({
   onChanged: (answer: AnswerItem) => void
 }) {
   const { t } = useTranslation()
-  const [section, setSection] = useState<'content' | 'guidance' | 'revisions'>('content')
+  const [section, setSection] = useState<'content' | 'guidance' | 'sources' | 'revisions'>('content')
   const [title, setTitle] = useState('')
   const [summary, setSummary] = useState('')
   const [body, setBody] = useState('')
@@ -299,6 +302,7 @@ function AnswerDetailDialog({
   const [validUntil, setValidUntil] = useState('')
   const [guidance, setGuidance] = useState<AnswerGuidance[]>([])
   const [revisions, setRevisions] = useState<AnswerRevision[]>([])
+  const [sourceLinks, setSourceLinks] = useState<AnswerSourceLink[]>([])
   const [guidanceType, setGuidanceType] = useState<AnswerGuidanceType>('keyword')
   const [guidanceText, setGuidanceText] = useState('')
   const [guidanceWeight, setGuidanceWeight] = useState('1')
@@ -323,18 +327,20 @@ function AnswerDetailDialog({
     if (!answer) return
     setIsLoadingDetails(true)
     try {
-      const [nextGuidance, nextRevisions] = await Promise.all([
+      const [nextGuidance, nextRevisions, nextSourceLinks] = await Promise.all([
         listAnswerGuidance(answer.answer_id),
         listAnswerRevisions(answer.answer_id),
+        listAnswerSourceLinks(answer.answer_id),
       ])
       setGuidance(nextGuidance)
       setRevisions(nextRevisions)
+      setSourceLinks(nextSourceLinks)
     } catch (err) {
       toast.error(localizedErrorMessage(err, t))
     } finally {
       setIsLoadingDetails(false)
     }
-  }, [answer])
+  }, [answer, t])
 
   useEffect(() => {
     if (!open || !answer) return
@@ -437,7 +443,7 @@ function AnswerDetailDialog({
         </DialogHeader>
 
         <div className="flex flex-wrap gap-2">
-          {(['content', 'guidance', 'revisions'] as const).map((item) => (
+          {(['content', 'guidance', 'sources', 'revisions'] as const).map((item) => (
             <Button
               key={item}
               type="button"
@@ -447,6 +453,7 @@ function AnswerDetailDialog({
             >
               {item === 'content' && t('answerCatalog.library.contentSection', 'Content')}
               {item === 'guidance' && t('answerCatalog.library.guidanceSection', 'Guidance')}
+              {item === 'sources' && t('answerCatalog.library.sourcesSection', 'Sources')}
               {item === 'revisions' && t('answerCatalog.library.revisionsSection', 'Revisions')}
             </Button>
           ))}
@@ -578,6 +585,60 @@ function AnswerDetailDialog({
                       </Button>
                     </div>
                   ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {section === 'sources' && (
+          <div className="grid gap-3 py-2">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <LinkIcon className="h-4 w-4" />
+              {t('answerCatalog.library.sourcesDesc', 'Source snapshots show where this answer version came from.')}
+            </div>
+            <div className="rounded-md border">
+              {sourceLinks.length === 0 ? (
+                <div className="p-4 text-sm text-muted-foreground">{t('answerCatalog.library.noSources', 'No source snapshots are linked to this answer.')}</div>
+              ) : (
+                <div className="divide-y">
+                  {sourceLinks.map((link) => {
+                    const snapshot = link.snapshot
+                    return (
+                      <div key={link.link_id} className="grid gap-3 p-3 lg:grid-cols-[1fr_170px]">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant="outline">{snapshot?.source_type || link.link_type}</Badge>
+                            <Badge variant="outline">v{link.answer_version}</Badge>
+                            <span className="truncate text-sm font-medium">
+                              {snapshot?.title || snapshot?.file_name || snapshot?.source_uri || link.snapshot_id}
+                            </span>
+                          </div>
+                          <div className="mt-1 truncate font-mono text-xs text-muted-foreground">{link.snapshot_id}</div>
+                          {snapshot?.source_uri && <div className="mt-1 truncate text-xs text-muted-foreground">{snapshot.source_uri}</div>}
+                          {snapshot?.content_preview && (
+                            <div className="mt-2 line-clamp-2 text-xs text-muted-foreground">{snapshot.content_preview}</div>
+                          )}
+                          {snapshot?.profile?.structured?.columns?.length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-1">
+                              {snapshot.profile.structured.columns.slice(0, 8).map((column: string) => (
+                                <Badge key={column} variant="outline">{column}</Badge>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          <div>{link.create_time ? new Date(link.create_time).toLocaleString() : '-'}</div>
+                          {snapshot && (
+                            <>
+                              <div className="mt-2">{snapshot.content_length.toLocaleString()} chars</div>
+                              <div className="mt-1 font-mono">{snapshot.content_hash.slice(0, 12)}</div>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
               )}
             </div>

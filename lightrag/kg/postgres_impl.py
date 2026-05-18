@@ -1911,6 +1911,8 @@ class PostgreSQLDB:
                     "LIGHTRAG_RELATION_CHUNKS",
                     "LIGHTRAG_PROMPTS",
                     "LIGHTRAG_USER_PROMPT_TEMPLATES",
+                    "LIGHTRAG_ANSWER_SOURCE_LINKS",
+                    "LIGHTRAG_ANSWER_SOURCE_SNAPSHOTS",
                     "LIGHTRAG_ANSWER_EVENTS",
                     "LIGHTRAG_ANSWER_GUIDANCE",
                     "LIGHTRAG_ANSWER_REVISIONS",

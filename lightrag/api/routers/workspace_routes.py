@@ -185,6 +185,29 @@ ANSWER_CATALOG_COPY_TABLES = [
         "select": "'evt-' || md5($2 || ':' || event_id), $2, event_type, query, selected_answer_id, candidate_ids, scores, metadata, create_time",
         "conflict": "(event_id)",
     },
+    {
+        "table": "LIGHTRAG_ANSWER_SOURCE_SNAPSHOTS",
+        "label": "answer_source_snapshots",
+        "columns": (
+            "snapshot_id, workspace, source_type, source_uri, file_name, title, raw_content, "
+            "content_hash, content_length, profile, metadata, created_answer_ids, status, task_id, create_time"
+        ),
+        "select": (
+            "'src-' || md5($2 || ':' || snapshot_id), $2, source_type, source_uri, file_name, title, raw_content, "
+            "content_hash, content_length, profile, metadata, created_answer_ids, status, task_id, create_time"
+        ),
+        "conflict": "(snapshot_id)",
+    },
+    {
+        "table": "LIGHTRAG_ANSWER_SOURCE_LINKS",
+        "label": "answer_source_links",
+        "columns": "link_id, workspace, answer_id, answer_version, snapshot_id, link_type, metadata, create_time",
+        "select": (
+            "'asl-' || md5($2 || ':' || link_id), $2, answer_id, answer_version, "
+            "'src-' || md5($2 || ':' || snapshot_id), link_type, metadata, create_time"
+        ),
+        "conflict": "(link_id)",
+    },
 ]
 
 ANSWER_CATALOG_TABLE_NAMES = [item["table"] for item in ANSWER_CATALOG_COPY_TABLES]

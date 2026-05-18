@@ -1931,6 +1931,36 @@ export type AnswerStructuredDataset = {
   metadata: Record<string, any>
 }
 
+export type AnswerSourceSnapshot = {
+  snapshot_id: string
+  workspace: string
+  source_type: string
+  source_uri?: string | null
+  file_name?: string | null
+  title?: string | null
+  content_hash: string
+  content_length: number
+  content_preview?: string | null
+  profile: Record<string, any>
+  metadata: Record<string, any>
+  created_answer_ids: string[]
+  status: string
+  task_id?: string | null
+  create_time?: string | null
+}
+
+export type AnswerSourceLink = {
+  link_id: string
+  workspace: string
+  answer_id: string
+  answer_version: number
+  snapshot_id: string
+  link_type: string
+  metadata: Record<string, any>
+  create_time?: string | null
+  snapshot?: AnswerSourceSnapshot | null
+}
+
 export type AnswerStructuredFilter = {
   field: string
   operator: 'contains' | 'equals' | 'starts_with' | 'ends_with'
@@ -2072,6 +2102,8 @@ export type AnswerSourceDraftRequest = {
 export type AnswerSourceDraftResponse = {
   answer: AnswerItem
   guidance: AnswerGuidance[]
+  snapshot?: AnswerSourceSnapshot | null
+  source_link?: AnswerSourceLink | null
 }
 
 export const listAnswers = async (params?: {
@@ -2096,8 +2128,23 @@ export const createAnswerSourceDraft = async (
   return response.data
 }
 
+export const listAnswerSourceSnapshots = async (params?: {
+  source_type?: string
+  answer_id?: string
+  search?: string
+  limit?: number
+}): Promise<AnswerSourceSnapshot[]> => {
+  const response = await axiosInstance.get('/api/answers/sources/snapshots', { params })
+  return response.data
+}
+
 export const getAnswer = async (answerId: string): Promise<AnswerItem> => {
   const response = await axiosInstance.get(`/api/answers/${encodeURIComponent(answerId)}`)
+  return response.data
+}
+
+export const listAnswerSourceLinks = async (answerId: string): Promise<AnswerSourceLink[]> => {
+  const response = await axiosInstance.get(`/api/answers/${encodeURIComponent(answerId)}/sources`)
   return response.data
 }
 

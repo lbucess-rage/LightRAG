@@ -1,4 +1,4 @@
-import { ChangeEvent, useEffect, useMemo, useState } from 'react'
+import { ChangeEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import {
@@ -17,7 +17,9 @@ import {
   AnswerContentFormat,
   AnswerGuidanceType,
   AnswerItem,
+  AnswerSourceSnapshot,
   createAnswerSourceDraft,
+  listAnswerSourceSnapshots,
 } from '@/api/lightrag'
 import AnswerHelpButton from '@/components/answers/AnswerHelpButton'
 import Badge from '@/components/ui/Badge'
@@ -304,7 +306,23 @@ export default function AnswerSources() {
   const [fileName, setFileName] = useState('')
   const [candidate, setCandidate] = useState<AnswerCandidate | null>(null)
   const [createdAnswer, setCreatedAnswer] = useState<AnswerItem | null>(null)
+  const [snapshots, setSnapshots] = useState<AnswerSourceSnapshot[]>([])
+  const [isLoadingSnapshots, setIsLoadingSnapshots] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const fetchSnapshots = useCallback(async () => {
+    const workspaceId = currentWorkspaceId
+    setIsLoadingSnapshots(true)
+    try {
+      const result = await listAnswerSourceSnapshots({ limit: 20 })
+      if (workspaceId !== useWorkspaceStore.getState().currentWorkspaceId) return
+      setSnapshots(result)
+    } catch (err) {
+      toast.error(localizedErrorMessage(err, t))
+    } finally {
+      setIsLoadingSnapshots(false)
+    }
+  }, [currentWorkspaceId, t])
 
   useEffect(() => {
     setSourceUri('')
@@ -318,8 +336,13 @@ export default function AnswerSources() {
     setFileName('')
     setCandidate(null)
     setCreatedAnswer(null)
+    setSnapshots([])
     setContentFormat(sourceFormat[sourceType])
   }, [currentWorkspaceId])
+
+  useEffect(() => {
+    fetchSnapshots()
+  }, [fetchSnapshots])
 
   const sourceHelp = useMemo(() => {
     if (sourceType === 'url') return t('answerCatalog.sources.urlHelp', 'URL is stored as source metadata. Paste the relevant content to create a reviewable answer draft.')
@@ -432,6 +455,7 @@ export default function AnswerSources() {
       if (workspaceId !== useWorkspaceStore.getState().currentWorkspaceId) return
       setCreatedAnswer(result.answer)
       toast.success(t('answerCatalog.sources.created', 'Answer draft created from source.'))
+      fetchSnapshots()
       resetForm()
     } catch (err) {
       toast.error(localizedErrorMessage(err, t))
@@ -681,6 +705,49 @@ export default function AnswerSources() {
             </div>
           </div>
         </div>
+      </div>
+
+      <div className="rounded-md border p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="font-semibold">{t('answerCatalog.sources.snapshotHistory', 'Source Snapshot History')}</div>
+          <Button variant="outline" size="sm" onClick={fetchSnapshots} disabled={isLoadingSnapshots}>
+            {isLoadingSnapshots ? <Loader2Icon className="h-4 w-4 animate-spin" /> : <EyeIcon className="h-4 w-4" />}
+            {t('common.refresh', 'Refresh')}
+          </Button>
+        </div>
+        {snapshots.length === 0 ? (
+          <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+            {t('answerCatalog.sources.noSnapshots', 'No source snapshots have been recorded yet.')}
+          </div>
+        ) : (
+          <div className="grid gap-2">
+            {snapshots.map((snapshot) => (
+              <div key={snapshot.snapshot_id} className="grid gap-3 rounded-md border bg-muted/10 p-3 lg:grid-cols-[1fr_180px_150px] lg:items-center">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline">{snapshot.source_type}</Badge>
+                    <span className="truncate text-sm font-medium">{snapshot.title || snapshot.file_name || snapshot.source_uri || snapshot.snapshot_id}</span>
+                  </div>
+                  <div className="mt-1 truncate font-mono text-xs text-muted-foreground">{snapshot.snapshot_id}</div>
+                  {snapshot.content_preview && (
+                    <div className="mt-2 line-clamp-2 text-xs text-muted-foreground">{snapshot.content_preview}</div>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-1 text-xs">
+                  <Badge variant="outline">{snapshot.content_length.toLocaleString()} chars</Badge>
+                  <Badge variant="outline">
+                    {(snapshot.created_answer_ids || []).length} {t('answerCatalog.sources.answers', 'answers')}
+                  </Badge>
+                  {snapshot.profile?.structured?.kind && <Badge variant="outline">{snapshot.profile.structured.kind}</Badge>}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {snapshot.create_time ? new Date(snapshot.create_time).toLocaleString() : '-'}
+                  <div className="mt-1 font-mono">{snapshot.content_hash.slice(0, 12)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )
