@@ -551,10 +551,12 @@ Remaining implementation notes:
   - workspace data deletion also cleans answer items, revisions, guidance, and events.
 - External lookup APIs added:
   - `POST /api/answers/search`: returns the selected approved answer body/summary plus candidates, confidence, source metadata, and trace ID.
+  - `POST /api/answers/source-draft`: creates an answer draft and guidance rows from source-wizard output in one API call.
   - `POST /api/answers/{answer_id}/view`: records a view event for analytics.
   - `POST /api/answers/{answer_id}/feedback`: records helpfulness/correction feedback for analytics.
   - `GET /api/answers/stats/summary`: now includes resolve/search/view/feedback event counts.
 - API client helpers were added in `lightrag_webui/src/api/lightrag.ts`.
+- The FAQ `Sources` screen now uses `source-draft` instead of separate answer/guidance calls, so UI and external integrations share the same materialization contract.
 - Verification:
   - Python compile passed for `workspace_routes.py`, `postgres_impl.py`, and `answer_routes.py`.
   - `git diff --check` passed.
@@ -563,3 +565,4 @@ Remaining implementation notes:
   - `faq_phase_ab_test_20260517` resolved `FAQ 워크스페이스는 어떻게 답변을 찾나요?` through `/api/answers/search` to `ANS-FAQ-PHASEAB-001`.
   - View and feedback event writes succeeded, and summary stats reported `searches=1`, `views=1`, `feedback=1` for the test workspace.
   - Created a temporary FAQ workspace, copied answer catalog data into it through `copy-data`, confirmed 5 answer rows were visible, then deleted the temporary workspace with `delete_data=true`.
+  - Created another temporary FAQ workspace, used `/api/answers/source-draft` to create one structured-source draft plus two guidance rows, searched it with `include_drafts=true`, and deleted the temporary workspace.

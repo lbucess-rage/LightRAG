@@ -2043,6 +2043,37 @@ export type AnswerFeedbackRequest = {
   metadata?: Record<string, any>
 }
 
+export type AnswerSourceGuidanceCandidate = {
+  guidance_type?: AnswerGuidanceType
+  text: string
+  weight?: number
+  source?: string | null
+  metadata?: Record<string, any>
+}
+
+export type AnswerSourceDraftRequest = {
+  answer_id?: string
+  source_type?: 'plain' | 'markdown' | 'html' | 'url' | 'file' | 'structured'
+  source_uri?: string | null
+  file_name?: string | null
+  title: string
+  body: string
+  approved_summary?: string | null
+  content_format?: AnswerContentFormat
+  display_policy?: AnswerDisplayPolicy
+  status?: AnswerStatus
+  priority?: number
+  tags?: string[]
+  source_profile?: Record<string, any>
+  guidance?: AnswerSourceGuidanceCandidate[]
+  metadata?: Record<string, any>
+}
+
+export type AnswerSourceDraftResponse = {
+  answer: AnswerItem
+  guidance: AnswerGuidance[]
+}
+
 export const listAnswers = async (params?: {
   status?: string
   search?: string
@@ -2055,6 +2086,13 @@ export const listAnswers = async (params?: {
 
 export const createAnswer = async (request: AnswerCreateRequest): Promise<AnswerItem> => {
   const response = await axiosInstance.post('/api/answers', request)
+  return response.data
+}
+
+export const createAnswerSourceDraft = async (
+  request: AnswerSourceDraftRequest
+): Promise<AnswerSourceDraftResponse> => {
+  const response = await axiosInstance.post('/api/answers/source-draft', request)
   return response.data
 }
 

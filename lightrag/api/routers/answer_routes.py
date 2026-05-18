@@ -382,6 +382,37 @@ class AnswerFeedbackRequest(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class SourceGuidanceCandidate(BaseModel):
+    guidance_type: GuidanceType = "keyword"
+    text: str = Field(..., min_length=1)
+    weight: float = Field(default=1.0, ge=0.0, le=10.0)
+    source: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AnswerSourceDraftRequest(BaseModel):
+    answer_id: Optional[str] = Field(default=None, description="Optional stable answer id. Defaults to ANS-<uuid>.")
+    source_type: Literal["plain", "markdown", "html", "url", "file", "structured"] = "plain"
+    source_uri: Optional[str] = None
+    file_name: Optional[str] = None
+    title: str = Field(..., min_length=1, max_length=500)
+    body: str = Field(..., min_length=1)
+    approved_summary: Optional[str] = None
+    content_format: ContentFormat = "markdown"
+    display_policy: DisplayPolicy = "both"
+    status: AnswerStatus = "draft"
+    priority: int = 0
+    tags: list[str] = Field(default_factory=list)
+    source_profile: dict[str, Any] = Field(default_factory=dict)
+    guidance: list[SourceGuidanceCandidate] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AnswerSourceDraftResponse(BaseModel):
+    answer: AnswerItem
+    guidance: list[AnswerGuidance] = Field(default_factory=list)
+
+
 class StructuredDataset(BaseModel):
     answer_id: str
     title: str
@@ -950,6 +981,96 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             if "duplicate" in message.lower() or "unique" in message.lower():
                 raise HTTPException(status_code=409, detail=f"Answer '{answer_id}' already exists")
             logger.error("Failed to create answer: %s\n%s", e, traceback.format_exc())
+            raise HTTPException(status_code=500, detail=message)
+
+    @router.post(
+        "/source-draft",
+        response_model=AnswerSourceDraftResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def create_answer_source_draft(request: Request, payload: AnswerSourceDraftRequest):
+        workspace, db = await db_for_request(request)
+        answer_id = payload.answer_id or f"ANS-{uuid.uuid4().hex[:12]}"
+        source_metadata = {
+            **payload.metadata,
+            "created_from": payload.metadata.get("created_from") or "answer_source_wizard",
+            "source_type": payload.source_type,
+            "source_uri": payload.source_uri,
+            "file_name": payload.file_name,
+            "source_profile": payload.source_profile,
+        }
+        try:
+            row = await db.query(
+                """
+                INSERT INTO LIGHTRAG_ANSWER_ITEMS
+                    (workspace, answer_id, title, body, approved_summary, content_format,
+                     display_policy, status, version, valid_from, valid_until, priority,
+                     tags, metadata, publish_time)
+                VALUES
+                    ($1, $2, $3, $4, $5, $6, $7, $8, 1, NULL, NULL, $9,
+                     $10::jsonb, $11::jsonb, CASE WHEN $8 = 'published' THEN NOW() ELSE NULL END)
+                RETURNING workspace, answer_id, title, body, approved_summary, content_format,
+                          display_policy, status, version, valid_from, valid_until, priority,
+                          tags, metadata, publish_time, create_time, update_time
+                """,
+                [
+                    workspace,
+                    answer_id,
+                    payload.title,
+                    payload.body,
+                    payload.approved_summary,
+                    payload.content_format,
+                    payload.display_policy,
+                    payload.status,
+                    payload.priority,
+                    _json_list(payload.tags),
+                    _json(source_metadata),
+                ],
+            )
+            if not row:
+                raise HTTPException(status_code=500, detail="Failed to create answer draft")
+            await _record_revision(db, dict(row))
+
+            created_guidance: list[AnswerGuidance] = []
+            for item in payload.guidance:
+                if not item.text.strip():
+                    continue
+                guidance_metadata = {
+                    **item.metadata,
+                    "created_from": "answer_source_wizard",
+                    "source": item.source,
+                }
+                guidance_row = await db.query(
+                    """
+                    INSERT INTO LIGHTRAG_ANSWER_GUIDANCE
+                        (guidance_id, workspace, answer_id, guidance_type, text, weight, metadata)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+                    RETURNING guidance_id, workspace, answer_id, guidance_type, text, weight, metadata, create_time
+                    """,
+                    [
+                        f"agd-{uuid.uuid4().hex}",
+                        workspace,
+                        answer_id,
+                        item.guidance_type,
+                        item.text.strip(),
+                        item.weight,
+                        _json(guidance_metadata),
+                    ],
+                )
+                if guidance_row:
+                    created_guidance.append(_guidance_from_row(dict(guidance_row)))
+
+            return AnswerSourceDraftResponse(
+                answer=_answer_from_row(dict(row)),
+                guidance=created_guidance,
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            message = str(e)
+            if "duplicate" in message.lower() or "unique" in message.lower():
+                raise HTTPException(status_code=409, detail=f"Answer '{answer_id}' already exists")
+            logger.error("Failed to create answer source draft: %s\n%s", e, traceback.format_exc())
             raise HTTPException(status_code=500, detail=message)
 
     @router.get("/events", response_model=list[AnswerEvent], dependencies=[Depends(combined_auth)])

@@ -17,8 +17,7 @@ import {
   AnswerContentFormat,
   AnswerGuidanceType,
   AnswerItem,
-  addAnswerGuidance,
-  createAnswer,
+  createAnswerSourceDraft,
 } from '@/api/lightrag'
 import AnswerHelpButton from '@/components/answers/AnswerHelpButton'
 import Badge from '@/components/ui/Badge'
@@ -383,7 +382,7 @@ export default function AnswerSources() {
     }
     setIsSubmitting(true)
     try {
-      const answer = await createAnswer({
+      const result = await createAnswerSourceDraft({
         title: title.trim(),
         approved_summary: summary.trim() || null,
         body: body.trim(),
@@ -392,30 +391,27 @@ export default function AnswerSources() {
         status: 'draft',
         priority: Number(priority) || 0,
         tags: parseTags(tags),
-        guidance: [],
         metadata: {
           created_from: 'answer_source_wizard',
-          source_type: sourceType,
-          source_uri: sourceUri.trim() || undefined,
-          file_name: fileName || undefined,
-          source_profile: candidate?.profile,
         },
-      })
-      const guidanceToCreate = guidanceCandidates.filter((item) => item.text.trim())
-      await Promise.all(
-        guidanceToCreate.map((item) =>
-          addAnswerGuidance(answer.answer_id, {
+        source_type: sourceType,
+        source_uri: sourceUri.trim() || undefined,
+        file_name: fileName || undefined,
+        source_profile: candidate?.profile,
+        guidance: guidanceCandidates
+          .filter((item) => item.text.trim())
+          .map((item) => ({
             guidance_type: item.guidance_type,
             text: item.text.trim(),
             weight: item.weight,
+            source: item.source,
             metadata: {
               created_from: 'answer_source_wizard',
               source: item.source,
             },
-          })
-        )
-      )
-      setCreatedAnswer(answer)
+          })),
+      })
+      setCreatedAnswer(result.answer)
       toast.success(t('answerCatalog.sources.created', 'Answer draft created from source.'))
       resetForm()
     } catch (err) {
