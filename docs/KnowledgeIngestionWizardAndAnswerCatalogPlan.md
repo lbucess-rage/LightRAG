@@ -385,6 +385,8 @@ Backward compatibility rules:
     - list revisions
     - list/add/delete guidance
     - deterministic answer resolve
+    - fixed-answer search response
+    - view and feedback event logging
     - summary stats
   - frontend screens:
     - `AnswerLibrary`
@@ -541,3 +543,23 @@ Remaining implementation notes:
   - FAQ workspace shows answer tabs and Matching screen correctly.
   - KMS workspace switch shows KMS tabs and document content.
   - No `/api/answers` 409 conflict appeared during the KMS smoke path; only expected answer stats calls for answer workspaces returned 200.
+
+### Phase 1 Data Lifecycle And External API Status - 2026-05-18
+
+- Workspace lifecycle now includes answer-catalog tables:
+  - `copy-data` and `move-data` copy answer items, revisions, guidance, and events when document data is included.
+  - workspace data deletion also cleans answer items, revisions, guidance, and events.
+- External lookup APIs added:
+  - `POST /api/answers/search`: returns the selected approved answer body/summary plus candidates, confidence, source metadata, and trace ID.
+  - `POST /api/answers/{answer_id}/view`: records a view event for analytics.
+  - `POST /api/answers/{answer_id}/feedback`: records helpfulness/correction feedback for analytics.
+  - `GET /api/answers/stats/summary`: now includes resolve/search/view/feedback event counts.
+- API client helpers were added in `lightrag_webui/src/api/lightrag.ts`.
+- Verification:
+  - Python compile passed for `workspace_routes.py`, `postgres_impl.py`, and `answer_routes.py`.
+  - `git diff --check` passed.
+  - WebUI `bun run build` succeeded.
+  - Server restarted on port `9422`, health check returned healthy.
+  - `faq_phase_ab_test_20260517` resolved `FAQ 워크스페이스는 어떻게 답변을 찾나요?` through `/api/answers/search` to `ANS-FAQ-PHASEAB-001`.
+  - View and feedback event writes succeeded, and summary stats reported `searches=1`, `views=1`, `feedback=1` for the test workspace.
+  - Created a temporary FAQ workspace, copied answer catalog data into it through `copy-data`, confirmed 5 answer rows were visible, then deleted the temporary workspace with `delete_data=true`.

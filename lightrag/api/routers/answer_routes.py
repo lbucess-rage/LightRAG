@@ -337,6 +337,51 @@ class ResolveResponse(BaseModel):
     rationale: str
 
 
+class AnswerSearchRequest(BaseModel):
+    query: str = Field(..., min_length=1)
+    top_k: int = Field(default=5, ge=1, le=20)
+    min_score: float = Field(default=0.18, ge=0.0, le=1.0)
+    include_drafts: bool = False
+    strategy: ResolveStrategy = "balanced"
+    response_policy: Optional[DisplayPolicy] = None
+    include_candidates: bool = True
+
+
+class AnswerSearchResponse(BaseModel):
+    matched: bool
+    answer_id: Optional[str] = None
+    title: Optional[str] = None
+    response: Optional[str] = None
+    summary: Optional[str] = None
+    full_content: Optional[str] = None
+    display_policy: Optional[DisplayPolicy] = None
+    content_format: Optional[ContentFormat] = None
+    status: Optional[AnswerStatus] = None
+    version: Optional[int] = None
+    valid_from: Optional[str] = None
+    valid_until: Optional[str] = None
+    confidence: float = 0.0
+    tags: list[str] = Field(default_factory=list)
+    source_type: Optional[str] = None
+    source_uri: Optional[str] = None
+    candidates: list[ResolveCandidate] = Field(default_factory=list)
+    trace_id: str
+    rationale: str
+
+
+class AnswerViewRequest(BaseModel):
+    query: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AnswerFeedbackRequest(BaseModel):
+    query: Optional[str] = None
+    helpful: Optional[bool] = None
+    note: Optional[str] = None
+    selected_alternative_id: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class StructuredDataset(BaseModel):
     answer_id: str
     title: str
@@ -758,6 +803,19 @@ def _score_candidate(
     return score, matched_guidance[:8], reason or "weak_match", details
 
 
+def _render_answer_response(answer: AnswerItem, display_policy: Optional[DisplayPolicy] = None) -> tuple[str, DisplayPolicy]:
+    policy = display_policy or answer.display_policy
+    summary = (answer.approved_summary or "").strip()
+    body = answer.body.strip()
+    if policy == "summary":
+        return summary or body, policy
+    if policy == "full":
+        return body, policy
+    if summary and body and summary != body:
+        return f"{summary}\n\n{body}", policy
+    return body or summary, policy
+
+
 def create_answer_routes(rag, api_key: Optional[str] = None):
     combined_auth = get_combined_auth_dependency(api_key)
 
@@ -996,6 +1054,57 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
         row = await _get_answer_row(db, workspace, answer_id)
         return _answer_from_row(dict(row))
 
+    @router.post("/{answer_id}/view", dependencies=[Depends(combined_auth)])
+    async def record_answer_view(
+        request: Request,
+        answer_id: str,
+        payload: Optional[AnswerViewRequest] = None,
+    ):
+        workspace, db = await db_for_request(request)
+        await _get_answer_row(db, workspace, answer_id)
+        event_payload = payload or AnswerViewRequest()
+        event_id = await _log_event(
+            db,
+            workspace,
+            "view",
+            query=event_payload.query,
+            selected_answer_id=answer_id,
+            candidate_ids=[answer_id],
+            scores={answer_id: 1.0},
+            metadata=event_payload.metadata,
+        )
+        return {"message": "Answer view recorded", "event_id": event_id, "answer_id": answer_id}
+
+    @router.post("/{answer_id}/feedback", dependencies=[Depends(combined_auth)])
+    async def record_answer_feedback(
+        request: Request,
+        answer_id: str,
+        payload: AnswerFeedbackRequest,
+    ):
+        workspace, db = await db_for_request(request)
+        await _get_answer_row(db, workspace, answer_id)
+        candidate_ids = [answer_id]
+        if payload.selected_alternative_id:
+            await _get_answer_row(db, workspace, payload.selected_alternative_id)
+            candidate_ids.append(payload.selected_alternative_id)
+        metadata = {
+            **payload.metadata,
+            "helpful": payload.helpful,
+            "note": payload.note,
+            "selected_alternative_id": payload.selected_alternative_id,
+        }
+        event_id = await _log_event(
+            db,
+            workspace,
+            "feedback",
+            query=payload.query,
+            selected_answer_id=answer_id,
+            candidate_ids=candidate_ids,
+            scores={answer_id: 1.0},
+            metadata=metadata,
+        )
+        return {"message": "Answer feedback recorded", "event_id": event_id, "answer_id": answer_id}
+
     @router.patch("/{answer_id}", response_model=AnswerItem, dependencies=[Depends(combined_auth)])
     async def update_answer(request: Request, answer_id: str, payload: AnswerUpdateRequest):
         workspace, db = await db_for_request(request)
@@ -1216,10 +1325,15 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
         )
         return {"message": "Guidance deleted", "guidance_id": guidance_id}
 
-    @router.post("/resolve", response_model=ResolveResponse, dependencies=[Depends(combined_auth)])
-    async def resolve_answer(request: Request, payload: ResolveRequest):
+    async def resolve_answer_candidates(
+        workspace: str,
+        db,
+        payload: ResolveRequest,
+        *,
+        event_type: str = "resolve",
+        event_metadata: Optional[dict[str, Any]] = None,
+    ) -> ResolveResponse:
         started = time.time()
-        workspace, db = await db_for_request(request)
         status_filter = ["published"] if not payload.include_drafts else ["draft", "published"]
         rows = await db.query(
             """
@@ -1282,12 +1396,13 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
         trace_id = await _log_event(
             db,
             workspace,
-            "resolve",
+            event_type,
             query=payload.query,
             selected_answer_id=selected.answer.answer_id if selected else None,
             candidate_ids=[item.answer.answer_id for item in candidates],
             scores={item.answer.answer_id: item.score for item in candidates},
             metadata={
+                **(event_metadata or {}),
                 "latency_ms": int((time.time() - started) * 1000),
                 "mode": "weighted_deterministic",
                 "strategy": payload.strategy,
@@ -1300,6 +1415,63 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             candidates=candidates,
             trace_id=trace_id,
             rationale=rationale,
+        )
+
+    @router.post("/resolve", response_model=ResolveResponse, dependencies=[Depends(combined_auth)])
+    async def resolve_answer(request: Request, payload: ResolveRequest):
+        workspace, db = await db_for_request(request)
+        return await resolve_answer_candidates(workspace, db, payload, event_type="resolve")
+
+    @router.post("/search", response_model=AnswerSearchResponse, dependencies=[Depends(combined_auth)])
+    async def search_answer(request: Request, payload: AnswerSearchRequest):
+        workspace, db = await db_for_request(request)
+        result = await resolve_answer_candidates(
+            workspace,
+            db,
+            ResolveRequest(
+                query=payload.query,
+                top_k=payload.top_k,
+                min_score=payload.min_score,
+                include_drafts=payload.include_drafts,
+                strategy=payload.strategy,
+            ),
+            event_type="search",
+            event_metadata={
+                "response_policy": payload.response_policy,
+                "include_candidates": payload.include_candidates,
+            },
+        )
+        answer = result.selected_answer
+        if answer is None:
+            return AnswerSearchResponse(
+                matched=False,
+                confidence=0.0,
+                candidates=result.candidates if payload.include_candidates else [],
+                trace_id=result.trace_id,
+                rationale=result.rationale,
+            )
+
+        response_text, display_policy = _render_answer_response(answer, payload.response_policy)
+        return AnswerSearchResponse(
+            matched=True,
+            answer_id=answer.answer_id,
+            title=answer.title,
+            response=response_text,
+            summary=answer.approved_summary,
+            full_content=answer.body,
+            display_policy=display_policy,
+            content_format=answer.content_format,
+            status=answer.status,
+            version=answer.version,
+            valid_from=answer.valid_from,
+            valid_until=answer.valid_until,
+            confidence=result.confidence,
+            tags=answer.tags,
+            source_type=answer.metadata.get("source_type") or answer.metadata.get("created_from"),
+            source_uri=answer.metadata.get("source_uri"),
+            candidates=result.candidates if payload.include_candidates else [],
+            trace_id=result.trace_id,
+            rationale=result.rationale,
         )
 
     @router.get("/stats/summary", dependencies=[Depends(combined_auth)])
@@ -1319,9 +1491,13 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
         )
         events = await db.query(
             """
-            SELECT COUNT(*)::INT AS resolves
+            SELECT
+              COUNT(*) FILTER (WHERE event_type = 'resolve')::INT AS resolves,
+              COUNT(*) FILTER (WHERE event_type = 'search')::INT AS searches,
+              COUNT(*) FILTER (WHERE event_type = 'view')::INT AS views,
+              COUNT(*) FILTER (WHERE event_type = 'feedback')::INT AS feedback
             FROM LIGHTRAG_ANSWER_EVENTS
-            WHERE workspace = $1 AND event_type = 'resolve'
+            WHERE workspace = $1
             """,
             [workspace],
         )

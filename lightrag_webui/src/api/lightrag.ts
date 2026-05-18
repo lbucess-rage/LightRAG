@@ -2003,6 +2003,46 @@ export type AnswerResolveResponse = {
   rationale: string
 }
 
+export type AnswerSearchRequest = AnswerResolveRequest & {
+  response_policy?: AnswerDisplayPolicy | null
+  include_candidates?: boolean
+}
+
+export type AnswerSearchResponse = {
+  matched: boolean
+  answer_id?: string | null
+  title?: string | null
+  response?: string | null
+  summary?: string | null
+  full_content?: string | null
+  display_policy?: AnswerDisplayPolicy | null
+  content_format?: AnswerContentFormat | null
+  status?: AnswerStatus | null
+  version?: number | null
+  valid_from?: string | null
+  valid_until?: string | null
+  confidence: number
+  tags: string[]
+  source_type?: string | null
+  source_uri?: string | null
+  candidates: AnswerResolveCandidate[]
+  trace_id: string
+  rationale: string
+}
+
+export type AnswerViewRequest = {
+  query?: string | null
+  metadata?: Record<string, any>
+}
+
+export type AnswerFeedbackRequest = {
+  query?: string | null
+  helpful?: boolean | null
+  note?: string | null
+  selected_alternative_id?: string | null
+  metadata?: Record<string, any>
+}
+
 export const listAnswers = async (params?: {
   status?: string
   search?: string
@@ -2070,6 +2110,27 @@ export const restoreAnswerRevision = async (answerId: string, revisionId: string
 
 export const resolveAnswer = async (request: AnswerResolveRequest): Promise<AnswerResolveResponse> => {
   const response = await axiosInstance.post('/api/answers/resolve', request)
+  return response.data
+}
+
+export const searchAnswer = async (request: AnswerSearchRequest): Promise<AnswerSearchResponse> => {
+  const response = await axiosInstance.post('/api/answers/search', request)
+  return response.data
+}
+
+export const recordAnswerView = async (
+  answerId: string,
+  request: AnswerViewRequest = {}
+): Promise<{ message: string; event_id: string; answer_id: string }> => {
+  const response = await axiosInstance.post(`/api/answers/${encodeURIComponent(answerId)}/view`, request)
+  return response.data
+}
+
+export const submitAnswerFeedback = async (
+  answerId: string,
+  request: AnswerFeedbackRequest
+): Promise<{ message: string; event_id: string; answer_id: string }> => {
+  const response = await axiosInstance.post(`/api/answers/${encodeURIComponent(answerId)}/feedback`, request)
   return response.data
 }
 

@@ -148,6 +148,48 @@ class CopyDataRequest(BaseModel):
     )
 
 
+ANSWER_CATALOG_COPY_TABLES = [
+    {
+        "table": "LIGHTRAG_ANSWER_ITEMS",
+        "label": "answer_items",
+        "columns": (
+            "workspace, answer_id, title, body, approved_summary, content_format, "
+            "display_policy, status, version, valid_from, valid_until, priority, "
+            "tags, metadata, publish_time, create_time, update_time"
+        ),
+        "select": (
+            "$2, answer_id, title, body, approved_summary, content_format, "
+            "display_policy, status, version, valid_from, valid_until, priority, "
+            "tags, metadata, publish_time, create_time, update_time"
+        ),
+        "conflict": "(workspace, answer_id)",
+    },
+    {
+        "table": "LIGHTRAG_ANSWER_REVISIONS",
+        "label": "answer_revisions",
+        "columns": "revision_id, workspace, answer_id, version, snapshot_json, created_at",
+        "select": "'rev-' || md5($2 || ':' || revision_id), $2, answer_id, version, snapshot_json, created_at",
+        "conflict": "(revision_id)",
+    },
+    {
+        "table": "LIGHTRAG_ANSWER_GUIDANCE",
+        "label": "answer_guidance",
+        "columns": "guidance_id, workspace, answer_id, guidance_type, text, weight, metadata, create_time",
+        "select": "'agd-' || md5($2 || ':' || guidance_id), $2, answer_id, guidance_type, text, weight, metadata, create_time",
+        "conflict": "(guidance_id)",
+    },
+    {
+        "table": "LIGHTRAG_ANSWER_EVENTS",
+        "label": "answer_events",
+        "columns": "event_id, workspace, event_type, query, selected_answer_id, candidate_ids, scores, metadata, create_time",
+        "select": "'evt-' || md5($2 || ':' || event_id), $2, event_type, query, selected_answer_id, candidate_ids, scores, metadata, create_time",
+        "conflict": "(event_id)",
+    },
+]
+
+ANSWER_CATALOG_TABLE_NAMES = [item["table"] for item in ANSWER_CATALOG_COPY_TABLES]
+
+
 # =====================================================
 # Route Factory
 # =====================================================
@@ -174,6 +216,32 @@ def create_workspace_routes(rag, api_key: Optional[str] = None):
             return is_busy, busy_start_time
         except Exception:
             return False, None
+
+    async def copy_answer_catalog_tables(
+        db,
+        source_workspace_id: str,
+        target_workspace_id: str,
+        *,
+        return_labels: bool = True,
+    ) -> list[str]:
+        """Copy FAQ answer-catalog tables while avoiding global ID conflicts."""
+        copied_tables: list[str] = []
+        for spec in ANSWER_CATALOG_COPY_TABLES:
+            try:
+                copy_sql = f"""
+                    INSERT INTO {spec["table"]} ({spec["columns"]})
+                    SELECT {spec["select"]}
+                    FROM {spec["table"]} WHERE workspace = $1
+                    ON CONFLICT {spec["conflict"]} DO NOTHING
+                """
+                await db.execute(
+                    copy_sql,
+                    {"src": source_workspace_id, "dst": target_workspace_id},
+                )
+                copied_tables.append(spec["label"] if return_labels else spec["table"])
+            except Exception as e:
+                logger.warning(f"Failed to copy {spec['table']}: {e}")
+        return copied_tables
 
     # =====================================================
     # CRUD Endpoints
@@ -746,6 +814,15 @@ def create_workspace_routes(rag, api_key: Optional[str] = None):
                 except Exception as e:
                     logger.warning(f"Failed to copy documents: {e}")
 
+                copied_tables.extend(
+                    await copy_answer_catalog_tables(
+                        db,
+                        workspace_id,
+                        request.target_workspace_id,
+                        return_labels=True,
+                    )
+                )
+
             # Copy entities and relations
             if request.include_entities:
                 try:
@@ -952,9 +1029,28 @@ def create_workspace_routes(rag, api_key: Optional[str] = None):
                 except Exception as e:
                     logger.warning(f"Failed to copy {table_name}: {e}")
 
+            answer_catalog_moved_tables = []
+            if request.include_documents:
+                answer_catalog_moved_tables = await copy_answer_catalog_tables(
+                    db,
+                    workspace_id,
+                    request.target_workspace_id,
+                    return_labels=False,
+                )
+                moved_tables.extend(answer_catalog_moved_tables)
+
             # Delete source data after successful copy
             for table_name, _ in tables_config:
                 if table_name in moved_tables:
+                    try:
+                        delete_sql = f"DELETE FROM {table_name} WHERE workspace = $1"
+                        await db.execute(delete_sql, {"workspace": workspace_id})
+                        deleted_tables.append(table_name)
+                    except Exception as e:
+                        logger.warning(f"Failed to delete from {table_name}: {e}")
+
+            for table_name in ANSWER_CATALOG_TABLE_NAMES:
+                if table_name in answer_catalog_moved_tables:
                     try:
                         delete_sql = f"DELETE FROM {table_name} WHERE workspace = $1"
                         await db.execute(delete_sql, {"workspace": workspace_id})

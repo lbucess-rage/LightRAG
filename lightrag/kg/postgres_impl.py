@@ -1911,6 +1911,10 @@ class PostgreSQLDB:
                     "LIGHTRAG_RELATION_CHUNKS",
                     "LIGHTRAG_PROMPTS",
                     "LIGHTRAG_USER_PROMPT_TEMPLATES",
+                    "LIGHTRAG_ANSWER_EVENTS",
+                    "LIGHTRAG_ANSWER_GUIDANCE",
+                    "LIGHTRAG_ANSWER_REVISIONS",
+                    "LIGHTRAG_ANSWER_ITEMS",
                 ]
                 for table in tables_to_clean:
                     try:
