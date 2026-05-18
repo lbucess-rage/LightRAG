@@ -1376,6 +1376,10 @@
   "workspace": {
     "selectWorkspace": "Select Workspace",
     "noWorkspaces": "No workspaces found",
+    "loading": "Loading workspace...",
+    "loadFailedTitle": "Workspace load failed",
+    "loadFailedDescription": "The server is reachable, but workspace data did not load in time. This can happen after VPN reconnects or database connection resets.",
+    "retryLoad": "Retry",
     "default": "Default",
     "docsCount": "{{count}} docs",
     "busy": "Processing",

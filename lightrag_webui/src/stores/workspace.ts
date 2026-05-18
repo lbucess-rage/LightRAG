@@ -110,8 +110,17 @@ const useWorkspaceStoreBase = create<WorkspaceState>()(
           try {
             const response = await getWorkspaces(1, 100, force)
             lastWorkspaceFetchAt = Date.now()
-            const currentWorkspace = response.workspaces.find(ws => ws.workspace_id === get().currentWorkspaceId)
+            const requestedWorkspaceId = get().currentWorkspaceId
+            let currentWorkspace = response.workspaces.find(ws => ws.workspace_id === requestedWorkspaceId)
+            let currentWorkspaceId = requestedWorkspaceId
+
+            if (!currentWorkspace && response.workspaces.length > 0) {
+              currentWorkspace = response.workspaces.find(ws => ws.is_default) || response.workspaces[0]
+              currentWorkspaceId = currentWorkspace.workspace_id
+            }
+
             set({
+              currentWorkspaceId,
               workspaces: response.workspaces,
               currentWorkspace: currentWorkspace || get().currentWorkspace,
               totalWorkspaces: response.total,

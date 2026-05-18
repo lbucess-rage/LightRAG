@@ -1685,6 +1685,7 @@ export type CopyDataRequest = {
  * @returns Promise with paginated workspaces response
  */
 const WORKSPACE_LIST_DEDUPE_MS = 1500
+const WORKSPACE_API_TIMEOUT_MS = 10000
 let workspaceListPromise: Promise<WorkspaceListResponse> | null = null
 let workspaceListCache: { key: string; timestamp: number; data: WorkspaceListResponse } | null = null
 
@@ -1706,7 +1707,8 @@ export const getWorkspaces = async (
 
   workspaceListPromise = axiosInstance
     .get('/workspaces', {
-      params: { page, page_size: pageSize }
+      params: { page, page_size: pageSize },
+      timeout: WORKSPACE_API_TIMEOUT_MS,
     })
     .then((response) => {
       workspaceListCache = { key, timestamp: Date.now(), data: response.data }
@@ -1725,7 +1727,9 @@ export const getWorkspaces = async (
  * @returns Promise with workspace info
  */
 export const getWorkspace = async (workspaceId: string): Promise<WorkspaceInfo> => {
-  const response = await axiosInstance.get(`/workspaces/${encodeURIComponent(workspaceId)}`)
+  const response = await axiosInstance.get(`/workspaces/${encodeURIComponent(workspaceId)}`, {
+    timeout: WORKSPACE_API_TIMEOUT_MS,
+  })
   return response.data
 }
 

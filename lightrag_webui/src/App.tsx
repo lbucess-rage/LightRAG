@@ -11,7 +11,9 @@ import { useWorkspaceStore } from '@/stores/workspace'
 import { AppTab, getDefaultTabForMode, getVisibleTabsForMode } from '@/lib/workspaceMode'
 import SiteHeader from '@/features/SiteHeader'
 import { InvalidApiKeyError, RequireApiKeError } from '@/api/lightrag'
-import { ZapIcon } from 'lucide-react'
+import Button from '@/components/ui/Button'
+import { useTranslation } from 'react-i18next'
+import { AlertTriangleIcon, RefreshCwIcon, ZapIcon } from 'lucide-react'
 
 import GraphViewer from '@/features/GraphViewer'
 import DocumentManager from '@/features/DocumentManager'
@@ -33,12 +35,16 @@ import AnswerHelp from '@/features/AnswerHelp'
 import { Tabs, TabsContent } from '@/components/ui/Tabs'
 
 function App() {
+  const { t } = useTranslation()
   const message = useBackendState.use.message()
   const enableHealthCheck = useSettingsStore.use.enableHealthCheck()
   const currentTab = useSettingsStore.use.currentTab()
   const currentWorkspaceId = useWorkspaceStore.use.currentWorkspaceId()
   const currentWorkspace = useWorkspaceStore.use.currentWorkspace()
   const workspaces = useWorkspaceStore.use.workspaces()
+  const workspaceError = useWorkspaceStore.use.error()
+  const workspaceIsLoading = useWorkspaceStore.use.isLoading()
+  const fetchWorkspaces = useWorkspaceStore.use.fetchWorkspaces()
   const [apiKeyAlertOpen, setApiKeyAlertOpen] = useState(false)
   const [initializing, setInitializing] = useState(true) // Add initializing state
   const versionCheckRef = useRef(false); // Prevent duplicate calls in Vite dev mode
@@ -247,8 +253,42 @@ function App() {
               <SiteHeader />
               <div className="relative grow">
                 {!workspaceModeReady && (
-                  <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
-                    Loading workspace...
+                  <div className="absolute inset-0 z-10 flex items-center justify-center bg-background text-sm text-muted-foreground">
+                    {workspaceError ? (
+                      <div className="mx-4 max-w-md rounded-md border bg-card p-5 text-card-foreground shadow-sm">
+                        <div className="flex items-start gap-3">
+                          <AlertTriangleIcon className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+                          <div className="min-w-0 space-y-2">
+                            <div className="font-semibold text-foreground">
+                              {t('workspace.loadFailedTitle', 'Workspace load failed')}
+                            </div>
+                            <p className="text-sm text-muted-foreground">
+                              {t(
+                                'workspace.loadFailedDescription',
+                                'The server is reachable, but workspace data did not load in time. This can happen after VPN reconnects or database connection resets.'
+                              )}
+                            </p>
+                            <p className="break-words rounded bg-muted px-2 py-1 text-xs text-muted-foreground">
+                              {workspaceError}
+                            </p>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => fetchWorkspaces(true)}
+                              disabled={workspaceIsLoading}
+                            >
+                              <RefreshCwIcon className={workspaceIsLoading ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
+                              {t('workspace.retryLoad', 'Retry')}
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <RefreshCwIcon className="h-4 w-4 animate-spin" />
+                        <span>{t('workspace.loading', 'Loading workspace...')}</span>
+                      </div>
+                    )}
                   </div>
                 )}
                 {canShowTab('documents') && (

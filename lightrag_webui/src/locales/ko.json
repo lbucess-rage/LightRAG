@@ -1376,6 +1376,10 @@
   "workspace": {
     "selectWorkspace": "워크스페이스 선택",
     "noWorkspaces": "워크스페이스가 없습니다",
+    "loading": "워크스페이스를 불러오는 중...",
+    "loadFailedTitle": "워크스페이스 로드 실패",
+    "loadFailedDescription": "서버는 응답 중이지만 워크스페이스 데이터를 제시간에 불러오지 못했습니다. VPN 재연결이나 DB 연결 재설정 이후 발생할 수 있습니다.",
+    "retryLoad": "다시 시도",
     "default": "기본",
     "docsCount": "{{count}}개 문서",
     "busy": "처리 중",

@@ -489,6 +489,10 @@
     "lastPage": "末页"
   },
   "workspace": {
+    "loading": "正在加载工作区...",
+    "loadFailedTitle": "工作区加载失败",
+    "loadFailedDescription": "服务器可访问，但工作区数据未能及时加载。VPN 重新连接或数据库连接重置后可能发生这种情况。",
+    "retryLoad": "重试",
     "requiredFields": "请填写所有必填字段",
     "createDescription": "创建用于数据隔离的新工作区。",
     "editDescription": "更新工作区信息。",
