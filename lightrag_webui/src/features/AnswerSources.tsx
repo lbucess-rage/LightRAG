@@ -1,4 +1,4 @@
-import { ChangeEvent, useMemo, useState } from 'react'
+import { ChangeEvent, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import {
@@ -27,6 +27,7 @@ import Textarea from '@/components/ui/Textarea'
 import { Label } from '@/components/ui/Label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select'
 import { localizedErrorMessage } from '@/lib/utils'
+import { useWorkspaceStore } from '@/stores/workspace'
 
 type SourceType = 'plain' | 'markdown' | 'html' | 'url' | 'file' | 'structured'
 
@@ -289,6 +290,7 @@ const buildCandidate = ({
 
 export default function AnswerSources() {
   const { t } = useTranslation()
+  const currentWorkspaceId = useWorkspaceStore.use.currentWorkspaceId()
   const [sourceType, setSourceType] = useState<SourceType>('plain')
   const [contentFormat, setContentFormat] = useState<AnswerContentFormat>('plain')
   const [sourceUri, setSourceUri] = useState('')
@@ -303,6 +305,21 @@ export default function AnswerSources() {
   const [candidate, setCandidate] = useState<AnswerCandidate | null>(null)
   const [createdAnswer, setCreatedAnswer] = useState<AnswerItem | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  useEffect(() => {
+    setSourceUri('')
+    setTitle('')
+    setSummary('')
+    setBody('')
+    setTags('')
+    setGuidance('')
+    setGuidanceCandidates([])
+    setPriority('0')
+    setFileName('')
+    setCandidate(null)
+    setCreatedAnswer(null)
+    setContentFormat(sourceFormat[sourceType])
+  }, [currentWorkspaceId])
 
   const sourceHelp = useMemo(() => {
     if (sourceType === 'url') return t('answerCatalog.sources.urlHelp', 'URL is stored as source metadata. Paste the relevant content to create a reviewable answer draft.')
@@ -382,6 +399,7 @@ export default function AnswerSources() {
     }
     setIsSubmitting(true)
     try {
+      const workspaceId = currentWorkspaceId
       const result = await createAnswerSourceDraft({
         title: title.trim(),
         approved_summary: summary.trim() || null,
@@ -411,6 +429,7 @@ export default function AnswerSources() {
             },
           })),
       })
+      if (workspaceId !== useWorkspaceStore.getState().currentWorkspaceId) return
       setCreatedAnswer(result.answer)
       toast.success(t('answerCatalog.sources.created', 'Answer draft created from source.'))
       resetForm()

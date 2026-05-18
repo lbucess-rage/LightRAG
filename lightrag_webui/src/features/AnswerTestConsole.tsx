@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { CheckCircle2Icon, Loader2Icon, SearchIcon, XCircleIcon } from 'lucide-react'
@@ -12,9 +12,11 @@ import Input from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select'
 import { localizedErrorMessage } from '@/lib/utils'
+import { useWorkspaceStore } from '@/stores/workspace'
 
 export default function AnswerTestConsole() {
   const { t } = useTranslation()
+  const currentWorkspaceId = useWorkspaceStore.use.currentWorkspaceId()
   const [query, setQuery] = useState('')
   const [topK, setTopK] = useState('5')
   const [minScore, setMinScore] = useState('0.18')
@@ -22,6 +24,10 @@ export default function AnswerTestConsole() {
   const [includeDrafts, setIncludeDrafts] = useState(false)
   const [result, setResult] = useState<AnswerResolveResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+
+  useEffect(() => {
+    setResult(null)
+  }, [currentWorkspaceId])
 
   const handleResolve = async () => {
     if (!query.trim()) {
@@ -31,6 +37,7 @@ export default function AnswerTestConsole() {
     setIsLoading(true)
     setResult(null)
     try {
+      const workspaceId = currentWorkspaceId
       const response = await resolveAnswer({
         query: query.trim(),
         top_k: Number(topK),
@@ -38,6 +45,7 @@ export default function AnswerTestConsole() {
         strategy,
         include_drafts: includeDrafts,
       })
+      if (workspaceId !== useWorkspaceStore.getState().currentWorkspaceId) return
       setResult(response)
     } catch (err) {
       toast.error(localizedErrorMessage(err, t))

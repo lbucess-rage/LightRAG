@@ -57,6 +57,7 @@ import {
   SelectValue,
 } from '@/components/ui/Select'
 import { localizedErrorMessage } from '@/lib/utils'
+import { useWorkspaceStore } from '@/stores/workspace'
 
 const statusVariant = (status: AnswerStatus): 'default' | 'secondary' | 'destructive' | 'outline' => {
   if (status === 'published') return 'secondary'
@@ -79,6 +80,7 @@ const fromLocalDateTimeValue = (value: string) => (value ? new Date(value).toISO
 
 export default function AnswerLibrary() {
   const { t } = useTranslation()
+  const currentWorkspaceId = useWorkspaceStore.use.currentWorkspaceId()
   const [answers, setAnswers] = useState<AnswerItem[]>([])
   const [status, setStatus] = useState<string>('all')
   const [search, setSearch] = useState('')
@@ -87,16 +89,24 @@ export default function AnswerLibrary() {
   const [selectedAnswer, setSelectedAnswer] = useState<AnswerItem | null>(null)
 
   const fetchAnswers = useCallback(async () => {
+    const workspaceId = currentWorkspaceId
     setIsLoading(true)
     try {
       const result = await listAnswers({ status, search: search.trim() || undefined, page: 1, page_size: 100 })
+      if (workspaceId !== useWorkspaceStore.getState().currentWorkspaceId) return
       setAnswers(result.answers)
     } catch (err) {
       toast.error(localizedErrorMessage(err, t))
     } finally {
       setIsLoading(false)
     }
-  }, [search, status])
+  }, [currentWorkspaceId, search, status, t])
+
+  useEffect(() => {
+    setAnswers([])
+    setSelectedAnswer(null)
+    setIsCreateOpen(false)
+  }, [currentWorkspaceId])
 
   useEffect(() => {
     fetchAnswers()

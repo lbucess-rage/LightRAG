@@ -18,6 +18,7 @@ import Input from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select'
 import { localizedErrorMessage } from '@/lib/utils'
+import { useWorkspaceStore } from '@/stores/workspace'
 
 type StructuredOperator = AnswerStructuredFilter['operator']
 
@@ -25,6 +26,7 @@ const operators: StructuredOperator[] = ['contains', 'equals', 'starts_with', 'e
 
 export default function AnswerStructuredData() {
   const { t } = useTranslation()
+  const currentWorkspaceId = useWorkspaceStore.use.currentWorkspaceId()
   const [datasets, setDatasets] = useState<AnswerStructuredDataset[]>([])
   const [search, setSearch] = useState('')
   const [kind, setKind] = useState('all')
@@ -39,17 +41,31 @@ export default function AnswerStructuredData() {
   const [isQuerying, setIsQuerying] = useState(false)
 
   const fetchDatasets = useCallback(async () => {
+    const workspaceId = currentWorkspaceId
     setIsLoading(true)
     try {
       const result = await listAnswerStructuredDatasets({ structured_only: structuredOnly, status: 'all' })
+      if (workspaceId !== useWorkspaceStore.getState().currentWorkspaceId) return
       setDatasets(result)
-      setSelectedDatasetId((current) => current || result[0]?.answer_id || '')
+      setSelectedDatasetId((current) =>
+        current && result.some((dataset) => dataset.answer_id === current)
+          ? current
+          : result[0]?.answer_id || ''
+      )
     } catch (err) {
       toast.error(localizedErrorMessage(err, t))
     } finally {
       setIsLoading(false)
     }
-  }, [structuredOnly])
+  }, [currentWorkspaceId, structuredOnly, t])
+
+  useEffect(() => {
+    setDatasets([])
+    setSelectedDatasetId('')
+    setField('')
+    setFilterValue('')
+    setQueryResult(null)
+  }, [currentWorkspaceId])
 
   useEffect(() => {
     fetchDatasets()

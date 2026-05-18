@@ -10,9 +10,11 @@ import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select'
 import { localizedErrorMessage } from '@/lib/utils'
+import { useWorkspaceStore } from '@/stores/workspace'
 
 export default function AnswerAnalytics() {
   const { t } = useTranslation()
+  const currentWorkspaceId = useWorkspaceStore.use.currentWorkspaceId()
   const [events, setEvents] = useState<AnswerEvent[]>([])
   const [answerTitles, setAnswerTitles] = useState<Record<string, string>>({})
   const [stats, setStats] = useState<{ answers?: Record<string, number>; events?: Record<string, number> }>({})
@@ -21,6 +23,7 @@ export default function AnswerAnalytics() {
   const [isLoading, setIsLoading] = useState(false)
 
   const fetchData = useCallback(async () => {
+    const workspaceId = currentWorkspaceId
     setIsLoading(true)
     try {
       const [summary, eventRows, answers] = await Promise.all([
@@ -28,6 +31,7 @@ export default function AnswerAnalytics() {
         listAnswerEvents({ event_type: eventType, limit: 100 }),
         listAnswers({ status: 'all', page: 1, page_size: 100 }),
       ])
+      if (workspaceId !== useWorkspaceStore.getState().currentWorkspaceId) return
       setStats(summary)
       setEvents(eventRows)
       setAnswerTitles(Object.fromEntries(answers.answers.map((answer) => [answer.answer_id, answer.title])))
@@ -36,7 +40,13 @@ export default function AnswerAnalytics() {
     } finally {
       setIsLoading(false)
     }
-  }, [eventType])
+  }, [currentWorkspaceId, eventType, t])
+
+  useEffect(() => {
+    setEvents([])
+    setAnswerTitles({})
+    setStats({})
+  }, [currentWorkspaceId])
 
   useEffect(() => {
     fetchData()

@@ -29,6 +29,7 @@ import Input from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select'
 import { cn, localizedErrorMessage } from '@/lib/utils'
+import { useWorkspaceStore } from '@/stores/workspace'
 
 type GuidanceRow = AnswerGuidance & {
   answer?: AnswerItem
@@ -61,6 +62,7 @@ const metricCards = [
 
 export default function AnswerMatching() {
   const { t } = useTranslation()
+  const currentWorkspaceId = useWorkspaceStore.use.currentWorkspaceId()
   const [answers, setAnswers] = useState<AnswerItem[]>([])
   const [guidanceByAnswer, setGuidanceByAnswer] = useState<Record<string, AnswerGuidance[]>>({})
   const [status, setStatus] = useState('all')
@@ -80,6 +82,7 @@ export default function AnswerMatching() {
   const [isTesting, setIsTesting] = useState(false)
 
   const fetchData = useCallback(async () => {
+    const workspaceId = currentWorkspaceId
     setIsLoading(true)
     try {
       const list = await listAnswers({
@@ -88,21 +91,33 @@ export default function AnswerMatching() {
         page: 1,
         page_size: 100,
       })
+      if (workspaceId !== useWorkspaceStore.getState().currentWorkspaceId) return
       setAnswers(list.answers)
-      if (!selectedAnswerId && list.answers[0]) {
-        setSelectedAnswerId(list.answers[0].answer_id)
-      }
+      setSelectedAnswerId((current) =>
+        current && list.answers.some((answer) => answer.answer_id === current)
+          ? current
+          : list.answers[0]?.answer_id || ''
+      )
 
       const entries = await Promise.all(
         list.answers.map(async (answer) => [answer.answer_id, await listAnswerGuidance(answer.answer_id)] as const)
       )
+      if (workspaceId !== useWorkspaceStore.getState().currentWorkspaceId) return
       setGuidanceByAnswer(Object.fromEntries(entries))
     } catch (err) {
       toast.error(localizedErrorMessage(err, t))
     } finally {
       setIsLoading(false)
     }
-  }, [search, selectedAnswerId, status])
+  }, [currentWorkspaceId, search, status, t])
+
+  useEffect(() => {
+    setAnswers([])
+    setGuidanceByAnswer({})
+    setSelectedAnswerId('')
+    setGuidanceText('')
+    setResult(null)
+  }, [currentWorkspaceId])
 
   useEffect(() => {
     fetchData()
