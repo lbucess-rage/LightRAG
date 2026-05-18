@@ -2027,16 +2027,33 @@ export type AnswerStructuredMaterializeRequest = {
   tags?: string[]
   mapping?: Record<string, string>
   guidance_columns?: string[]
+  materialization_mode?: 'table_as_dataset' | 'row_per_answer'
   metadata?: Record<string, any>
 }
 
 export type AnswerStructuredMaterializeResponse = {
   answer: AnswerItem
   dataset: AnswerStructuredDataset
+  answers: AnswerItem[]
+  datasets: AnswerStructuredDataset[]
   profile: AnswerStructuredProfileResponse
   guidance: AnswerGuidance[]
   snapshot?: AnswerSourceSnapshot | null
   source_link?: AnswerSourceLink | null
+}
+
+export type AnswerStructuredLookupLog = {
+  log_id: string
+  workspace: string
+  dataset_id: string
+  dataset_title?: string | null
+  pseudo_sql: string
+  filters: Record<string, any>[]
+  result_count: number
+  preview_only: boolean
+  latency_ms: number
+  metadata: Record<string, any>
+  create_time?: string | null
 }
 
 export type AnswerListResponse = {
@@ -2302,6 +2319,14 @@ export const materializeAnswerStructuredSource = async (
   request: AnswerStructuredMaterializeRequest
 ): Promise<AnswerStructuredMaterializeResponse> => {
   const response = await axiosInstance.post('/api/answers/structured/materialize', request)
+  return response.data
+}
+
+export const listAnswerStructuredLookupLogs = async (params?: {
+  dataset_id?: string
+  limit?: number
+}): Promise<AnswerStructuredLookupLog[]> => {
+  const response = await axiosInstance.get('/api/answers/structured/query/logs', { params })
   return response.data
 }
 

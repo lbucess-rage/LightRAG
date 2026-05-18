@@ -6,9 +6,11 @@ import { DatabaseIcon, PlayIcon, RefreshCwIcon, SaveIcon, TableIcon, WandSparkle
 import {
   AnswerStructuredDataset,
   AnswerStructuredFilter,
+  AnswerStructuredLookupLog,
   AnswerStructuredProfileResponse,
   AnswerStructuredQueryResponse,
   AnswerStructuredSourceType,
+  listAnswerStructuredLookupLogs,
   listAnswerStructuredDatasets,
   materializeAnswerStructuredSource,
   profileAnswerStructuredSource,
@@ -59,6 +61,8 @@ export default function AnswerStructuredData() {
   const [profile, setProfile] = useState<AnswerStructuredProfileResponse | null>(null)
   const [mapping, setMapping] = useState<Record<string, string>>({})
   const [guidanceColumns, setGuidanceColumns] = useState<string[]>([])
+  const [materializationMode, setMaterializationMode] = useState<'table_as_dataset' | 'row_per_answer'>('table_as_dataset')
+  const [lookupLogs, setLookupLogs] = useState<AnswerStructuredLookupLog[]>([])
   const [isProfiling, setIsProfiling] = useState(false)
   const [isMaterializing, setIsMaterializing] = useState(false)
 
@@ -114,6 +118,15 @@ export default function AnswerStructuredData() {
 
   const kinds = useMemo(() => Array.from(new Set(datasets.map((item) => item.kind))).filter(Boolean), [datasets])
   const allColumns = useMemo(() => Array.from(new Set(filtered.flatMap((item) => item.columns))).slice(0, 80), [filtered])
+
+  const fetchLookupLogs = useCallback(async (datasetId?: string) => {
+    try {
+      const result = await listAnswerStructuredLookupLogs({ dataset_id: datasetId, limit: 20 })
+      setLookupLogs(result)
+    } catch (err) {
+      toast.error(localizedErrorMessage(err, t))
+    }
+  }, [t])
 
   const resetProfileState = () => {
     setProfile(null)
@@ -182,13 +195,16 @@ export default function AnswerStructuredData() {
         tags: parseTags(sourceTags),
         mapping: activeMapping,
         guidance_columns: guidanceColumns,
+        materialization_mode: materializationMode,
         metadata: { created_from_ui: 'structured_data' },
       })
-      toast.success(t('answerCatalog.structured.materializeComplete', 'Structured dataset draft was created.'))
+      const createdCount = response.answers?.length || 1
+      toast.success(t('answerCatalog.structured.materializeComplete', 'Structured dataset draft was created.', { count: createdCount }))
       setSelectedDatasetId(response.dataset.answer_id)
       setProfile(response.profile)
       await fetchDatasets()
       setSelectedDatasetId(response.dataset.answer_id)
+      await fetchLookupLogs(response.dataset.answer_id)
     } catch (err) {
       toast.error(localizedErrorMessage(err, t))
     } finally {
@@ -213,12 +229,21 @@ export default function AnswerStructuredData() {
         preview_only: previewOnly,
       })
       setQueryResult(result)
+      await fetchLookupLogs(selectedDatasetId)
     } catch (err) {
       toast.error(localizedErrorMessage(err, t))
     } finally {
       setIsQuerying(false)
     }
   }
+
+  useEffect(() => {
+    if (selectedDatasetId) {
+      fetchLookupLogs(selectedDatasetId)
+    } else {
+      setLookupLogs([])
+    }
+  }, [selectedDatasetId, fetchLookupLogs])
 
   return (
     <div className="flex h-full flex-col gap-4 p-4">
@@ -280,7 +305,7 @@ export default function AnswerStructuredData() {
             {t('answerCatalog.structured.sourceProfiling', 'Structured Source Profiling')}
           </div>
           <div className="grid gap-3">
-            <div className="grid gap-3 md:grid-cols-[150px_1fr]">
+            <div className="grid gap-3 md:grid-cols-[150px_210px_1fr]">
               <div className="grid gap-2">
                 <Label>{t('answerCatalog.structured.sourceType', 'Source Type')}</Label>
                 <Select value={sourceType} onValueChange={(value) => {
@@ -291,6 +316,19 @@ export default function AnswerStructuredData() {
                   <SelectContent>
                     <SelectItem value="csv">CSV / TSV</SelectItem>
                     <SelectItem value="json">JSON</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label>{t('answerCatalog.structured.materializationMode', 'Materialization Mode')}</Label>
+                <Select
+                  value={materializationMode}
+                  onValueChange={(value) => setMaterializationMode(value as 'table_as_dataset' | 'row_per_answer')}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="table_as_dataset">{t('answerCatalog.structured.tableAsDataset', 'Table as Dataset')}</SelectItem>
+                    <SelectItem value="row_per_answer">{t('answerCatalog.structured.rowPerAnswer', 'One Row = One Answer')}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -344,6 +382,11 @@ export default function AnswerStructuredData() {
                 {isMaterializing ? <RefreshCwIcon className="h-4 w-4 animate-spin" /> : <SaveIcon className="h-4 w-4" />}
                 {t('answerCatalog.structured.createDataset', 'Create Dataset Draft')}
               </Button>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {materializationMode === 'row_per_answer'
+                ? t('answerCatalog.structured.rowPerAnswerHint', 'Creates one draft answer for each source row using mapped question/answer/category fields.')
+                : t('answerCatalog.structured.tableAsDatasetHint', 'Creates one structured dataset draft that can be queried with the safe lookup panel.')}
             </div>
           </div>
         </div>
@@ -552,6 +595,48 @@ export default function AnswerStructuredData() {
               {t('answerCatalog.structured.queryHint', 'Choose a dataset, add an optional condition, then preview or execute a safe query.')}
             </div>
           )}
+          <div className="mt-5 border-t pt-4">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="text-sm font-semibold">{t('answerCatalog.structured.lookupLogs', 'Recent Lookup Logs')}</div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => fetchLookupLogs(selectedDatasetId || undefined)}
+                disabled={!selectedDatasetId}
+              >
+                <RefreshCwIcon className="h-4 w-4" />
+                {t('common.refresh', 'Refresh')}
+              </Button>
+            </div>
+            {lookupLogs.length > 0 ? (
+              <div className="max-h-52 overflow-auto rounded-md border">
+                <table className="w-full min-w-[560px] text-xs">
+                  <thead className="bg-muted/40 text-muted-foreground">
+                    <tr>
+                      <th className="p-2 text-left">{t('answerCatalog.structured.mode', 'Mode')}</th>
+                      <th className="p-2 text-right">{t('answerCatalog.structured.rows', 'Rows')}</th>
+                      <th className="p-2 text-right">{t('answerCatalog.structured.latency', 'Latency')}</th>
+                      <th className="p-2 text-left">SQL</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lookupLogs.map((log) => (
+                      <tr key={log.log_id} className="border-t">
+                        <td className="p-2">{log.preview_only ? t('answerCatalog.structured.preview', 'Preview') : t('answerCatalog.structured.execute', 'Execute')}</td>
+                        <td className="p-2 text-right">{log.result_count.toLocaleString()}</td>
+                        <td className="p-2 text-right">{Math.round(log.latency_ms)}ms</td>
+                        <td className="max-w-72 truncate p-2 font-mono">{log.pseudo_sql}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="text-xs text-muted-foreground">
+                {t('answerCatalog.structured.noLookupLogs', 'No structured lookup logs for this dataset yet.')}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

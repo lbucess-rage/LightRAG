@@ -33,6 +33,7 @@ GuidanceType = Literal["keyword", "question", "synonym", "negative_keyword", "no
 ResolveStrategy = Literal["fast", "balanced"]
 StructuredOperator = Literal["contains", "equals", "starts_with", "ends_with"]
 StructuredSourceType = Literal["csv", "json"]
+StructuredMaterializationMode = Literal["table_as_dataset", "row_per_answer"]
 
 VALID_WORKSPACE_MODES = {"kms", "answer_catalog", "hybrid"}
 ANSWER_WORKSPACE_MODES = {"answer_catalog", "hybrid"}
@@ -240,6 +241,21 @@ async def _ensure_tables(db) -> None:
             create_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS LIGHTRAG_STRUCTURED_LOOKUP_LOGS (
+            log_id TEXT PRIMARY KEY,
+            workspace TEXT NOT NULL,
+            dataset_id TEXT NOT NULL,
+            dataset_title TEXT,
+            pseudo_sql TEXT NOT NULL,
+            filters JSONB NOT NULL DEFAULT '[]'::jsonb,
+            result_count INTEGER NOT NULL DEFAULT 0,
+            preview_only BOOLEAN NOT NULL DEFAULT FALSE,
+            latency_ms DOUBLE PRECISION NOT NULL DEFAULT 0,
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            create_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
         "CREATE INDEX IF NOT EXISTS IDX_ANSWERS_WORKSPACE_STATUS ON LIGHTRAG_ANSWER_ITEMS(workspace, status)",
         "CREATE INDEX IF NOT EXISTS IDX_ANSWERS_WORKSPACE_UPDATE ON LIGHTRAG_ANSWER_ITEMS(workspace, update_time DESC)",
         "CREATE INDEX IF NOT EXISTS IDX_ANSWER_GUIDANCE_WORKSPACE_ANSWER ON LIGHTRAG_ANSWER_GUIDANCE(workspace, answer_id)",
@@ -248,6 +264,8 @@ async def _ensure_tables(db) -> None:
         "CREATE INDEX IF NOT EXISTS IDX_ANSWER_SOURCE_SNAPSHOTS_WORKSPACE_HASH ON LIGHTRAG_ANSWER_SOURCE_SNAPSHOTS(workspace, content_hash)",
         "CREATE INDEX IF NOT EXISTS IDX_ANSWER_SOURCE_LINKS_WORKSPACE_ANSWER ON LIGHTRAG_ANSWER_SOURCE_LINKS(workspace, answer_id)",
         "CREATE INDEX IF NOT EXISTS IDX_ANSWER_SOURCE_LINKS_WORKSPACE_SNAPSHOT ON LIGHTRAG_ANSWER_SOURCE_LINKS(workspace, snapshot_id)",
+        "CREATE INDEX IF NOT EXISTS IDX_STRUCTURED_LOOKUP_LOGS_WORKSPACE_TIME ON LIGHTRAG_STRUCTURED_LOOKUP_LOGS(workspace, create_time DESC)",
+        "CREATE INDEX IF NOT EXISTS IDX_STRUCTURED_LOOKUP_LOGS_WORKSPACE_DATASET ON LIGHTRAG_STRUCTURED_LOOKUP_LOGS(workspace, dataset_id)",
     ]
     for statement in statements:
         await db.execute(statement)
@@ -559,16 +577,33 @@ class StructuredMaterializeRequest(BaseModel):
     tags: list[str] = Field(default_factory=list)
     mapping: dict[str, str] = Field(default_factory=dict)
     guidance_columns: list[str] = Field(default_factory=list)
+    materialization_mode: StructuredMaterializationMode = "table_as_dataset"
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class StructuredMaterializeResponse(BaseModel):
     answer: AnswerItem
     dataset: StructuredDataset
+    answers: list[AnswerItem] = Field(default_factory=list)
+    datasets: list[StructuredDataset] = Field(default_factory=list)
     profile: StructuredProfileResponse
     guidance: list[AnswerGuidance] = Field(default_factory=list)
     snapshot: Optional[AnswerSourceSnapshot] = None
     source_link: Optional[AnswerSourceLink] = None
+
+
+class StructuredLookupLog(BaseModel):
+    log_id: str
+    workspace: str
+    dataset_id: str
+    dataset_title: Optional[str] = None
+    pseudo_sql: str
+    filters: list[dict[str, Any]] = Field(default_factory=list)
+    result_count: int = 0
+    preview_only: bool = False
+    latency_ms: float = 0.0
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    create_time: Optional[str] = None
 
 
 def _answer_from_row(row: dict[str, Any]) -> AnswerItem:
@@ -640,6 +675,28 @@ def _event_from_row(row: dict[str, Any]) -> AnswerEvent:
     )
 
 
+def _structured_lookup_log_from_row(row: dict[str, Any]) -> StructuredLookupLog:
+    filters = _coerce_json(row.get("filters"), [])
+    if not isinstance(filters, list):
+        filters = []
+    metadata = _coerce_json(row.get("metadata"), {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+    return StructuredLookupLog(
+        log_id=str(row["log_id"]),
+        workspace=str(row["workspace"]),
+        dataset_id=str(row["dataset_id"]),
+        dataset_title=row.get("dataset_title"),
+        pseudo_sql=str(row.get("pseudo_sql") or ""),
+        filters=[item for item in filters if isinstance(item, dict)],
+        result_count=int(row.get("result_count") or 0),
+        preview_only=bool(row.get("preview_only")),
+        latency_ms=float(row.get("latency_ms") or 0.0),
+        metadata=metadata,
+        create_time=_iso(row.get("create_time")),
+    )
+
+
 def _content_hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
@@ -697,6 +754,18 @@ def _source_link_from_row(
 
 
 def _structured_profile(answer: AnswerItem) -> dict[str, Any]:
+    if (
+        isinstance(answer.metadata, dict)
+        and answer.metadata.get("materialization_mode") == "row_per_answer"
+        and isinstance(answer.metadata.get("source_row"), dict)
+    ):
+        source_row = answer.metadata["source_row"]
+        return {
+            "kind": "structured_row",
+            "columns": [str(column) for column in source_row.keys()],
+            "row_count": 1,
+        }
+
     profile = answer.metadata.get("source_profile") if isinstance(answer.metadata, dict) else {}
     if not isinstance(profile, dict):
         profile = {}
@@ -956,6 +1025,58 @@ def _guidance_from_structured_profile(
     return candidates[:80]
 
 
+def _structured_row_text(row: dict[str, Any], column: Optional[str]) -> str:
+    if not column:
+        return ""
+    return str(row.get(column) or "").strip()
+
+
+def _title_for_structured_row(
+    base_title: str,
+    row: dict[str, Any],
+    mapping: dict[str, str],
+    row_index: int,
+) -> str:
+    for role in ("title", "question", "id"):
+        text = _structured_row_text(row, mapping.get(role))
+        if text:
+            return text[:500]
+    return f"{base_title} #{row_index + 1}"
+
+
+def _body_for_structured_row(row: dict[str, Any], mapping: dict[str, str]) -> str:
+    body = _structured_row_text(row, mapping.get("answer"))
+    if body:
+        return body
+    return json.dumps(row, ensure_ascii=False, indent=2)
+
+
+def _summary_for_structured_row(
+    row: dict[str, Any],
+    mapping: dict[str, str],
+    fallback: Optional[str],
+) -> Optional[str]:
+    summary = _structured_row_text(row, mapping.get("answer"))
+    return summary or fallback
+
+
+def _tags_for_structured_row(
+    base_tags: list[str],
+    row: dict[str, Any],
+    mapping: dict[str, str],
+    source_type: str,
+) -> list[str]:
+    tags: list[str] = []
+    for tag in [*base_tags, "structured", source_type]:
+        text = str(tag or "").strip()
+        if text and text not in tags:
+            tags.append(text)
+    category = _structured_row_text(row, mapping.get("category"))
+    if category and category not in tags:
+        tags.append(category)
+    return tags
+
+
 def _rows_from_answer(answer: AnswerItem) -> tuple[list[dict[str, Any]], list[str], str]:
     body = answer.body.strip()
     rows: list[dict[str, Any]] = []
@@ -974,6 +1095,10 @@ def _rows_from_answer(answer: AnswerItem) -> tuple[list[dict[str, Any]], list[st
             rows = []
 
     profile = _structured_profile(answer)
+    if not rows and isinstance(answer.metadata, dict) and isinstance(answer.metadata.get("source_row"), dict):
+        rows = [{str(key): _row_value(value) for key, value in answer.metadata["source_row"].items()}]
+        kind = "structured_row"
+
     if not rows:
         rows = [
             {
@@ -1022,6 +1147,7 @@ def _dataset_from_answer(answer: AnswerItem) -> StructuredDataset:
             "content_format": answer.content_format,
             "display_policy": answer.display_policy,
             "version": answer.version,
+            "materialization_mode": answer.metadata.get("materialization_mode"),
         },
     )
 
@@ -1244,6 +1370,131 @@ async def _record_source_link(
     if not row:
         raise HTTPException(status_code=500, detail="Failed to record source link")
     return _source_link_from_row(dict(row))
+
+
+async def _record_structured_lookup_log(
+    db,
+    workspace: str,
+    *,
+    dataset_id: str,
+    dataset_title: str,
+    pseudo_sql: str,
+    filters: list[StructuredFilter],
+    result_count: int,
+    preview_only: bool,
+    latency_ms: float,
+    metadata: Optional[dict[str, Any]] = None,
+) -> str:
+    log_id = f"sll-{uuid.uuid4().hex}"
+    filter_payload = [
+        {
+            "field": item.field,
+            "operator": item.operator,
+            "value": item.value,
+        }
+        for item in filters
+    ]
+    await db.execute(
+        """
+        INSERT INTO LIGHTRAG_STRUCTURED_LOOKUP_LOGS
+            (log_id, workspace, dataset_id, dataset_title, pseudo_sql, filters,
+             result_count, preview_only, latency_ms, metadata)
+        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10::jsonb)
+        """,
+        {
+            "log_id": log_id,
+            "workspace": workspace,
+            "dataset_id": dataset_id,
+            "dataset_title": dataset_title,
+            "pseudo_sql": pseudo_sql,
+            "filters": _json_list(filter_payload),
+            "result_count": result_count,
+            "preview_only": preview_only,
+            "latency_ms": latency_ms,
+            "metadata": _json(metadata or {}),
+        },
+    )
+    return log_id
+
+
+async def _insert_answer_item(
+    db,
+    workspace: str,
+    *,
+    answer_id: str,
+    title: str,
+    body: str,
+    approved_summary: Optional[str],
+    content_format: ContentFormat,
+    display_policy: DisplayPolicy,
+    status: AnswerStatus,
+    priority: int,
+    tags: list[str],
+    metadata: dict[str, Any],
+) -> AnswerItem:
+    row = await db.query(
+        """
+        INSERT INTO LIGHTRAG_ANSWER_ITEMS
+            (workspace, answer_id, title, body, approved_summary, content_format,
+             display_policy, status, version, valid_from, valid_until, priority,
+             tags, metadata, publish_time)
+        VALUES
+            ($1, $2, $3, $4, $5, $6, $7, $8, 1, NULL, NULL, $9,
+             $10::jsonb, $11::jsonb, CASE WHEN $8 = 'published' THEN NOW() ELSE NULL END)
+        RETURNING workspace, answer_id, title, body, approved_summary, content_format,
+                  display_policy, status, version, valid_from, valid_until, priority,
+                  tags, metadata, publish_time, create_time, update_time
+        """,
+        [
+            workspace,
+            answer_id,
+            title,
+            body,
+            approved_summary,
+            content_format,
+            display_policy,
+            status,
+            priority,
+            _json_list(tags),
+            _json(metadata),
+        ],
+    )
+    if not row:
+        raise HTTPException(status_code=500, detail="Failed to create answer")
+    await _record_revision(db, dict(row))
+    return _answer_from_row(dict(row))
+
+
+async def _insert_answer_guidance(
+    db,
+    workspace: str,
+    answer_id: str,
+    candidates: list[SourceGuidanceCandidate],
+) -> list[AnswerGuidance]:
+    created_guidance: list[AnswerGuidance] = []
+    for item in candidates:
+        if not item.text.strip():
+            continue
+        guidance_row = await db.query(
+            """
+            INSERT INTO LIGHTRAG_ANSWER_GUIDANCE
+                (guidance_id, workspace, answer_id, guidance_type, text, weight, metadata)
+            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+            RETURNING guidance_id, workspace, answer_id, guidance_type, text, weight, metadata, create_time
+            """,
+            [
+                f"agd-{uuid.uuid4().hex}",
+                workspace,
+                answer_id,
+                item.guidance_type,
+                item.text.strip(),
+                item.weight,
+                _json({**item.metadata, "source": item.source}),
+            ],
+        )
+        if guidance_row:
+            created_guidance.append(_guidance_from_row(dict(guidance_row)))
+    return created_guidance
 
 
 def _score_candidate(
@@ -1592,7 +1843,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             try:
                 await db.execute(
                     "DELETE FROM LIGHTRAG_ANSWER_SOURCE_SNAPSHOTS WHERE workspace = $1 AND snapshot_id = $2",
-                    [workspace, snapshot.snapshot_id],
+                    {"workspace": workspace, "snapshot_id": snapshot.snapshot_id},
                 )
             except Exception:
                 pass
@@ -1682,12 +1933,23 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             if text and text not in tags:
                 tags.append(text)
 
-        answer_id = f"ANS-{uuid.uuid4().hex[:12]}"
+        if payload.materialization_mode == "row_per_answer" and len(rows) > 200:
+            raise HTTPException(
+                status_code=400,
+                detail="Row-per-answer materialization supports up to 200 rows per request",
+            )
+
+        answer_ids = (
+            [f"ANS-{uuid.uuid4().hex[:12]}" for _ in rows]
+            if payload.materialization_mode == "row_per_answer"
+            else [f"ANS-{uuid.uuid4().hex[:12]}"]
+        )
         source_profile = {
             "structured": {
                 **profile_dict,
                 "mapping": mapping,
                 "guidance_columns": guidance_columns,
+                "materialization_mode": payload.materialization_mode,
             }
         }
         source_metadata = {
@@ -1695,6 +1957,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             "created_from": payload.metadata.get("created_from") or "structured_materialize",
             "source_type": "structured",
             "structured_source_type": payload.source_type,
+            "materialization_mode": payload.materialization_mode,
             "source_uri": payload.source_uri,
             "file_name": payload.file_name,
             "source_profile": source_profile,
@@ -1712,9 +1975,10 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 **payload.metadata,
                 "created_from": "structured_materialize",
                 "structured_source_type": payload.source_type,
+                "materialization_mode": payload.materialization_mode,
                 "tags": tags,
             },
-            created_answer_ids=[answer_id],
+            created_answer_ids=answer_ids,
             status="materialized",
             task_id=payload.metadata.get("task_id"),
         )
@@ -1722,87 +1986,135 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
         source_metadata["source_content_hash"] = snapshot.content_hash
 
         created_guidance: list[AnswerGuidance] = []
+        created_answers: list[AnswerItem] = []
+        created_datasets: list[StructuredDataset] = []
+        first_source_link: Optional[AnswerSourceLink] = None
         try:
-            row = await db.query(
-                """
-                INSERT INTO LIGHTRAG_ANSWER_ITEMS
-                    (workspace, answer_id, title, body, approved_summary, content_format,
-                     display_policy, status, version, valid_from, valid_until, priority,
-                     tags, metadata, publish_time)
-                VALUES
-                    ($1, $2, $3, $4, $5, 'plain', 'both', $6, 1, NULL, NULL, $7,
-                     $8::jsonb, $9::jsonb, CASE WHEN $6 = 'published' THEN NOW() ELSE NULL END)
-                RETURNING workspace, answer_id, title, body, approved_summary, content_format,
-                          display_policy, status, version, valid_from, valid_until, priority,
-                          tags, metadata, publish_time, create_time, update_time
-                """,
-                [
+            if payload.materialization_mode == "table_as_dataset":
+                answer = await _insert_answer_item(
+                    db,
                     workspace,
-                    answer_id,
-                    payload.title,
-                    payload.raw_content.strip(),
-                    payload.approved_summary,
-                    payload.status,
-                    payload.priority,
-                    _json_list(tags),
-                    _json(source_metadata),
-                ],
-            )
-            if not row:
-                raise HTTPException(status_code=500, detail="Failed to create structured dataset")
-            await _record_revision(db, dict(row))
-            source_link = await _record_source_link(
-                db,
-                workspace,
-                answer_id=answer_id,
-                answer_version=int(row.get("version") or 1),
-                snapshot_id=snapshot.snapshot_id,
-                link_type="created_from",
-                metadata={
-                    "created_from": "structured_materialize",
-                    "structured_source_type": payload.source_type,
-                    "mapping": mapping,
-                    "guidance_columns": guidance_columns,
-                },
-            )
-
-            for item in _guidance_from_structured_profile(rows, mapping, guidance_columns):
-                guidance_row = await db.query(
-                    """
-                    INSERT INTO LIGHTRAG_ANSWER_GUIDANCE
-                        (guidance_id, workspace, answer_id, guidance_type, text, weight, metadata)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
-                    RETURNING guidance_id, workspace, answer_id, guidance_type, text, weight, metadata, create_time
-                    """,
-                    [
-                        f"agd-{uuid.uuid4().hex}",
-                        workspace,
-                        answer_id,
-                        item.guidance_type,
-                        item.text.strip(),
-                        item.weight,
-                        _json({**item.metadata, "source": item.source}),
-                    ],
+                    answer_id=answer_ids[0],
+                    title=payload.title,
+                    body=payload.raw_content.strip(),
+                    approved_summary=payload.approved_summary,
+                    content_format="plain",
+                    display_policy="both",
+                    status=payload.status,
+                    priority=payload.priority,
+                    tags=tags,
+                    metadata=source_metadata,
                 )
-                if guidance_row:
-                    created_guidance.append(_guidance_from_row(dict(guidance_row)))
+                created_answers.append(answer)
+                created_datasets.append(_dataset_from_answer(answer))
+                first_source_link = await _record_source_link(
+                    db,
+                    workspace,
+                    answer_id=answer.answer_id,
+                    answer_version=answer.version,
+                    snapshot_id=snapshot.snapshot_id,
+                    link_type="created_from",
+                    metadata={
+                        "created_from": "structured_materialize",
+                        "structured_source_type": payload.source_type,
+                        "materialization_mode": payload.materialization_mode,
+                        "mapping": mapping,
+                        "guidance_columns": guidance_columns,
+                    },
+                )
+                created_guidance.extend(
+                    await _insert_answer_guidance(
+                        db,
+                        workspace,
+                        answer.answer_id,
+                        _guidance_from_structured_profile(rows, mapping, guidance_columns),
+                    )
+                )
+            else:
+                for row_index, row_data in enumerate(rows):
+                    row_answer_id = answer_ids[row_index]
+                    row_metadata = {
+                        **source_metadata,
+                        "source_row_index": row_index,
+                        "source_row_hash": _content_hash(json.dumps(row_data, ensure_ascii=False, sort_keys=True)),
+                        "source_row": row_data,
+                    }
+                    answer = await _insert_answer_item(
+                        db,
+                        workspace,
+                        answer_id=row_answer_id,
+                        title=_title_for_structured_row(payload.title, row_data, mapping, row_index),
+                        body=_body_for_structured_row(row_data, mapping),
+                        approved_summary=_summary_for_structured_row(row_data, mapping, payload.approved_summary),
+                        content_format="plain",
+                        display_policy="both",
+                        status=payload.status,
+                        priority=payload.priority,
+                        tags=_tags_for_structured_row(tags, row_data, mapping, payload.source_type),
+                        metadata=row_metadata,
+                    )
+                    created_answers.append(answer)
+                    created_datasets.append(_dataset_from_answer(answer))
+                    source_link = await _record_source_link(
+                        db,
+                        workspace,
+                        answer_id=answer.answer_id,
+                        answer_version=answer.version,
+                        snapshot_id=snapshot.snapshot_id,
+                        link_type="created_from_row",
+                        metadata={
+                            "created_from": "structured_materialize",
+                            "structured_source_type": payload.source_type,
+                            "materialization_mode": payload.materialization_mode,
+                            "source_row_index": row_index,
+                            "mapping": mapping,
+                            "guidance_columns": guidance_columns,
+                        },
+                    )
+                    first_source_link = first_source_link or source_link
+                    created_guidance.extend(
+                        await _insert_answer_guidance(
+                            db,
+                            workspace,
+                            answer.answer_id,
+                            _guidance_from_structured_profile([row_data], mapping, guidance_columns),
+                        )
+                    )
 
-            answer = _answer_from_row(dict(row))
             return StructuredMaterializeResponse(
-                answer=answer,
-                dataset=_dataset_from_answer(answer),
+                answer=created_answers[0],
+                dataset=created_datasets[0],
+                answers=created_answers,
+                datasets=created_datasets,
                 profile=profile,
                 guidance=created_guidance,
                 snapshot=snapshot,
-                source_link=source_link,
+                source_link=first_source_link,
             )
         except HTTPException:
             raise
         except Exception as e:
             try:
+                for cleanup_answer_id in answer_ids:
+                    await db.execute(
+                        "DELETE FROM LIGHTRAG_ANSWER_GUIDANCE WHERE workspace = $1 AND answer_id = $2",
+                        {"workspace": workspace, "answer_id": cleanup_answer_id},
+                    )
+                    await db.execute(
+                        "DELETE FROM LIGHTRAG_ANSWER_SOURCE_LINKS WHERE workspace = $1 AND answer_id = $2",
+                        {"workspace": workspace, "answer_id": cleanup_answer_id},
+                    )
+                    await db.execute(
+                        "DELETE FROM LIGHTRAG_ANSWER_REVISIONS WHERE workspace = $1 AND answer_id = $2",
+                        {"workspace": workspace, "answer_id": cleanup_answer_id},
+                    )
+                    await db.execute(
+                        "DELETE FROM LIGHTRAG_ANSWER_ITEMS WHERE workspace = $1 AND answer_id = $2",
+                        {"workspace": workspace, "answer_id": cleanup_answer_id},
+                    )
                 await db.execute(
                     "DELETE FROM LIGHTRAG_ANSWER_SOURCE_SNAPSHOTS WHERE workspace = $1 AND snapshot_id = $2",
-                    [workspace, snapshot.snapshot_id],
+                    {"workspace": workspace, "snapshot_id": snapshot.snapshot_id},
                 )
             except Exception:
                 pass
@@ -1840,14 +2152,18 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             datasets = [
                 dataset
                 for dataset in datasets
-                if dataset.row_count > 1
-                or len(dataset.columns) > 9
-                or dataset.kind in {"json", "table", "structured"}
+                if dataset.metadata.get("materialization_mode") != "row_per_answer"
+                and (
+                    dataset.row_count > 1
+                    or len(dataset.columns) > 9
+                    or dataset.kind in {"json", "table", "structured"}
+                )
             ]
         return datasets
 
     @router.post("/structured/query", response_model=StructuredQueryResponse, dependencies=[Depends(combined_auth)])
     async def query_structured_dataset(request: Request, payload: StructuredQueryRequest):
+        started_at = time.perf_counter()
         workspace, db = await db_for_request(request)
         row = await _get_answer_row(db, workspace, payload.answer_id)
         answer = _answer_from_row(dict(row))
@@ -1865,6 +2181,23 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             filtered_rows = [row for row in filtered_rows if _matches_filter(row, item)]
 
         pseudo_sql = _pseudo_sql(dataset, payload.filters, payload.limit)
+        latency_ms = round((time.perf_counter() - started_at) * 1000, 2)
+        await _record_structured_lookup_log(
+            db,
+            workspace,
+            dataset_id=answer.answer_id,
+            dataset_title=answer.title,
+            pseudo_sql=pseudo_sql,
+            filters=payload.filters,
+            result_count=len(filtered_rows),
+            preview_only=payload.preview_only,
+            latency_ms=latency_ms,
+            metadata={
+                "limit": payload.limit,
+                "source_type": dataset.source_type,
+                "kind": dataset.kind,
+            },
+        )
         return StructuredQueryResponse(
             answer_id=answer.answer_id,
             title=answer.title,
@@ -1874,6 +2207,33 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             row_count=len(filtered_rows),
             preview_only=payload.preview_only,
         )
+
+    @router.get("/structured/query/logs", response_model=list[StructuredLookupLog], dependencies=[Depends(combined_auth)])
+    async def list_structured_lookup_logs(
+        request: Request,
+        dataset_id: Optional[str] = Query(default=None),
+        limit: int = Query(default=30, ge=1, le=200),
+    ):
+        workspace, db = await db_for_request(request)
+        params: list[Any] = [workspace]
+        where = ["workspace = $1"]
+        if dataset_id:
+            params.append(dataset_id)
+            where.append(f"dataset_id = ${len(params)}")
+        params.append(limit)
+        rows = await db.query(
+            f"""
+            SELECT log_id, workspace, dataset_id, dataset_title, pseudo_sql, filters,
+                   result_count, preview_only, latency_ms, metadata, create_time
+            FROM LIGHTRAG_STRUCTURED_LOOKUP_LOGS
+            WHERE {' AND '.join(where)}
+            ORDER BY create_time DESC
+            LIMIT ${len(params)}
+            """,
+            params,
+            multirows=True,
+        )
+        return [_structured_lookup_log_from_row(dict(row)) for row in rows or []]
 
     @router.get("/sources/snapshots", response_model=list[AnswerSourceSnapshot], dependencies=[Depends(combined_auth)])
     async def list_source_snapshots(

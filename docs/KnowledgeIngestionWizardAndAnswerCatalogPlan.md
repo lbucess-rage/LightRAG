@@ -630,3 +630,37 @@ Remaining implementation notes:
   - Verified CSV profile, JSON profile, CSV materialization, structured dataset listing, safe SQL preview, safe query execution, and guidance-driven `/api/answers/search`.
   - Browser verified the `Structured Data` tab profiling UI, role mapping preview, dataset draft creation, and selected dataset state.
   - Deleted the temporary workspace with `delete_data=true` and confirmed the WebUI falls back to `Base`.
+
+### Phase D+ Row Materialization And Lookup Logs Status - 2026-05-18
+
+- Extended structured materialization with two explicit modes:
+  - `table_as_dataset`: keeps the Phase D behavior and creates one queryable structured dataset answer.
+  - `row_per_answer`: creates one draft answer per source row using mapped question/answer/category fields.
+- Added structured lookup audit storage and API:
+  - `LIGHTRAG_STRUCTURED_LOOKUP_LOGS`
+  - `GET /api/answers/structured/query/logs`
+- `POST /api/answers/structured/query` now records preview and execute lookups with dataset ID, pseudo SQL, filters, result count, latency, and source metadata.
+- The `Structured Data` tab now shows:
+  - materialization mode selection
+  - row-per-answer guidance text
+  - recent lookup logs for the selected dataset
+- Validation and fixes:
+  - Found a server error while logging structured lookups because `db.execute()` was called with positional list data. Fixed lookup-log writes and related rollback cleanup paths to use the repository's dictionary parameter convention.
+  - Row-per-answer drafts now expose the source row as a single-row structured profile but are excluded from the structured dataset list so answer drafts and queryable datasets do not mix in the UI.
+- Preserved test workspace for inspection:
+  - workspace ID: `faq_phase_e_test_20260518`
+  - workspace name: `FAQ Phase E 테스트 20260518`
+  - created row-per-answer drafts:
+    - `ANS-f58a1c6e4434` for `환불은 어떻게 하나요?`
+    - `ANS-1a7d6b725168` for `비밀번호를 잊어버렸어요`
+  - created table dataset:
+    - `ANS-82bffb13fd95` for `Phase E 구조화 조회 로그 CSV`
+- Verification:
+  - Python compile passed for `answer_routes.py`.
+  - `ruff check lightrag/api/routers/answer_routes.py` passed.
+  - Server restarted on port `9422`, health check returned healthy.
+  - Verified `row_per_answer` materialization created two draft answers and `/api/answers/search` matched the refund question to `ANS-f58a1c6e4434`.
+  - Verified `table_as_dataset` materialization created `ANS-82bffb13fd95`.
+  - Verified structured query preview and execute for `category = Billing`, returning one matching row.
+  - Verified lookup logs show both preview and execute rows with pseudo SQL and latency.
+  - Browser verified the preserved FAQ workspace, answer-oriented navigation, `Structured Data` tab, mode selector, selected dataset, and recent lookup logs. Browser console error list was empty.
