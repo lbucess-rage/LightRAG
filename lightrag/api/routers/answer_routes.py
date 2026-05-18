@@ -32,6 +32,7 @@ ContentFormat = Literal["plain", "markdown", "html"]
 GuidanceType = Literal["keyword", "question", "synonym", "negative_keyword", "note"]
 ResolveStrategy = Literal["fast", "balanced"]
 StructuredOperator = Literal["contains", "equals", "starts_with", "ends_with"]
+StructuredSourceType = Literal["csv", "json"]
 
 VALID_WORKSPACE_MODES = {"kms", "answer_catalog", "hybrid"}
 ANSWER_WORKSPACE_MODES = {"answer_catalog", "hybrid"}
@@ -517,6 +518,59 @@ class StructuredQueryResponse(BaseModel):
     preview_only: bool = False
 
 
+class StructuredFieldProfile(BaseModel):
+    name: str
+    inferred_type: str = "text"
+    null_count: int = 0
+    null_rate: float = 0.0
+    distinct_count: int = 0
+    sample_values: list[str] = Field(default_factory=list)
+    semantic_role: str = "metadata"
+    confidence: float = 0.0
+
+
+class StructuredProfileRequest(BaseModel):
+    source_type: StructuredSourceType = "csv"
+    raw_content: str = Field(..., min_length=1)
+    source_uri: Optional[str] = None
+    sample_limit: int = Field(default=20, ge=1, le=100)
+
+
+class StructuredProfileResponse(BaseModel):
+    source_type: StructuredSourceType
+    kind: str
+    row_count: int
+    columns: list[str] = Field(default_factory=list)
+    fields: list[StructuredFieldProfile] = Field(default_factory=list)
+    sample_rows: list[dict[str, Any]] = Field(default_factory=list)
+    mapping_suggestions: dict[str, Optional[str]] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class StructuredMaterializeRequest(BaseModel):
+    source_type: StructuredSourceType = "csv"
+    raw_content: str = Field(..., min_length=1)
+    title: str = Field(..., min_length=1, max_length=500)
+    approved_summary: Optional[str] = None
+    source_uri: Optional[str] = None
+    file_name: Optional[str] = None
+    status: AnswerStatus = "draft"
+    priority: int = 0
+    tags: list[str] = Field(default_factory=list)
+    mapping: dict[str, str] = Field(default_factory=dict)
+    guidance_columns: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class StructuredMaterializeResponse(BaseModel):
+    answer: AnswerItem
+    dataset: StructuredDataset
+    profile: StructuredProfileResponse
+    guidance: list[AnswerGuidance] = Field(default_factory=list)
+    snapshot: Optional[AnswerSourceSnapshot] = None
+    source_link: Optional[AnswerSourceLink] = None
+
+
 def _answer_from_row(row: dict[str, Any]) -> AnswerItem:
     tags = _coerce_json(row.get("tags"), [])
     if isinstance(tags, str):
@@ -670,6 +724,238 @@ def _row_value(value: Any) -> Any:
     return json.dumps(value, ensure_ascii=False)
 
 
+def _parse_structured_rows(
+    source_type: str,
+    raw_content: str,
+    *,
+    max_rows: int = 1000,
+) -> tuple[list[dict[str, Any]], str, list[str]]:
+    content = (raw_content or "").strip()
+    warnings: list[str] = []
+    if not content:
+        raise HTTPException(status_code=400, detail="Structured source content is empty")
+
+    if source_type == "json":
+        try:
+            parsed = json.loads(content)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid JSON source: {exc.msg}") from exc
+        raw_rows = parsed if isinstance(parsed, list) else [parsed]
+        object_rows = [row for row in raw_rows if isinstance(row, dict)]
+        if not object_rows:
+            raise HTTPException(status_code=400, detail="JSON source must be an object or an array of objects")
+        if len(object_rows) < len(raw_rows):
+            warnings.append("Non-object JSON rows were ignored")
+        rows = [
+            {str(key): _row_value(value) for key, value in row.items()}
+            for row in object_rows[:max_rows]
+        ]
+        if len(object_rows) > max_rows:
+            warnings.append(f"Only the first {max_rows} JSON rows were profiled")
+        return rows, "json", warnings
+
+    sample = content[:4096]
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=",\t;|")
+    except csv.Error:
+        dialect = csv.excel_tab if "\t" in content.splitlines()[0] else csv.excel
+    reader = csv.DictReader(io.StringIO(content), dialect=dialect)
+    if not reader.fieldnames:
+        raise HTTPException(status_code=400, detail="CSV source must include a header row")
+
+    rows: list[dict[str, Any]] = []
+    for row in reader:
+        if len(rows) >= max_rows:
+            warnings.append(f"Only the first {max_rows} CSV rows were profiled")
+            break
+        if row:
+            rows.append({str(key): _row_value(value) for key, value in row.items() if key is not None})
+    if not rows:
+        raise HTTPException(status_code=400, detail="CSV source must include at least one data row")
+    return rows, "table", warnings
+
+
+def _is_empty_cell(value: Any) -> bool:
+    if value is None:
+        return True
+    normalized = str(value).strip().lower()
+    return normalized in {"", "null", "none", "n/a", "na"}
+
+
+def _infer_cell_type(value: Any) -> str:
+    if value is None:
+        return "empty"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    text = str(value).strip()
+    if not text:
+        return "empty"
+    if text.lower() in {"true", "false", "yes", "no", "y", "n"}:
+        return "boolean"
+    if re.fullmatch(r"[-+]?\d+", text):
+        return "integer"
+    if re.fullmatch(r"[-+]?\d+\.\d+", text):
+        return "number"
+    if re.fullmatch(r"\d{4}[-/.]\d{1,2}[-/.]\d{1,2}.*", text):
+        return "date"
+    if (text.startswith("{") and text.endswith("}")) or (text.startswith("[") and text.endswith("]")):
+        try:
+            json.loads(text)
+            return "json"
+        except json.JSONDecodeError:
+            return "text"
+    return "text"
+
+
+def _infer_column_type(values: list[Any]) -> str:
+    typed = [_infer_cell_type(value) for value in values if not _is_empty_cell(value)]
+    if not typed:
+        return "empty"
+    counts = {kind: typed.count(kind) for kind in set(typed)}
+    preferred = ["integer", "number", "boolean", "date", "json", "text"]
+    dominant = max(preferred, key=lambda item: (counts.get(item, 0), -preferred.index(item)))
+    if dominant == "integer" and counts.get("number"):
+        return "number"
+    return dominant if counts.get(dominant, 0) / max(len(typed), 1) >= 0.7 else "text"
+
+
+def _suggest_semantic_role(column: str, inferred_type: str) -> tuple[str, float]:
+    normalized = re.sub(r"[^0-9a-z가-힣]+", "_", column.strip().lower()).strip("_")
+    role_patterns: list[tuple[str, set[str], float]] = [
+        ("question", {"question", "query", "intent", "utterance", "질문", "문의", "의도"}, 0.92),
+        ("answer", {"answer", "response", "reply", "body", "content", "답변", "응답", "내용"}, 0.92),
+        ("title", {"title", "name", "subject", "제목", "이름", "명칭"}, 0.86),
+        ("category", {"category", "type", "group", "분류", "유형", "카테고리"}, 0.84),
+        ("status", {"status", "state", "상태"}, 0.82),
+        ("valid_from", {"valid_from", "start", "from", "시작", "시작일"}, 0.8),
+        ("valid_until", {"valid_until", "valid_to", "end", "until", "종료", "종료일", "만료"}, 0.8),
+        ("id", {"id", "key", "code", "uid", "번호", "코드"}, 0.78),
+    ]
+    for role, names, confidence in role_patterns:
+        if normalized in names or any(part in names for part in normalized.split("_")):
+            return role, confidence
+    if inferred_type == "date":
+        return "metadata", 0.45
+    return "metadata", 0.35
+
+
+def _profile_structured_source(
+    source_type: StructuredSourceType,
+    raw_content: str,
+    *,
+    sample_limit: int = 20,
+) -> StructuredProfileResponse:
+    rows, kind, warnings = _parse_structured_rows(source_type, raw_content)
+    columns: list[str] = []
+    for row in rows:
+        for column in row.keys():
+            if column not in columns:
+                columns.append(column)
+
+    fields: list[StructuredFieldProfile] = []
+    mapping_suggestions: dict[str, Optional[str]] = {
+        "id": None,
+        "title": None,
+        "question": None,
+        "answer": None,
+        "category": None,
+        "status": None,
+        "valid_from": None,
+        "valid_until": None,
+    }
+    for column in columns:
+        values = [row.get(column) for row in rows]
+        non_empty_values = [value for value in values if not _is_empty_cell(value)]
+        inferred_type = _infer_column_type(values)
+        role, confidence = _suggest_semantic_role(column, inferred_type)
+        sample_values = []
+        seen_samples: set[str] = set()
+        for value in non_empty_values:
+            text = str(value)
+            if text in seen_samples:
+                continue
+            sample_values.append(text[:160])
+            seen_samples.add(text)
+            if len(sample_values) >= 5:
+                break
+        null_count = len(values) - len(non_empty_values)
+        fields.append(
+            StructuredFieldProfile(
+                name=column,
+                inferred_type=inferred_type,
+                null_count=null_count,
+                null_rate=round(null_count / max(len(values), 1), 4),
+                distinct_count=len({str(value) for value in non_empty_values}),
+                sample_values=sample_values,
+                semantic_role=role,
+                confidence=confidence,
+            )
+        )
+        if role in mapping_suggestions and mapping_suggestions[role] is None and confidence >= 0.7:
+            mapping_suggestions[role] = column
+
+    return StructuredProfileResponse(
+        source_type=source_type,
+        kind=kind,
+        row_count=len(rows),
+        columns=columns,
+        fields=fields,
+        sample_rows=rows[:sample_limit],
+        mapping_suggestions=mapping_suggestions,
+        warnings=warnings,
+    )
+
+
+def _guidance_from_structured_profile(
+    rows: list[dict[str, Any]],
+    mapping: dict[str, str],
+    guidance_columns: list[str],
+) -> list[SourceGuidanceCandidate]:
+    candidates: list[SourceGuidanceCandidate] = []
+    seen: set[tuple[str, str]] = set()
+
+    def add(guidance_type: GuidanceType, value: Any, weight: float, source: str) -> None:
+        text = str(value or "").strip()
+        if len(text) < 2:
+            return
+        key = (guidance_type, text.lower())
+        if key in seen:
+            return
+        seen.add(key)
+        candidates.append(
+            SourceGuidanceCandidate(
+                guidance_type=guidance_type,
+                text=text[:500],
+                weight=weight,
+                source=source,
+                metadata={"created_from": "structured_materialize"},
+            )
+        )
+
+    question_column = mapping.get("question")
+    title_column = mapping.get("title")
+    category_column = mapping.get("category")
+    answer_column = mapping.get("answer")
+    for row in rows[:100]:
+        if question_column:
+            add("question", row.get(question_column), 1.25, question_column)
+        if title_column:
+            add("keyword", row.get(title_column), 0.95, title_column)
+        if category_column:
+            add("keyword", row.get(category_column), 0.85, category_column)
+        if answer_column:
+            add("note", row.get(answer_column), 0.45, answer_column)
+        for column in guidance_columns:
+            add("keyword", row.get(column), 0.75, column)
+        if len(candidates) >= 80:
+            break
+    return candidates[:80]
+
+
 def _rows_from_answer(answer: AnswerItem) -> tuple[list[dict[str, Any]], list[str], str]:
     body = answer.body.strip()
     rows: list[dict[str, Any]] = []
@@ -677,26 +963,15 @@ def _rows_from_answer(answer: AnswerItem) -> tuple[list[dict[str, Any]], list[st
 
     if body:
         try:
-            parsed = json.loads(body)
-            raw_rows = parsed if isinstance(parsed, list) else [parsed]
-            object_rows = [row for row in raw_rows if isinstance(row, dict)]
-            if object_rows:
-                rows = [{str(key): _row_value(value) for key, value in row.items()} for row in object_rows]
-                kind = "json"
-        except json.JSONDecodeError:
+            rows, kind, _ = _parse_structured_rows("json", body)
+        except HTTPException:
             rows = []
 
     if not rows and body:
-        lines = [line for line in body.splitlines() if line.strip()]
-        if len(lines) >= 2 and "," in lines[0]:
-            reader = csv.DictReader(io.StringIO(body))
-            parsed_rows = []
-            for row in reader:
-                if row:
-                    parsed_rows.append({str(key): _row_value(value) for key, value in row.items() if key is not None})
-            if parsed_rows:
-                rows = parsed_rows
-                kind = "table"
+        try:
+            rows, kind, _ = _parse_structured_rows("csv", body)
+        except HTTPException:
+            rows = []
 
     profile = _structured_profile(answer)
     if not rows:
@@ -1357,6 +1632,183 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             multirows=True,
         )
         return [_event_from_row(dict(row)) for row in rows or []]
+
+    @router.post(
+        "/structured/profile",
+        response_model=StructuredProfileResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def profile_structured_source(request: Request, payload: StructuredProfileRequest):
+        await db_for_request(request)
+        return _profile_structured_source(
+            payload.source_type,
+            payload.raw_content,
+            sample_limit=payload.sample_limit,
+        )
+
+    @router.post(
+        "/structured/materialize",
+        response_model=StructuredMaterializeResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def materialize_structured_source(request: Request, payload: StructuredMaterializeRequest):
+        workspace, db = await db_for_request(request)
+        profile = _profile_structured_source(payload.source_type, payload.raw_content, sample_limit=20)
+        rows, _, _ = _parse_structured_rows(payload.source_type, payload.raw_content)
+        profile_dict = profile.model_dump() if hasattr(profile, "model_dump") else profile.dict()
+
+        mapping: dict[str, str] = {}
+        for role, column in profile.mapping_suggestions.items():
+            if column and column in profile.columns:
+                mapping[role] = column
+        for role, column in payload.mapping.items():
+            if column in profile.columns:
+                mapping[str(role)] = column
+
+        guidance_columns = [
+            column for column in payload.guidance_columns
+            if column in profile.columns and column not in mapping.values()
+        ]
+        if not guidance_columns:
+            guidance_columns = [
+                field.name
+                for field in profile.fields
+                if field.semantic_role in {"category", "title", "id"}
+            ][:5]
+
+        tags: list[str] = []
+        for tag in [*payload.tags, "structured", payload.source_type]:
+            text = str(tag or "").strip()
+            if text and text not in tags:
+                tags.append(text)
+
+        answer_id = f"ANS-{uuid.uuid4().hex[:12]}"
+        source_profile = {
+            "structured": {
+                **profile_dict,
+                "mapping": mapping,
+                "guidance_columns": guidance_columns,
+            }
+        }
+        source_metadata = {
+            **payload.metadata,
+            "created_from": payload.metadata.get("created_from") or "structured_materialize",
+            "source_type": "structured",
+            "structured_source_type": payload.source_type,
+            "source_uri": payload.source_uri,
+            "file_name": payload.file_name,
+            "source_profile": source_profile,
+        }
+        snapshot = await _record_source_snapshot(
+            db,
+            workspace,
+            source_type="structured",
+            source_uri=payload.source_uri,
+            file_name=payload.file_name,
+            title=payload.title,
+            raw_content=payload.raw_content,
+            profile=source_profile,
+            metadata={
+                **payload.metadata,
+                "created_from": "structured_materialize",
+                "structured_source_type": payload.source_type,
+                "tags": tags,
+            },
+            created_answer_ids=[answer_id],
+            status="materialized",
+            task_id=payload.metadata.get("task_id"),
+        )
+        source_metadata["source_snapshot_id"] = snapshot.snapshot_id
+        source_metadata["source_content_hash"] = snapshot.content_hash
+
+        created_guidance: list[AnswerGuidance] = []
+        try:
+            row = await db.query(
+                """
+                INSERT INTO LIGHTRAG_ANSWER_ITEMS
+                    (workspace, answer_id, title, body, approved_summary, content_format,
+                     display_policy, status, version, valid_from, valid_until, priority,
+                     tags, metadata, publish_time)
+                VALUES
+                    ($1, $2, $3, $4, $5, 'plain', 'both', $6, 1, NULL, NULL, $7,
+                     $8::jsonb, $9::jsonb, CASE WHEN $6 = 'published' THEN NOW() ELSE NULL END)
+                RETURNING workspace, answer_id, title, body, approved_summary, content_format,
+                          display_policy, status, version, valid_from, valid_until, priority,
+                          tags, metadata, publish_time, create_time, update_time
+                """,
+                [
+                    workspace,
+                    answer_id,
+                    payload.title,
+                    payload.raw_content.strip(),
+                    payload.approved_summary,
+                    payload.status,
+                    payload.priority,
+                    _json_list(tags),
+                    _json(source_metadata),
+                ],
+            )
+            if not row:
+                raise HTTPException(status_code=500, detail="Failed to create structured dataset")
+            await _record_revision(db, dict(row))
+            source_link = await _record_source_link(
+                db,
+                workspace,
+                answer_id=answer_id,
+                answer_version=int(row.get("version") or 1),
+                snapshot_id=snapshot.snapshot_id,
+                link_type="created_from",
+                metadata={
+                    "created_from": "structured_materialize",
+                    "structured_source_type": payload.source_type,
+                    "mapping": mapping,
+                    "guidance_columns": guidance_columns,
+                },
+            )
+
+            for item in _guidance_from_structured_profile(rows, mapping, guidance_columns):
+                guidance_row = await db.query(
+                    """
+                    INSERT INTO LIGHTRAG_ANSWER_GUIDANCE
+                        (guidance_id, workspace, answer_id, guidance_type, text, weight, metadata)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+                    RETURNING guidance_id, workspace, answer_id, guidance_type, text, weight, metadata, create_time
+                    """,
+                    [
+                        f"agd-{uuid.uuid4().hex}",
+                        workspace,
+                        answer_id,
+                        item.guidance_type,
+                        item.text.strip(),
+                        item.weight,
+                        _json({**item.metadata, "source": item.source}),
+                    ],
+                )
+                if guidance_row:
+                    created_guidance.append(_guidance_from_row(dict(guidance_row)))
+
+            answer = _answer_from_row(dict(row))
+            return StructuredMaterializeResponse(
+                answer=answer,
+                dataset=_dataset_from_answer(answer),
+                profile=profile,
+                guidance=created_guidance,
+                snapshot=snapshot,
+                source_link=source_link,
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            try:
+                await db.execute(
+                    "DELETE FROM LIGHTRAG_ANSWER_SOURCE_SNAPSHOTS WHERE workspace = $1 AND snapshot_id = $2",
+                    [workspace, snapshot.snapshot_id],
+                )
+            except Exception:
+                pass
+            message = str(e)
+            logger.error("Failed to materialize structured source: %s\n%s", e, traceback.format_exc())
+            raise HTTPException(status_code=500, detail=message)
 
     @router.get("/structured/datasets", response_model=list[StructuredDataset], dependencies=[Depends(combined_auth)])
     async def list_structured_datasets(

@@ -1984,6 +1984,61 @@ export type AnswerStructuredQueryResponse = {
   preview_only: boolean
 }
 
+export type AnswerStructuredSourceType = 'csv' | 'json'
+
+export type AnswerStructuredFieldProfile = {
+  name: string
+  inferred_type: string
+  null_count: number
+  null_rate: number
+  distinct_count: number
+  sample_values: string[]
+  semantic_role: string
+  confidence: number
+}
+
+export type AnswerStructuredProfileRequest = {
+  source_type: AnswerStructuredSourceType
+  raw_content: string
+  source_uri?: string | null
+  sample_limit?: number
+}
+
+export type AnswerStructuredProfileResponse = {
+  source_type: AnswerStructuredSourceType
+  kind: string
+  row_count: number
+  columns: string[]
+  fields: AnswerStructuredFieldProfile[]
+  sample_rows: Record<string, any>[]
+  mapping_suggestions: Record<string, string | null>
+  warnings: string[]
+}
+
+export type AnswerStructuredMaterializeRequest = {
+  source_type: AnswerStructuredSourceType
+  raw_content: string
+  title: string
+  approved_summary?: string | null
+  source_uri?: string | null
+  file_name?: string | null
+  status?: AnswerStatus
+  priority?: number
+  tags?: string[]
+  mapping?: Record<string, string>
+  guidance_columns?: string[]
+  metadata?: Record<string, any>
+}
+
+export type AnswerStructuredMaterializeResponse = {
+  answer: AnswerItem
+  dataset: AnswerStructuredDataset
+  profile: AnswerStructuredProfileResponse
+  guidance: AnswerGuidance[]
+  snapshot?: AnswerSourceSnapshot | null
+  source_link?: AnswerSourceLink | null
+}
+
 export type AnswerListResponse = {
   answers: AnswerItem[]
   total: number
@@ -2233,6 +2288,20 @@ export const listAnswerStructuredDatasets = async (params?: {
   status?: string
 }): Promise<AnswerStructuredDataset[]> => {
   const response = await axiosInstance.get('/api/answers/structured/datasets', { params })
+  return response.data
+}
+
+export const profileAnswerStructuredSource = async (
+  request: AnswerStructuredProfileRequest
+): Promise<AnswerStructuredProfileResponse> => {
+  const response = await axiosInstance.post('/api/answers/structured/profile', request)
+  return response.data
+}
+
+export const materializeAnswerStructuredSource = async (
+  request: AnswerStructuredMaterializeRequest
+): Promise<AnswerStructuredMaterializeResponse> => {
+  const response = await axiosInstance.post('/api/answers/structured/materialize', request)
   return response.data
 }
 

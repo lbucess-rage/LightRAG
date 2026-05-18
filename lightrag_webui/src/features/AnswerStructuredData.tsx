@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { DatabaseIcon, PlayIcon, RefreshCwIcon, TableIcon } from 'lucide-react'
+import { DatabaseIcon, PlayIcon, RefreshCwIcon, SaveIcon, TableIcon, WandSparklesIcon } from 'lucide-react'
 
 import {
   AnswerStructuredDataset,
   AnswerStructuredFilter,
+  AnswerStructuredProfileResponse,
   AnswerStructuredQueryResponse,
+  AnswerStructuredSourceType,
   listAnswerStructuredDatasets,
+  materializeAnswerStructuredSource,
+  profileAnswerStructuredSource,
   queryAnswerStructuredDataset,
 } from '@/api/lightrag'
 import AnswerHelpButton from '@/components/answers/AnswerHelpButton'
@@ -17,12 +21,20 @@ import Checkbox from '@/components/ui/Checkbox'
 import Input from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select'
+import Textarea from '@/components/ui/Textarea'
 import { localizedErrorMessage } from '@/lib/utils'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 type StructuredOperator = AnswerStructuredFilter['operator']
 
 const operators: StructuredOperator[] = ['contains', 'equals', 'starts_with', 'ends_with']
+const mappingRoles = ['id', 'title', 'question', 'answer', 'category', 'status', 'valid_from', 'valid_until']
+
+const parseTags = (value: string) =>
+  Array.from(new Set(value.split(',').map((item) => item.trim()).filter(Boolean)))
+
+const compactMapping = (mapping: Record<string, string | null | undefined>): Record<string, string> =>
+  Object.fromEntries(Object.entries(mapping).filter(([, column]) => Boolean(column))) as Record<string, string>
 
 export default function AnswerStructuredData() {
   const { t } = useTranslation()
@@ -39,6 +51,16 @@ export default function AnswerStructuredData() {
   const [queryResult, setQueryResult] = useState<AnswerStructuredQueryResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [isQuerying, setIsQuerying] = useState(false)
+  const [sourceType, setSourceType] = useState<AnswerStructuredSourceType>('csv')
+  const [sourceTitle, setSourceTitle] = useState('')
+  const [sourceUri, setSourceUri] = useState('')
+  const [sourceTags, setSourceTags] = useState('')
+  const [rawContent, setRawContent] = useState('')
+  const [profile, setProfile] = useState<AnswerStructuredProfileResponse | null>(null)
+  const [mapping, setMapping] = useState<Record<string, string>>({})
+  const [guidanceColumns, setGuidanceColumns] = useState<string[]>([])
+  const [isProfiling, setIsProfiling] = useState(false)
+  const [isMaterializing, setIsMaterializing] = useState(false)
 
   const fetchDatasets = useCallback(async () => {
     const workspaceId = currentWorkspaceId
@@ -92,6 +114,87 @@ export default function AnswerStructuredData() {
 
   const kinds = useMemo(() => Array.from(new Set(datasets.map((item) => item.kind))).filter(Boolean), [datasets])
   const allColumns = useMemo(() => Array.from(new Set(filtered.flatMap((item) => item.columns))).slice(0, 80), [filtered])
+
+  const resetProfileState = () => {
+    setProfile(null)
+    setMapping({})
+    setGuidanceColumns([])
+  }
+
+  const handleProfileSource = async () => {
+    if (!rawContent.trim()) {
+      toast.error(t('answerCatalog.structured.sourceRequired', 'Paste CSV or JSON source content first.'))
+      return null
+    }
+    setIsProfiling(true)
+    try {
+      const result = await profileAnswerStructuredSource({
+        source_type: sourceType,
+        raw_content: rawContent,
+        source_uri: sourceUri || undefined,
+        sample_limit: 20,
+      })
+      setProfile(result)
+      setMapping(compactMapping(result.mapping_suggestions))
+      setGuidanceColumns(result.fields
+        .filter((field) => ['title', 'category', 'id'].includes(field.semantic_role))
+        .map((field) => field.name)
+        .slice(0, 5))
+      toast.success(t('answerCatalog.structured.profileComplete', 'Structured source profile is ready.'))
+      return result
+    } catch (err) {
+      toast.error(localizedErrorMessage(err, t))
+      return null
+    } finally {
+      setIsProfiling(false)
+    }
+  }
+
+  const handleMaterializeSource = async () => {
+    if (!sourceTitle.trim()) {
+      toast.error(t('answerCatalog.structured.titleRequired', 'Enter a dataset title first.'))
+      return
+    }
+    if (!rawContent.trim()) {
+      toast.error(t('answerCatalog.structured.sourceRequired', 'Paste CSV or JSON source content first.'))
+      return
+    }
+    setIsMaterializing(true)
+    try {
+      const activeProfile = profile || await profileAnswerStructuredSource({
+        source_type: sourceType,
+        raw_content: rawContent,
+        source_uri: sourceUri || undefined,
+        sample_limit: 20,
+      })
+      if (!profile) {
+        setProfile(activeProfile)
+        setMapping(compactMapping(activeProfile.mapping_suggestions))
+      }
+      const activeMapping = Object.keys(mapping).length > 0
+        ? compactMapping(mapping)
+        : compactMapping(activeProfile.mapping_suggestions)
+      const response = await materializeAnswerStructuredSource({
+        source_type: sourceType,
+        raw_content: rawContent,
+        title: sourceTitle.trim(),
+        source_uri: sourceUri || undefined,
+        tags: parseTags(sourceTags),
+        mapping: activeMapping,
+        guidance_columns: guidanceColumns,
+        metadata: { created_from_ui: 'structured_data' },
+      })
+      toast.success(t('answerCatalog.structured.materializeComplete', 'Structured dataset draft was created.'))
+      setSelectedDatasetId(response.dataset.answer_id)
+      setProfile(response.profile)
+      await fetchDatasets()
+      setSelectedDatasetId(response.dataset.answer_id)
+    } catch (err) {
+      toast.error(localizedErrorMessage(err, t))
+    } finally {
+      setIsMaterializing(false)
+    }
+  }
 
   const handleQuery = async (previewOnly: boolean) => {
     if (!selectedDatasetId) {
@@ -168,6 +271,176 @@ export default function AnswerStructuredData() {
           <Checkbox checked={structuredOnly} onCheckedChange={(checked) => setStructuredOnly(Boolean(checked))} />
           {t('answerCatalog.structured.structuredOnly', 'Structured only')}
         </label>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
+        <div className="rounded-md border p-4">
+          <div className="mb-3 flex items-center gap-2 font-semibold">
+            <WandSparklesIcon className="h-4 w-4" />
+            {t('answerCatalog.structured.sourceProfiling', 'Structured Source Profiling')}
+          </div>
+          <div className="grid gap-3">
+            <div className="grid gap-3 md:grid-cols-[150px_1fr]">
+              <div className="grid gap-2">
+                <Label>{t('answerCatalog.structured.sourceType', 'Source Type')}</Label>
+                <Select value={sourceType} onValueChange={(value) => {
+                  setSourceType(value as AnswerStructuredSourceType)
+                  resetProfileState()
+                }}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="csv">CSV / TSV</SelectItem>
+                    <SelectItem value="json">JSON</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label>{t('answerCatalog.structured.datasetTitle', 'Dataset Title')}</Label>
+                <Input
+                  value={sourceTitle}
+                  onChange={(event) => setSourceTitle(event.target.value)}
+                  placeholder={t('answerCatalog.structured.datasetTitlePlaceholder', 'Example: Customer Center FAQ Table')}
+                />
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid gap-2">
+                <Label>{t('answerCatalog.structured.sourceUri', 'Source URI')}</Label>
+                <Input
+                  value={sourceUri}
+                  onChange={(event) => setSourceUri(event.target.value)}
+                  placeholder={t('answerCatalog.structured.sourceUriPlaceholder', 'Optional source name, table, URL, or path')}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label>{t('answerCatalog.structured.tags', 'Tags')}</Label>
+                <Input
+                  value={sourceTags}
+                  onChange={(event) => setSourceTags(event.target.value)}
+                  placeholder={t('answerCatalog.structured.tagsPlaceholder', 'Comma separated tags')}
+                />
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label>{t('answerCatalog.structured.rawContent', 'Source Content')}</Label>
+              <Textarea
+                className="min-h-48 font-mono text-xs"
+                value={rawContent}
+                onChange={(event) => {
+                  setRawContent(event.target.value)
+                  resetProfileState()
+                }}
+                placeholder={sourceType === 'json'
+                  ? '[{"question":"...", "answer":"...", "category":"..."}]'
+                  : 'question,answer,category\nHow do I reset my password?,Use the password reset page.,Account'}
+              />
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={handleProfileSource} disabled={isProfiling || isMaterializing}>
+                <WandSparklesIcon className={isProfiling ? 'h-4 w-4 animate-pulse' : 'h-4 w-4'} />
+                {t('answerCatalog.structured.profileSource', 'Profile Source')}
+              </Button>
+              <Button onClick={handleMaterializeSource} disabled={isProfiling || isMaterializing}>
+                {isMaterializing ? <RefreshCwIcon className="h-4 w-4 animate-spin" /> : <SaveIcon className="h-4 w-4" />}
+                {t('answerCatalog.structured.createDataset', 'Create Dataset Draft')}
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-md border p-4">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <div className="font-semibold">{t('answerCatalog.structured.profilePreview', 'Profile Preview')}</div>
+            {profile && (
+              <div className="flex flex-wrap gap-1">
+                <Badge variant="outline">{profile.kind}</Badge>
+                <Badge variant="outline">{profile.row_count.toLocaleString()} {t('answerCatalog.sources.rows', 'Rows')}</Badge>
+              </div>
+            )}
+          </div>
+          {profile ? (
+            <div className="grid gap-4">
+              {profile.warnings.length > 0 && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+                  {profile.warnings.join(' / ')}
+                </div>
+              )}
+              <div className="grid gap-2">
+                <div className="text-xs font-medium text-muted-foreground">
+                  {t('answerCatalog.structured.fieldMapping', 'Field Role Mapping')}
+                </div>
+                <div className="grid gap-2 md:grid-cols-2">
+                  {mappingRoles.map((role) => (
+                    <div key={role} className="grid gap-1">
+                      <Label className="text-xs">{t(`answerCatalog.structured.roles.${role}`, role)}</Label>
+                      <Select
+                        value={mapping[role] || 'none'}
+                        onValueChange={(value) => setMapping((current) => {
+                          const next = { ...current }
+                          if (value === 'none') delete next[role]
+                          else next[role] = value
+                          return next
+                        })}
+                      >
+                        <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">{t('common.none', 'None')}</SelectItem>
+                          {profile.columns.map((column) => (
+                            <SelectItem key={`${role}-${column}`} value={column}>{column}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="max-h-72 overflow-auto rounded-md border">
+                <table className="w-full min-w-[680px] text-sm">
+                  <thead className="bg-muted/40 text-xs text-muted-foreground">
+                    <tr>
+                      <th className="p-2 text-left">{t('answerCatalog.structured.field', 'Field')}</th>
+                      <th className="p-2 text-left">{t('answerCatalog.structured.type', 'Type')}</th>
+                      <th className="p-2 text-left">{t('answerCatalog.structured.role', 'Role')}</th>
+                      <th className="p-2 text-right">{t('answerCatalog.structured.nullRate', 'Null')}</th>
+                      <th className="p-2 text-right">{t('answerCatalog.structured.distinct', 'Distinct')}</th>
+                      <th className="p-2 text-left">{t('answerCatalog.structured.guidance', 'Guidance')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {profile.fields.map((fieldProfile) => (
+                      <tr key={fieldProfile.name} className="border-t">
+                        <td className="p-2 font-medium">{fieldProfile.name}</td>
+                        <td className="p-2">{fieldProfile.inferred_type}</td>
+                        <td className="p-2">{t(`answerCatalog.structured.roles.${fieldProfile.semantic_role}`, fieldProfile.semantic_role)}</td>
+                        <td className="p-2 text-right">{Math.round(fieldProfile.null_rate * 100)}%</td>
+                        <td className="p-2 text-right">{fieldProfile.distinct_count.toLocaleString()}</td>
+                        <td className="p-2">
+                          <Checkbox
+                            checked={guidanceColumns.includes(fieldProfile.name)}
+                            onCheckedChange={(checked) => {
+                              setGuidanceColumns((current) => checked
+                                ? Array.from(new Set([...current, fieldProfile.name]))
+                                : current.filter((column) => column !== fieldProfile.name))
+                            }}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {profile.sample_rows.length > 0 && (
+                <pre className="max-h-40 overflow-auto rounded-md bg-muted/50 p-3 text-xs">
+                  {JSON.stringify(profile.sample_rows.slice(0, 3), null, 2)}
+                </pre>
+              )}
+            </div>
+          ) : (
+            <div className="rounded-md bg-muted/30 p-6 text-sm text-muted-foreground">
+              {t('answerCatalog.structured.profileHint', 'Paste a structured source and run profiling to inspect fields, inferred types, role mapping, and guidance candidates before creating a dataset.')}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[420px_1fr]">

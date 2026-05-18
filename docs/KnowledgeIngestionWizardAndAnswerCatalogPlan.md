@@ -598,3 +598,35 @@ Remaining implementation notes:
   - Browser verified the `Sources` snapshot history and answer-detail `Sources` section.
   - Copied the temporary workspace data into `faq_phase_c_copy_20260518` and confirmed snapshots/links were copied with remapped IDs.
   - Deleted both temporary workspaces with `delete_data=true`.
+
+### Phase D Structured Source Profiling Status - 2026-05-18
+
+- Added structured source profiling APIs for FAQ/answer-catalog workspaces:
+  - `POST /api/answers/structured/profile`
+  - `POST /api/answers/structured/materialize`
+- Supported source payloads in this phase:
+  - CSV / TSV / delimited table text
+  - JSON object or array of objects
+- The profile response now includes:
+  - detected kind, row count, columns, sample rows
+  - field-level inferred type, null rate, distinct count, sample values
+  - semantic role suggestions such as question, answer, category, status, valid_from, valid_until
+  - warnings for truncated or ignored rows
+- Materialization now creates:
+  - a draft answer dataset with the raw structured content
+  - source snapshot and source link records
+  - structured profile metadata with mapping and guidance columns
+  - guidance rows generated from mapped question/category/title/answer fields
+- Frontend updates:
+  - `Structured Data` tab has a structured source profiling panel.
+  - Operators can paste CSV/JSON, inspect profile fields, review role mapping, choose guidance columns, and create a dataset draft.
+  - The existing safe query preview/execute panel can immediately query the created dataset.
+  - Korean and English i18n strings were added for the new flow.
+- Verification:
+  - Python compile passed for `answer_routes.py`.
+  - WebUI `bun run build` succeeded.
+  - Server restarted on port `9422`, health check returned healthy.
+  - Created temporary workspace `faq_phase_d_smoke_20260518`.
+  - Verified CSV profile, JSON profile, CSV materialization, structured dataset listing, safe SQL preview, safe query execution, and guidance-driven `/api/answers/search`.
+  - Browser verified the `Structured Data` tab profiling UI, role mapping preview, dataset draft creation, and selected dataset state.
+  - Deleted the temporary workspace with `delete_data=true` and confirmed the WebUI falls back to `Base`.
