@@ -11,7 +11,7 @@ import zh_TW from './locales/zh_TW.json'
 
 const getStoredLanguage = () => {
   try {
-    const settingsString = localStorage.getItem('settings-storage')
+    const settingsString = sessionStorage.getItem('settings-storage')
     if (settingsString) {
       const settings = JSON.parse(settingsString)
       return settings.state?.language || 'ko'

@@ -179,12 +179,29 @@ const isGuestToken = (token: string): boolean => {
   return payload.role === 'guest';
 };
 
+const AUTH_STORAGE_KEYS = [
+  'LIGHTRAG-API-TOKEN',
+  'LIGHTRAG-CORE-VERSION',
+  'LIGHTRAG-API-VERSION',
+  'LIGHTRAG-WEBUI-TITLE',
+  'LIGHTRAG-WEBUI-DESCRIPTION',
+]
+
+const clearLegacyAuthLocalStorage = () => {
+  if (typeof window === 'undefined') return
+  for (const key of AUTH_STORAGE_KEYS) {
+    localStorage.removeItem(key)
+  }
+  localStorage.removeItem('LIGHTRAG-PREVIOUS-USER')
+}
+
 const initAuthState = (): { isAuthenticated: boolean; isGuestMode: boolean; coreVersion: string | null; apiVersion: string | null; username: string | null; webuiTitle: string | null; webuiDescription: string | null } => {
-  const token = localStorage.getItem('LIGHTRAG-API-TOKEN');
-  const coreVersion = localStorage.getItem('LIGHTRAG-CORE-VERSION');
-  const apiVersion = localStorage.getItem('LIGHTRAG-API-VERSION');
-  const webuiTitle = localStorage.getItem('LIGHTRAG-WEBUI-TITLE');
-  const webuiDescription = localStorage.getItem('LIGHTRAG-WEBUI-DESCRIPTION');
+  clearLegacyAuthLocalStorage()
+  const token = sessionStorage.getItem('LIGHTRAG-API-TOKEN');
+  const coreVersion = sessionStorage.getItem('LIGHTRAG-CORE-VERSION');
+  const apiVersion = sessionStorage.getItem('LIGHTRAG-API-VERSION');
+  const webuiTitle = sessionStorage.getItem('LIGHTRAG-WEBUI-TITLE');
+  const webuiDescription = sessionStorage.getItem('LIGHTRAG-WEBUI-DESCRIPTION');
   const username = token ? getUsernameFromToken(token) : null;
 
   if (!token) {
@@ -211,7 +228,7 @@ const initAuthState = (): { isAuthenticated: boolean; isGuestMode: boolean; core
 };
 
 export const useAuthStore = create<AuthState>(set => {
-  // Get initial state from localStorage
+  // Get initial state from the current browser session only.
   const initialState = initAuthState();
 
   return {
@@ -224,25 +241,26 @@ export const useAuthStore = create<AuthState>(set => {
     webuiDescription: initialState.webuiDescription,
 
     login: (token, isGuest = false, coreVersion = null, apiVersion = null, webuiTitle = null, webuiDescription = null) => {
-      localStorage.setItem('LIGHTRAG-API-TOKEN', token);
+      clearLegacyAuthLocalStorage()
+      sessionStorage.setItem('LIGHTRAG-API-TOKEN', token);
 
       if (coreVersion) {
-        localStorage.setItem('LIGHTRAG-CORE-VERSION', coreVersion);
+        sessionStorage.setItem('LIGHTRAG-CORE-VERSION', coreVersion);
       }
       if (apiVersion) {
-        localStorage.setItem('LIGHTRAG-API-VERSION', apiVersion);
+        sessionStorage.setItem('LIGHTRAG-API-VERSION', apiVersion);
       }
 
       if (webuiTitle) {
-        localStorage.setItem('LIGHTRAG-WEBUI-TITLE', webuiTitle);
+        sessionStorage.setItem('LIGHTRAG-WEBUI-TITLE', webuiTitle);
       } else {
-        localStorage.removeItem('LIGHTRAG-WEBUI-TITLE');
+        sessionStorage.removeItem('LIGHTRAG-WEBUI-TITLE');
       }
 
       if (webuiDescription) {
-        localStorage.setItem('LIGHTRAG-WEBUI-DESCRIPTION', webuiDescription);
+        sessionStorage.setItem('LIGHTRAG-WEBUI-DESCRIPTION', webuiDescription);
       } else {
-        localStorage.removeItem('LIGHTRAG-WEBUI-DESCRIPTION');
+        sessionStorage.removeItem('LIGHTRAG-WEBUI-DESCRIPTION');
       }
 
       const username = getUsernameFromToken(token);
@@ -258,12 +276,12 @@ export const useAuthStore = create<AuthState>(set => {
     },
 
     logout: () => {
-      localStorage.removeItem('LIGHTRAG-API-TOKEN');
+      sessionStorage.removeItem('LIGHTRAG-API-TOKEN');
 
-      const coreVersion = localStorage.getItem('LIGHTRAG-CORE-VERSION');
-      const apiVersion = localStorage.getItem('LIGHTRAG-API-VERSION');
-      const webuiTitle = localStorage.getItem('LIGHTRAG-WEBUI-TITLE');
-      const webuiDescription = localStorage.getItem('LIGHTRAG-WEBUI-DESCRIPTION');
+      const coreVersion = sessionStorage.getItem('LIGHTRAG-CORE-VERSION');
+      const apiVersion = sessionStorage.getItem('LIGHTRAG-API-VERSION');
+      const webuiTitle = sessionStorage.getItem('LIGHTRAG-WEBUI-TITLE');
+      const webuiDescription = sessionStorage.getItem('LIGHTRAG-WEBUI-DESCRIPTION');
 
       set({
         isAuthenticated: false,
@@ -277,12 +295,11 @@ export const useAuthStore = create<AuthState>(set => {
     },
 
     setVersion: (coreVersion, apiVersion) => {
-      // Update localStorage
       if (coreVersion) {
-        localStorage.setItem('LIGHTRAG-CORE-VERSION', coreVersion);
+        sessionStorage.setItem('LIGHTRAG-CORE-VERSION', coreVersion);
       }
       if (apiVersion) {
-        localStorage.setItem('LIGHTRAG-API-VERSION', apiVersion);
+        sessionStorage.setItem('LIGHTRAG-API-VERSION', apiVersion);
       }
 
       // Update state
@@ -293,17 +310,16 @@ export const useAuthStore = create<AuthState>(set => {
     },
 
     setCustomTitle: (webuiTitle, webuiDescription) => {
-      // Update localStorage
       if (webuiTitle) {
-        localStorage.setItem('LIGHTRAG-WEBUI-TITLE', webuiTitle);
+        sessionStorage.setItem('LIGHTRAG-WEBUI-TITLE', webuiTitle);
       } else {
-        localStorage.removeItem('LIGHTRAG-WEBUI-TITLE');
+        sessionStorage.removeItem('LIGHTRAG-WEBUI-TITLE');
       }
 
       if (webuiDescription) {
-        localStorage.setItem('LIGHTRAG-WEBUI-DESCRIPTION', webuiDescription);
+        sessionStorage.setItem('LIGHTRAG-WEBUI-DESCRIPTION', webuiDescription);
       } else {
-        localStorage.removeItem('LIGHTRAG-WEBUI-DESCRIPTION');
+        sessionStorage.removeItem('LIGHTRAG-WEBUI-DESCRIPTION');
       }
 
       // Update state

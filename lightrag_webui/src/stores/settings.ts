@@ -6,7 +6,12 @@ import { Message, QueryRequest } from '@/api/lightrag'
 import { AppTab } from '@/lib/workspaceMode'
 
 type Theme = 'dark' | 'light' | 'system'
-type Language = 'en' | 'zh' | 'fr' | 'ar' | 'zh_TW'
+type Language = 'ko' | 'en' | 'zh' | 'fr' | 'ar' | 'zh_TW'
+
+if (typeof window !== 'undefined') {
+  localStorage.removeItem('settings-storage')
+}
+
 interface SettingsState {
   // Document manager settings
   showFileName: boolean
@@ -195,7 +200,7 @@ const useSettingsStoreBase = create<SettingsState>()(
 
       setApiKey: (apiKey: string | null) => set({ apiKey }),
 
-      setCurrentTab: (tab: Tab) => set({ currentTab: tab }),
+      setCurrentTab: (tab: AppTab) => set({ currentTab: tab }),
 
       setRetrievalHistory: (history: Message[]) => set({ retrievalHistory: history }),
 
@@ -250,7 +255,7 @@ const useSettingsStoreBase = create<SettingsState>()(
     }),
     {
       name: 'settings-storage',
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() => sessionStorage),
       version: 25,
       migrate: (state: any, version: number) => {
         if (version < 2) {

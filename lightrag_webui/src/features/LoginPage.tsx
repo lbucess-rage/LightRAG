@@ -95,23 +95,7 @@ const LoginPage = () => {
       setLoading(true)
       const response = await loginToServer(username, password)
 
-      // Get previous username from localStorage
-      const previousUsername = localStorage.getItem('LIGHTRAG-PREVIOUS-USER')
-
-      // Check if it's the same user logging in again
-      const isSameUser = previousUsername === username
-
-      // If it's not the same user, clear chat history
-      if (isSameUser) {
-        console.log('Same user logging in, preserving chat history')
-      } else {
-        console.log('Different user logging in, clearing chat history')
-        // Directly clear chat history instead of setting a flag
-        useSettingsStore.getState().setRetrievalHistory([])
-      }
-
-      // Update previous username
-      localStorage.setItem('LIGHTRAG-PREVIOUS-USER', username)
+      useSettingsStore.getState().setRetrievalHistory([])
 
       // Check authentication mode
       const isGuestMode = response.auth_mode === 'disabled'
@@ -137,8 +121,7 @@ const LoginPage = () => {
 
       // Clear any existing auth state
       useAuthStore.getState().logout()
-      // Clear local storage
-      localStorage.removeItem('LIGHTRAG-API-TOKEN')
+      sessionStorage.removeItem('LIGHTRAG-API-TOKEN')
     } finally {
       setLoading(false)
     }

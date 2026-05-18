@@ -328,7 +328,7 @@ const axiosInstance = axios.create({
 // Interceptor: add api key, workspace header, and check authentication
 axiosInstance.interceptors.request.use((config) => {
   const apiKey = useSettingsStore.getState().apiKey
-  const token = localStorage.getItem('LIGHTRAG-API-TOKEN');
+  const token = sessionStorage.getItem('LIGHTRAG-API-TOKEN');
   const workspaceId = useWorkspaceStore.getState().currentWorkspaceId
 
   // Always include token if it exists, regardless of path
@@ -444,7 +444,7 @@ export const queryTextStream = async (
   onEvidenceMap?: (evidenceMap: Record<string, string[]>) => void
 ) => {
   const apiKey = useSettingsStore.getState().apiKey;
-  const token = localStorage.getItem('LIGHTRAG-API-TOKEN');
+  const token = sessionStorage.getItem('LIGHTRAG-API-TOKEN');
   const workspaceId = useWorkspaceStore.getState().currentWorkspaceId;
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
@@ -2348,7 +2348,7 @@ export const streamTaskProgress = (
 ): AbortController => {
   const controller = new AbortController()
   const apiKey = useSettingsStore.getState().apiKey
-  const token = localStorage.getItem('LIGHTRAG-API-TOKEN')
+  const token = sessionStorage.getItem('LIGHTRAG-API-TOKEN')
   const workspaceId = useWorkspaceStore.getState().currentWorkspaceId
 
   const headers: HeadersInit = {
@@ -2477,9 +2477,9 @@ export const processMultimodal = async (
     headers: { 'Content-Type': 'multipart/form-data' },
     onUploadProgress: onUploadProgress
       ? (progressEvent) => {
-          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total!)
-          onUploadProgress(percentCompleted)
-        }
+        const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total!)
+        onUploadProgress(percentCompleted)
+      }
       : undefined,
   })
   return response.data

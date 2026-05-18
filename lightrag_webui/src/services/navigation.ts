@@ -58,15 +58,7 @@ class NavigationService {
       return;
     }
 
-    // Store current username before logout for comparison during next login
-    const currentUsername = useAuthStore.getState().username;
-    if (currentUsername) {
-      localStorage.setItem('LIGHTRAG-PREVIOUS-USER', currentUsername);
-    }
-
-    // Reset application state but preserve history
-    // History will be cleared on next login if the user changes
-    this.resetAllApplicationState(true);
+    this.resetAllApplicationState(false);
     useAuthStore.getState().logout();
 
     this.navigate('/login');

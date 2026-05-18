@@ -23,7 +23,7 @@ const AppContent = () => {
 
     const checkAuth = async () => {
       try {
-        const token = localStorage.getItem('LIGHTRAG-API-TOKEN')
+        const token = sessionStorage.getItem('LIGHTRAG-API-TOKEN')
 
         if (token && isAuthenticated) {
           setInitializing(false);
