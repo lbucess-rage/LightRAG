@@ -3,9 +3,8 @@ This module contains all workspace-related routes for the LightRAG API.
 Allows managing workspaces for multi-tenant data isolation.
 """
 
-import json
-from typing import Optional, Any
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from lightrag.utils import logger
@@ -184,6 +183,19 @@ ANSWER_CATALOG_COPY_TABLES = [
         "columns": "event_id, workspace, event_type, query, selected_answer_id, candidate_ids, scores, metadata, create_time",
         "select": "'evt-' || md5($2 || ':' || event_id), $2, event_type, query, selected_answer_id, candidate_ids, scores, metadata, create_time",
         "conflict": "(event_id)",
+    },
+    {
+        "table": "LIGHTRAG_SOURCE_CONNECTORS",
+        "label": "source_connectors",
+        "columns": (
+            "connector_id, workspace, name, connector_type, status, config, "
+            "auth_ref, refresh_policy, enabled, metadata, create_time, update_time"
+        ),
+        "select": (
+            "'conn-' || md5($2 || ':' || connector_id), $2, name, connector_type, status, config, "
+            "auth_ref, refresh_policy, enabled, metadata, create_time, update_time"
+        ),
+        "conflict": "(connector_id)",
     },
     {
         "table": "LIGHTRAG_ANSWER_SOURCE_SNAPSHOTS",

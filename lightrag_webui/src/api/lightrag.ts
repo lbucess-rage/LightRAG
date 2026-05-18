@@ -2056,6 +2056,73 @@ export type AnswerStructuredLookupLog = {
   create_time?: string | null
 }
 
+export type AnswerSourceConnectorType = 'manual_table' | 'db_table' | 'multi_table' | 'nosql_collection' | 'web'
+export type AnswerSourceConnectorStatus = 'draft' | 'active' | 'paused' | 'error'
+
+export type AnswerSourceConnector = {
+  connector_id: string
+  workspace: string
+  name: string
+  connector_type: AnswerSourceConnectorType
+  status: AnswerSourceConnectorStatus
+  config: Record<string, any>
+  auth_ref?: string | null
+  refresh_policy: Record<string, any>
+  enabled: boolean
+  metadata: Record<string, any>
+  create_time?: string | null
+  update_time?: string | null
+}
+
+export type AnswerSourceConnectorCreateRequest = {
+  connector_id?: string
+  name: string
+  connector_type: AnswerSourceConnectorType
+  status?: AnswerSourceConnectorStatus
+  config?: Record<string, any>
+  auth_ref?: string | null
+  refresh_policy?: Record<string, any>
+  enabled?: boolean
+  metadata?: Record<string, any>
+}
+
+export type AnswerSourceConnectorSample = {
+  connector_id: string
+  connector_type: AnswerSourceConnectorType
+  source_type: 'csv' | 'json'
+  source_uri?: string | null
+  raw_content: string
+  rows: Record<string, any>[]
+  columns: string[]
+  row_count: number
+  warnings: string[]
+}
+
+export type AnswerSourceConnectorMappingPreview = {
+  connector: AnswerSourceConnector
+  sample: AnswerSourceConnectorSample
+  profile: AnswerStructuredProfileResponse
+  mapping: Record<string, string>
+  guidance_columns: string[]
+  materialization_modes: Array<'table_as_dataset' | 'row_per_answer'>
+}
+
+export type AnswerSourceConnectorMaterializeRequest = {
+  title?: string
+  mapping?: Record<string, string>
+  guidance_columns?: string[]
+  materialization_mode?: 'table_as_dataset' | 'row_per_answer'
+  status?: AnswerStatus
+  tags?: string[]
+  metadata?: Record<string, any>
+}
+
+export type AnswerSourceConnectorMaterializeResponse = {
+  connector: AnswerSourceConnector
+  sample: AnswerSourceConnectorSample
+  materialized: AnswerStructuredMaterializeResponse
+}
+
 export type AnswerListResponse = {
   answers: AnswerItem[]
   total: number
@@ -2334,6 +2401,55 @@ export const queryAnswerStructuredDataset = async (
   request: AnswerStructuredQueryRequest
 ): Promise<AnswerStructuredQueryResponse> => {
   const response = await axiosInstance.post('/api/answers/structured/query', request)
+  return response.data
+}
+
+export const listAnswerSourceConnectors = async (params?: {
+  connector_type?: string
+  status?: string
+  search?: string
+  limit?: number
+}): Promise<AnswerSourceConnector[]> => {
+  const response = await axiosInstance.get('/api/answers/connectors', { params })
+  return response.data
+}
+
+export const createAnswerSourceConnector = async (
+  request: AnswerSourceConnectorCreateRequest
+): Promise<AnswerSourceConnector> => {
+  const response = await axiosInstance.post('/api/answers/connectors', request)
+  return response.data
+}
+
+export const sampleAnswerSourceConnector = async (
+  connectorId: string,
+  request: { limit?: number } = {}
+): Promise<AnswerSourceConnectorSample> => {
+  const response = await axiosInstance.post(`/api/answers/connectors/${encodeURIComponent(connectorId)}/sample`, request)
+  return response.data
+}
+
+export const profileAnswerSourceConnector = async (
+  connectorId: string,
+  request: { limit?: number } = {}
+): Promise<AnswerStructuredProfileResponse> => {
+  const response = await axiosInstance.post(`/api/answers/connectors/${encodeURIComponent(connectorId)}/profile`, request)
+  return response.data
+}
+
+export const previewAnswerSourceConnectorMapping = async (
+  connectorId: string,
+  request: { mapping?: Record<string, string>; materialization_mode?: 'table_as_dataset' | 'row_per_answer' } = {}
+): Promise<AnswerSourceConnectorMappingPreview> => {
+  const response = await axiosInstance.post(`/api/answers/connectors/${encodeURIComponent(connectorId)}/mapping/preview`, request)
+  return response.data
+}
+
+export const materializeAnswerSourceConnector = async (
+  connectorId: string,
+  request: AnswerSourceConnectorMaterializeRequest
+): Promise<AnswerSourceConnectorMaterializeResponse> => {
+  const response = await axiosInstance.post(`/api/answers/connectors/${encodeURIComponent(connectorId)}/materialize`, request)
   return response.data
 }
 

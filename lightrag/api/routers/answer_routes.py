@@ -34,6 +34,8 @@ ResolveStrategy = Literal["fast", "balanced"]
 StructuredOperator = Literal["contains", "equals", "starts_with", "ends_with"]
 StructuredSourceType = Literal["csv", "json"]
 StructuredMaterializationMode = Literal["table_as_dataset", "row_per_answer"]
+SourceConnectorType = Literal["manual_table", "db_table", "multi_table", "nosql_collection", "web"]
+SourceConnectorStatus = Literal["draft", "active", "paused", "error"]
 
 VALID_WORKSPACE_MODES = {"kms", "answer_catalog", "hybrid"}
 ANSWER_WORKSPACE_MODES = {"answer_catalog", "hybrid"}
@@ -256,6 +258,22 @@ async def _ensure_tables(db) -> None:
             create_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS LIGHTRAG_SOURCE_CONNECTORS (
+            connector_id TEXT PRIMARY KEY,
+            workspace TEXT NOT NULL,
+            name TEXT NOT NULL,
+            connector_type TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'draft',
+            config JSONB NOT NULL DEFAULT '{}'::jsonb,
+            auth_ref TEXT,
+            refresh_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
+            enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            create_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            update_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
         "CREATE INDEX IF NOT EXISTS IDX_ANSWERS_WORKSPACE_STATUS ON LIGHTRAG_ANSWER_ITEMS(workspace, status)",
         "CREATE INDEX IF NOT EXISTS IDX_ANSWERS_WORKSPACE_UPDATE ON LIGHTRAG_ANSWER_ITEMS(workspace, update_time DESC)",
         "CREATE INDEX IF NOT EXISTS IDX_ANSWER_GUIDANCE_WORKSPACE_ANSWER ON LIGHTRAG_ANSWER_GUIDANCE(workspace, answer_id)",
@@ -266,6 +284,8 @@ async def _ensure_tables(db) -> None:
         "CREATE INDEX IF NOT EXISTS IDX_ANSWER_SOURCE_LINKS_WORKSPACE_SNAPSHOT ON LIGHTRAG_ANSWER_SOURCE_LINKS(workspace, snapshot_id)",
         "CREATE INDEX IF NOT EXISTS IDX_STRUCTURED_LOOKUP_LOGS_WORKSPACE_TIME ON LIGHTRAG_STRUCTURED_LOOKUP_LOGS(workspace, create_time DESC)",
         "CREATE INDEX IF NOT EXISTS IDX_STRUCTURED_LOOKUP_LOGS_WORKSPACE_DATASET ON LIGHTRAG_STRUCTURED_LOOKUP_LOGS(workspace, dataset_id)",
+        "CREATE INDEX IF NOT EXISTS IDX_SOURCE_CONNECTORS_WORKSPACE_TYPE ON LIGHTRAG_SOURCE_CONNECTORS(workspace, connector_type)",
+        "CREATE INDEX IF NOT EXISTS IDX_SOURCE_CONNECTORS_WORKSPACE_UPDATE ON LIGHTRAG_SOURCE_CONNECTORS(workspace, update_time DESC)",
     ]
     for statement in statements:
         await db.execute(statement)
@@ -606,6 +626,89 @@ class StructuredLookupLog(BaseModel):
     create_time: Optional[str] = None
 
 
+class SourceConnector(BaseModel):
+    connector_id: str
+    workspace: str
+    name: str
+    connector_type: SourceConnectorType
+    status: SourceConnectorStatus = "draft"
+    config: dict[str, Any] = Field(default_factory=dict)
+    auth_ref: Optional[str] = None
+    refresh_policy: dict[str, Any] = Field(default_factory=dict)
+    enabled: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    create_time: Optional[str] = None
+    update_time: Optional[str] = None
+
+
+class SourceConnectorCreateRequest(BaseModel):
+    connector_id: Optional[str] = Field(default=None, description="Optional stable connector id. Defaults to conn-<uuid>.")
+    name: str = Field(..., min_length=1, max_length=300)
+    connector_type: SourceConnectorType
+    status: SourceConnectorStatus = "draft"
+    config: dict[str, Any] = Field(default_factory=dict)
+    auth_ref: Optional[str] = None
+    refresh_policy: dict[str, Any] = Field(default_factory=dict)
+    enabled: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SourceConnectorUpdateRequest(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=300)
+    status: Optional[SourceConnectorStatus] = None
+    config: Optional[dict[str, Any]] = None
+    auth_ref: Optional[str] = None
+    refresh_policy: Optional[dict[str, Any]] = None
+    enabled: Optional[bool] = None
+    metadata: Optional[dict[str, Any]] = None
+
+
+class SourceConnectorSampleRequest(BaseModel):
+    limit: int = Field(default=20, ge=1, le=200)
+
+
+class SourceConnectorSampleResponse(BaseModel):
+    connector_id: str
+    connector_type: SourceConnectorType
+    source_type: StructuredSourceType
+    source_uri: Optional[str] = None
+    raw_content: str
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+    columns: list[str] = Field(default_factory=list)
+    row_count: int = 0
+    warnings: list[str] = Field(default_factory=list)
+
+
+class SourceConnectorMappingPreviewRequest(BaseModel):
+    mapping: dict[str, str] = Field(default_factory=dict)
+    materialization_mode: StructuredMaterializationMode = "table_as_dataset"
+
+
+class SourceConnectorMappingPreviewResponse(BaseModel):
+    connector: SourceConnector
+    sample: SourceConnectorSampleResponse
+    profile: StructuredProfileResponse
+    mapping: dict[str, str] = Field(default_factory=dict)
+    guidance_columns: list[str] = Field(default_factory=list)
+    materialization_modes: list[StructuredMaterializationMode] = Field(default_factory=list)
+
+
+class SourceConnectorMaterializeRequest(BaseModel):
+    title: Optional[str] = None
+    mapping: dict[str, str] = Field(default_factory=dict)
+    guidance_columns: list[str] = Field(default_factory=list)
+    materialization_mode: StructuredMaterializationMode = "table_as_dataset"
+    status: AnswerStatus = "draft"
+    tags: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SourceConnectorMaterializeResponse(BaseModel):
+    connector: SourceConnector
+    sample: SourceConnectorSampleResponse
+    materialized: StructuredMaterializeResponse
+
+
 def _answer_from_row(row: dict[str, Any]) -> AnswerItem:
     tags = _coerce_json(row.get("tags"), [])
     if isinstance(tags, str):
@@ -694,6 +797,32 @@ def _structured_lookup_log_from_row(row: dict[str, Any]) -> StructuredLookupLog:
         latency_ms=float(row.get("latency_ms") or 0.0),
         metadata=metadata,
         create_time=_iso(row.get("create_time")),
+    )
+
+
+def _source_connector_from_row(row: dict[str, Any]) -> SourceConnector:
+    config = _coerce_json(row.get("config"), {})
+    if not isinstance(config, dict):
+        config = {}
+    refresh_policy = _coerce_json(row.get("refresh_policy"), {})
+    if not isinstance(refresh_policy, dict):
+        refresh_policy = {}
+    metadata = _coerce_json(row.get("metadata"), {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+    return SourceConnector(
+        connector_id=str(row["connector_id"]),
+        workspace=str(row["workspace"]),
+        name=str(row.get("name") or ""),
+        connector_type=row.get("connector_type") or "manual_table",
+        status=row.get("status") or "draft",
+        config=config,
+        auth_ref=row.get("auth_ref"),
+        refresh_policy=refresh_policy,
+        enabled=bool(row.get("enabled")),
+        metadata=metadata,
+        create_time=_iso(row.get("create_time")),
+        update_time=_iso(row.get("update_time")),
     )
 
 
@@ -842,6 +971,157 @@ def _parse_structured_rows(
     if not rows:
         raise HTTPException(status_code=400, detail="CSV source must include at least one data row")
     return rows, "table", warnings
+
+
+def _rows_to_csv(rows: list[dict[str, Any]], columns: Optional[list[str]] = None) -> str:
+    ordered_columns = columns or []
+    if not ordered_columns:
+        for row in rows:
+            for column in row.keys():
+                if column not in ordered_columns:
+                    ordered_columns.append(column)
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=ordered_columns)
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({column: row.get(column, "") for column in ordered_columns})
+    return output.getvalue().strip()
+
+
+def _column_order_from_rows(rows: list[dict[str, Any]]) -> list[str]:
+    columns: list[str] = []
+    for row in rows:
+        for column in row.keys():
+            if column not in columns:
+                columns.append(column)
+    return columns
+
+
+def _connector_raw_content(connector: SourceConnector, limit: int) -> tuple[StructuredSourceType, str, Optional[str], list[str]]:
+    config = connector.config
+    warnings: list[str] = []
+    source_uri = config.get("source_uri") or config.get("uri") or config.get("url") or config.get("table") or config.get("collection")
+
+    raw_content = str(config.get("raw_content") or "").strip()
+    if raw_content:
+        source_type = str(config.get("source_type") or "").lower()
+        if source_type not in {"csv", "json"}:
+            source_type = "json" if raw_content.startswith(("{", "[")) else "csv"
+        return source_type, raw_content, source_uri, warnings
+
+    rows = config.get("sample_rows") or config.get("rows") or config.get("documents")
+    if isinstance(rows, dict):
+        rows = [rows]
+    if isinstance(rows, list) and rows:
+        object_rows = [row for row in rows if isinstance(row, dict)]
+        if object_rows:
+            sliced_rows = [{str(key): _row_value(value) for key, value in row.items()} for row in object_rows[:limit]]
+            if len(object_rows) > limit:
+                warnings.append(f"Only the first {limit} connector rows were sampled")
+            return "json", json.dumps(sliced_rows, ensure_ascii=False), source_uri, warnings
+        array_rows = [row for row in rows if isinstance(row, list)]
+        columns = config.get("columns")
+        if array_rows and isinstance(columns, list) and columns:
+            dict_rows = [
+                {str(column): _row_value(row[index]) if index < len(row) else "" for index, column in enumerate(columns)}
+                for row in array_rows[:limit]
+            ]
+            return "csv", _rows_to_csv(dict_rows, [str(column) for column in columns]), source_uri, warnings
+
+    tables = config.get("tables")
+    if isinstance(tables, list) and tables:
+        flattened: list[dict[str, Any]] = []
+        for table in tables:
+            if not isinstance(table, dict):
+                continue
+            table_name = str(table.get("name") or table.get("table") or "table")
+            table_rows = table.get("sample_rows") or table.get("rows") or []
+            if isinstance(table_rows, dict):
+                table_rows = [table_rows]
+            for row in table_rows[: max(1, limit // max(len(tables), 1))]:
+                if isinstance(row, dict):
+                    flattened.append({"table": table_name, **{str(key): _row_value(value) for key, value in row.items()}})
+        if flattened:
+            return "json", json.dumps(flattened[:limit], ensure_ascii=False), source_uri, warnings
+
+    if connector.connector_type == "web":
+        row = {
+            "title": config.get("title") or connector.name,
+            "url": config.get("url") or source_uri or "",
+            "content": config.get("content") or config.get("summary") or "",
+        }
+        return "json", json.dumps([row], ensure_ascii=False), source_uri, warnings
+
+    row = {
+        "name": connector.name,
+        "connector_type": connector.connector_type,
+        "source_uri": source_uri or "",
+        "description": config.get("description") or connector.metadata.get("description") or "",
+    }
+    warnings.append("Connector has no raw_content or sample_rows; generated a metadata sample row")
+    return "json", json.dumps([row], ensure_ascii=False), source_uri, warnings
+
+
+def _connector_sample_response(connector: SourceConnector, limit: int) -> SourceConnectorSampleResponse:
+    source_type, raw_content, source_uri, warnings = _connector_raw_content(connector, limit)
+    rows, _, parse_warnings = _parse_structured_rows(source_type, raw_content, max_rows=limit)
+    warnings.extend(parse_warnings)
+    return SourceConnectorSampleResponse(
+        connector_id=connector.connector_id,
+        connector_type=connector.connector_type,
+        source_type=source_type,
+        source_uri=source_uri,
+        raw_content=raw_content,
+        rows=rows,
+        columns=_column_order_from_rows(rows),
+        row_count=len(rows),
+        warnings=warnings,
+    )
+
+
+def _mapping_from_profile(
+    profile: StructuredProfileResponse,
+    override: Optional[dict[str, str]] = None,
+) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for role, column in profile.mapping_suggestions.items():
+        if column and column in profile.columns:
+            mapping[role] = column
+    for role, column in (override or {}).items():
+        if column in profile.columns:
+            mapping = {mapped_role: mapped_column for mapped_role, mapped_column in mapping.items() if mapped_column != column}
+            mapping[str(role)] = column
+    return mapping
+
+
+def _guidance_columns_from_profile(
+    profile: StructuredProfileResponse,
+    mapping: dict[str, str],
+    override: Optional[list[str]] = None,
+) -> list[str]:
+    guidance_columns = [
+        column for column in (override or [])
+        if column in profile.columns and column not in mapping.values()
+    ]
+    if guidance_columns:
+        return guidance_columns
+    suggested: list[str] = []
+    guidance_name_hints = {
+        "keyword", "keywords", "tag", "tags", "intent", "synonym",
+        "키워드", "태그", "의도", "동의어", "검색어",
+    }
+    mapped_columns = set(mapping.values())
+    for field in profile.fields:
+        normalized = re.sub(r"[^0-9a-z가-힣]+", "_", field.name.strip().lower()).strip("_")
+        name_parts = set(normalized.split("_"))
+        should_include = (
+            field.semantic_role in {"category", "title", "id"}
+            or normalized in guidance_name_hints
+            or bool(name_parts & guidance_name_hints)
+        )
+        if should_include and field.name not in mapped_columns and field.name not in suggested:
+            suggested.append(field.name)
+    return suggested[:5]
 
 
 def _is_empty_cell(value: Any) -> bool:
@@ -2234,6 +2514,258 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             multirows=True,
         )
         return [_structured_lookup_log_from_row(dict(row)) for row in rows or []]
+
+    async def _get_connector_row(db, workspace: str, connector_id: str) -> dict[str, Any]:
+        row = await db.query(
+            """
+            SELECT connector_id, workspace, name, connector_type, status, config,
+                   auth_ref, refresh_policy, enabled, metadata, create_time, update_time
+            FROM LIGHTRAG_SOURCE_CONNECTORS
+            WHERE workspace = $1 AND connector_id = $2
+            """,
+            [workspace, connector_id],
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Source connector '{connector_id}' not found")
+        return dict(row)
+
+    @router.get("/connectors", response_model=list[SourceConnector], dependencies=[Depends(combined_auth)])
+    async def list_source_connectors(
+        request: Request,
+        connector_type: Optional[str] = Query(default=None),
+        status: Optional[str] = Query(default=None),
+        search: Optional[str] = Query(default=None),
+        limit: int = Query(default=100, ge=1, le=500),
+    ):
+        workspace, db = await db_for_request(request)
+        params: list[Any] = [workspace]
+        where = ["workspace = $1"]
+        if connector_type and connector_type != "all":
+            params.append(connector_type)
+            where.append(f"connector_type = ${len(params)}")
+        if status and status != "all":
+            params.append(status)
+            where.append(f"status = ${len(params)}")
+        if search:
+            params.append(f"%{search}%")
+            p = f"${len(params)}"
+            where.append(f"(name ILIKE {p} OR connector_id ILIKE {p})")
+        params.append(limit)
+        rows = await db.query(
+            f"""
+            SELECT connector_id, workspace, name, connector_type, status, config,
+                   auth_ref, refresh_policy, enabled, metadata, create_time, update_time
+            FROM LIGHTRAG_SOURCE_CONNECTORS
+            WHERE {' AND '.join(where)}
+            ORDER BY update_time DESC, connector_id ASC
+            LIMIT ${len(params)}
+            """,
+            params,
+            multirows=True,
+        )
+        return [_source_connector_from_row(dict(row)) for row in rows or []]
+
+    @router.post("/connectors", response_model=SourceConnector, dependencies=[Depends(combined_auth)])
+    async def create_source_connector(request: Request, payload: SourceConnectorCreateRequest):
+        workspace, db = await db_for_request(request)
+        connector_id = payload.connector_id or f"conn-{uuid.uuid4().hex[:12]}"
+        try:
+            row = await db.query(
+                """
+                INSERT INTO LIGHTRAG_SOURCE_CONNECTORS
+                    (connector_id, workspace, name, connector_type, status, config,
+                     auth_ref, refresh_policy, enabled, metadata)
+                VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8::jsonb, $9, $10::jsonb)
+                RETURNING connector_id, workspace, name, connector_type, status, config,
+                          auth_ref, refresh_policy, enabled, metadata, create_time, update_time
+                """,
+                [
+                    connector_id,
+                    workspace,
+                    payload.name,
+                    payload.connector_type,
+                    payload.status,
+                    _json(payload.config),
+                    payload.auth_ref,
+                    _json(payload.refresh_policy),
+                    payload.enabled,
+                    _json(payload.metadata),
+                ],
+            )
+        except Exception as e:
+            message = str(e)
+            if "duplicate" in message.lower() or "unique" in message.lower():
+                raise HTTPException(status_code=409, detail=f"Source connector '{connector_id}' already exists")
+            logger.error("Failed to create source connector: %s\n%s", e, traceback.format_exc())
+            raise HTTPException(status_code=500, detail=message)
+        if not row:
+            raise HTTPException(status_code=500, detail="Failed to create source connector")
+        return _source_connector_from_row(dict(row))
+
+    @router.get("/connectors/{connector_id}", response_model=SourceConnector, dependencies=[Depends(combined_auth)])
+    async def get_source_connector(request: Request, connector_id: str):
+        workspace, db = await db_for_request(request)
+        return _source_connector_from_row(await _get_connector_row(db, workspace, connector_id))
+
+    @router.patch("/connectors/{connector_id}", response_model=SourceConnector, dependencies=[Depends(combined_auth)])
+    async def update_source_connector(request: Request, connector_id: str, payload: SourceConnectorUpdateRequest):
+        workspace, db = await db_for_request(request)
+        current = _source_connector_from_row(await _get_connector_row(db, workspace, connector_id))
+        row = await db.query(
+            """
+            UPDATE LIGHTRAG_SOURCE_CONNECTORS
+            SET name = $3,
+                status = $4,
+                config = $5::jsonb,
+                auth_ref = $6,
+                refresh_policy = $7::jsonb,
+                enabled = $8,
+                metadata = $9::jsonb,
+                update_time = NOW()
+            WHERE workspace = $1 AND connector_id = $2
+            RETURNING connector_id, workspace, name, connector_type, status, config,
+                      auth_ref, refresh_policy, enabled, metadata, create_time, update_time
+            """,
+            [
+                workspace,
+                connector_id,
+                payload.name if payload.name is not None else current.name,
+                payload.status if payload.status is not None else current.status,
+                _json(payload.config if payload.config is not None else current.config),
+                payload.auth_ref if payload.auth_ref is not None else current.auth_ref,
+                _json(payload.refresh_policy if payload.refresh_policy is not None else current.refresh_policy),
+                payload.enabled if payload.enabled is not None else current.enabled,
+                _json(payload.metadata if payload.metadata is not None else current.metadata),
+            ],
+        )
+        if not row:
+            raise HTTPException(status_code=500, detail="Failed to update source connector")
+        return _source_connector_from_row(dict(row))
+
+    @router.post(
+        "/connectors/{connector_id}/sample",
+        response_model=SourceConnectorSampleResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def sample_source_connector(
+        request: Request,
+        connector_id: str,
+        payload: SourceConnectorSampleRequest = SourceConnectorSampleRequest(),
+    ):
+        workspace, db = await db_for_request(request)
+        connector = _source_connector_from_row(await _get_connector_row(db, workspace, connector_id))
+        if not connector.enabled:
+            raise HTTPException(status_code=409, detail=f"Source connector '{connector_id}' is disabled")
+        return _connector_sample_response(connector, payload.limit)
+
+    @router.post(
+        "/connectors/{connector_id}/profile",
+        response_model=StructuredProfileResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def profile_source_connector(
+        request: Request,
+        connector_id: str,
+        payload: SourceConnectorSampleRequest = SourceConnectorSampleRequest(),
+    ):
+        workspace, db = await db_for_request(request)
+        connector = _source_connector_from_row(await _get_connector_row(db, workspace, connector_id))
+        sample = _connector_sample_response(connector, payload.limit)
+        return _profile_structured_source(sample.source_type, sample.raw_content, sample_limit=min(payload.limit, 100))
+
+    @router.post(
+        "/connectors/{connector_id}/mapping/preview",
+        response_model=SourceConnectorMappingPreviewResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def preview_source_connector_mapping(
+        request: Request,
+        connector_id: str,
+        payload: SourceConnectorMappingPreviewRequest = SourceConnectorMappingPreviewRequest(),
+    ):
+        workspace, db = await db_for_request(request)
+        connector = _source_connector_from_row(await _get_connector_row(db, workspace, connector_id))
+        sample = _connector_sample_response(connector, 100)
+        profile = _profile_structured_source(sample.source_type, sample.raw_content, sample_limit=20)
+        mapping = _mapping_from_profile(profile, payload.mapping)
+        return SourceConnectorMappingPreviewResponse(
+            connector=connector,
+            sample=sample,
+            profile=profile,
+            mapping=mapping,
+            guidance_columns=_guidance_columns_from_profile(profile, mapping),
+            materialization_modes=["table_as_dataset", "row_per_answer"],
+        )
+
+    @router.post(
+        "/connectors/{connector_id}/materialize",
+        response_model=SourceConnectorMaterializeResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def materialize_source_connector(
+        request: Request,
+        connector_id: str,
+        payload: SourceConnectorMaterializeRequest,
+    ):
+        workspace, db = await db_for_request(request)
+        connector = _source_connector_from_row(await _get_connector_row(db, workspace, connector_id))
+        sample = _connector_sample_response(connector, 1000)
+        profile = _profile_structured_source(sample.source_type, sample.raw_content, sample_limit=20)
+        mapping = _mapping_from_profile(profile, payload.mapping)
+        guidance_columns = _guidance_columns_from_profile(profile, mapping, payload.guidance_columns)
+        tags = []
+        for tag in [*payload.tags, "connector", connector.connector_type]:
+            text = str(tag or "").strip()
+            if text and text not in tags:
+                tags.append(text)
+        materialized = await materialize_structured_source(
+            request,
+            StructuredMaterializeRequest(
+                source_type=sample.source_type,
+                raw_content=sample.raw_content,
+                title=payload.title or connector.name,
+                approved_summary=None,
+                source_uri=sample.source_uri or f"connector://{connector.connector_id}",
+                file_name=None,
+                status=payload.status,
+                priority=0,
+                tags=tags,
+                mapping=mapping,
+                guidance_columns=guidance_columns,
+                materialization_mode=payload.materialization_mode,
+                metadata={
+                    **payload.metadata,
+                    "created_from": "source_connector",
+                    "connector_id": connector.connector_id,
+                    "connector_type": connector.connector_type,
+                },
+            ),
+        )
+        await db.query(
+            """
+            UPDATE LIGHTRAG_SOURCE_CONNECTORS
+            SET status = CASE WHEN status = 'draft' THEN 'active' ELSE status END,
+                metadata = metadata || $3::jsonb,
+                update_time = NOW()
+            WHERE workspace = $1 AND connector_id = $2
+            RETURNING connector_id
+            """,
+            [
+                workspace,
+                connector.connector_id,
+                _json({
+                    "last_materialized_at": _now().isoformat(),
+                    "last_materialized_answer_ids": [answer.answer_id for answer in materialized.answers],
+                    "last_materialization_mode": payload.materialization_mode,
+                }),
+            ],
+        )
+        refreshed = _source_connector_from_row(await _get_connector_row(db, workspace, connector_id))
+        return SourceConnectorMaterializeResponse(
+            connector=refreshed,
+            sample=sample,
+            materialized=materialized,
+        )
 
     @router.get("/sources/snapshots", response_model=list[AnswerSourceSnapshot], dependencies=[Depends(combined_auth)])
     async def list_source_snapshots(

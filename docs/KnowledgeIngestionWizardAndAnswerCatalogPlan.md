@@ -741,3 +741,98 @@ Preserved intermediate workspaces from earlier failed test-script attempts:
 - `faq_reg_d_20260518_234900`
 
 The final JSON test output was written locally to `/tmp/faq_stage_regression_results_20260518_235014.json`.
+
+### Phase E Connector MVP Implementation Status - 2026-05-18
+
+- Added an answer-source connector registry for FAQ/answer-catalog and hybrid workspaces:
+  - table: `LIGHTRAG_SOURCE_CONNECTORS`
+  - connector types: `manual_table`, `db_table`, `multi_table`, `nosql_collection`, `web`
+  - status values: `draft`, `active`, `paused`, `error`
+  - config stores safe connector metadata, sample rows/raw content, source URI, auth reference, refresh policy, and operational metadata.
+- Added connector APIs under the existing answer-catalog router:
+  - `GET /api/answers/connectors`
+  - `POST /api/answers/connectors`
+  - `GET /api/answers/connectors/{connector_id}`
+  - `PATCH /api/answers/connectors/{connector_id}`
+  - `POST /api/answers/connectors/{connector_id}/sample`
+  - `POST /api/answers/connectors/{connector_id}/profile`
+  - `POST /api/answers/connectors/{connector_id}/mapping/preview`
+  - `POST /api/answers/connectors/{connector_id}/materialize`
+- The connector MVP intentionally materializes from registered samples rather than opening arbitrary live source connections at runtime.
+  - This keeps the first connector stage auditable and avoids storing raw credentials in UI state.
+  - Real DB/NoSQL/web connector adapters can be added behind the same registry contract later.
+- Connector sample handling supports:
+  - raw CSV or JSON payloads
+  - object rows
+  - array rows with configured columns
+  - multi-table sample flattening with a `table` field
+  - web/link content snapshots
+  - metadata fallback rows with warnings when no sample data exists.
+- Mapping preview reuses the Phase D structured profiler:
+  - infers fields and semantic roles
+  - suggests answer/title/question/category/status mappings
+  - returns guidance columns and supported materialization modes.
+- Materialization reuses the Phase D/D+ structured materialization path:
+  - `table_as_dataset` creates one queryable structured answer dataset.
+  - `row_per_answer` creates one draft answer per source row.
+  - connector metadata records last materialization time, mode, and created answer IDs.
+- Workspace data lifecycle now includes source connectors:
+  - `copy-data` and `move-data` copy connectors with remapped connector IDs.
+  - workspace deletion cleans connector rows with the rest of answer-catalog data.
+- Frontend updates:
+  - `Sources` tab now includes a connector registry section above the manual source editor.
+  - Operators can register a connector sample, select a connector, load the sample into the source editor, preview mapping, and materialize drafts.
+  - Korean and English i18n strings were added for connector UI labels, validation, and success messages.
+- Validation completed:
+  - Python compile passed for `answer_routes.py`.
+  - `ruff check lightrag/api/routers/answer_routes.py` passed.
+  - WebUI `bun run build` succeeded.
+  - Offline connector helper regression passed 10/10 cases:
+    - raw CSV
+    - raw JSON
+    - object rows
+    - array rows with columns
+    - multi-table flattening
+    - web sample
+    - metadata fallback warning
+    - mapping suggestions
+    - mapping override de-duplication
+    - guidance column filtering.
+- Runtime verification status:
+  - A first server restart attempt failed while the development VPN path was unavailable:
+    - PostgreSQL `10.62.130.84:5432`
+    - Embedding server `10.62.130.84:19006`
+    - LLM server `10.62.130.85:18002`
+  - After the VPN path recovered, the server restarted on port `9422` and `/health` returned healthy.
+  - Preserved successful test workspace:
+    - workspace ID: `faq_connector_final_20260518_1779144556`
+    - DB connector: `conn-8cd54c1ffc89`
+    - NoSQL connector: `conn-5cf802f7e211`
+    - structured dataset answer: `ANS-8272ebe7d8a0`
+    - row-per-answer drafts: `ANS-5cfe5878ec6b`, `ANS-8cce12710451`
+  - Preserved connector lifecycle copy test workspace:
+    - workspace ID: `faq_connector_copy_20260518_1779144915`
+    - copied connector count: 2
+    - copied answer count: 3
+  - API verification passed 18/18 checks:
+    - workspace creation
+    - initial connector listing
+    - DB connector creation/listing/sample/profile/mapping preview
+    - DB connector `table_as_dataset` materialization
+    - structured query preview and execute
+    - NoSQL connector creation/mapping preview
+    - NoSQL connector `row_per_answer` materialization
+    - draft-inclusive fixed-answer search
+    - source snapshot creation
+    - structured lookup log creation
+    - active connector filtering after materialization
+  - Workspace lifecycle verification:
+    - `copy-data` copied `source_connectors` together with answer items, revisions, guidance, events, snapshots, and links.
+    - copied workspace retained two connectors and three generated draft answers.
+  - Browser verification:
+    - selected `faq_connector_final_20260518_1779144556` from the workspace selector.
+    - confirmed answer-catalog tabs are shown.
+    - confirmed the Answer Library shows three generated draft answers.
+    - confirmed the `Sources` tab shows the connector registry, selected NoSQL connector, materialization metadata, source snapshots, and mapping preview with `keyword` guidance column.
+  - Preserved partial workspace from the first failed assertion attempt:
+    - `faq_connector_final_20260518_1779144224`

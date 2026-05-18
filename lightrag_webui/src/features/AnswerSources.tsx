@@ -17,9 +17,17 @@ import {
   AnswerContentFormat,
   AnswerGuidanceType,
   AnswerItem,
+  AnswerSourceConnector,
+  AnswerSourceConnectorMappingPreview,
+  AnswerSourceConnectorType,
   AnswerSourceSnapshot,
+  createAnswerSourceConnector,
   createAnswerSourceDraft,
+  listAnswerSourceConnectors,
   listAnswerSourceSnapshots,
+  materializeAnswerSourceConnector,
+  previewAnswerSourceConnectorMapping,
+  sampleAnswerSourceConnector,
 } from '@/api/lightrag'
 import AnswerHelpButton from '@/components/answers/AnswerHelpButton'
 import Badge from '@/components/ui/Badge'
@@ -32,6 +40,7 @@ import { localizedErrorMessage } from '@/lib/utils'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 type SourceType = 'plain' | 'markdown' | 'html' | 'url' | 'file' | 'structured'
+type ConnectorMaterializationMode = 'table_as_dataset' | 'row_per_answer'
 
 type StructuredProfile = {
   kind: 'json' | 'table' | 'text'
@@ -83,6 +92,8 @@ const sourceTypeToTag: Record<SourceType, string> = {
   structured: 'structured',
 }
 
+const connectorTypes: AnswerSourceConnectorType[] = ['db_table', 'multi_table', 'nosql_collection', 'web', 'manual_table']
+
 const stopWords = new Set([
   'and',
   'the',
@@ -113,6 +124,11 @@ const parseTags = (value: string) =>
   value.split(',').map((tag) => tag.trim()).filter(Boolean)
 
 const unique = <T,>(items: T[]) => Array.from(new Set(items))
+
+const inferStructuredSourceType = (value: string) => {
+  const trimmed = value.trim()
+  return trimmed.startsWith('{') || trimmed.startsWith('[') ? 'json' : 'csv'
+}
 
 const stripMarkup = (value: string, format: AnswerContentFormat) => {
   if (format === 'html') {
@@ -309,6 +325,16 @@ export default function AnswerSources() {
   const [snapshots, setSnapshots] = useState<AnswerSourceSnapshot[]>([])
   const [isLoadingSnapshots, setIsLoadingSnapshots] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [connectors, setConnectors] = useState<AnswerSourceConnector[]>([])
+  const [selectedConnectorId, setSelectedConnectorId] = useState('')
+  const [connectorName, setConnectorName] = useState('')
+  const [connectorType, setConnectorType] = useState<AnswerSourceConnectorType>('db_table')
+  const [connectorUri, setConnectorUri] = useState('')
+  const [connectorContent, setConnectorContent] = useState('')
+  const [connectorMode, setConnectorMode] = useState<ConnectorMaterializationMode>('table_as_dataset')
+  const [connectorPreview, setConnectorPreview] = useState<AnswerSourceConnectorMappingPreview | null>(null)
+  const [isLoadingConnectors, setIsLoadingConnectors] = useState(false)
+  const [isConnectorBusy, setIsConnectorBusy] = useState(false)
 
   const fetchSnapshots = useCallback(async () => {
     const workspaceId = currentWorkspaceId
@@ -321,6 +347,21 @@ export default function AnswerSources() {
       toast.error(localizedErrorMessage(err, t))
     } finally {
       setIsLoadingSnapshots(false)
+    }
+  }, [currentWorkspaceId, t])
+
+  const fetchConnectors = useCallback(async () => {
+    const workspaceId = currentWorkspaceId
+    setIsLoadingConnectors(true)
+    try {
+      const result = await listAnswerSourceConnectors({ limit: 50 })
+      if (workspaceId !== useWorkspaceStore.getState().currentWorkspaceId) return
+      setConnectors(result)
+      setSelectedConnectorId((current) => result.some((connector) => connector.connector_id === current) ? current : result[0]?.connector_id || '')
+    } catch (err) {
+      toast.error(localizedErrorMessage(err, t))
+    } finally {
+      setIsLoadingConnectors(false)
     }
   }, [currentWorkspaceId, t])
 
@@ -337,12 +378,20 @@ export default function AnswerSources() {
     setCandidate(null)
     setCreatedAnswer(null)
     setSnapshots([])
+    setConnectors([])
+    setSelectedConnectorId('')
+    setConnectorName('')
+    setConnectorType('db_table')
+    setConnectorUri('')
+    setConnectorContent('')
+    setConnectorPreview(null)
     setContentFormat(sourceFormat[sourceType])
   }, [currentWorkspaceId])
 
   useEffect(() => {
     fetchSnapshots()
-  }, [fetchSnapshots])
+    fetchConnectors()
+  }, [fetchConnectors, fetchSnapshots])
 
   const sourceHelp = useMemo(() => {
     if (sourceType === 'url') return t('answerCatalog.sources.urlHelp', 'URL is stored as source metadata. Paste the relevant content to create a reviewable answer draft.')
@@ -350,6 +399,11 @@ export default function AnswerSources() {
     if (sourceType === 'structured') return t('answerCatalog.sources.structuredHelp', 'Paste a table row, JSON record, DB extract, or NoSQL document snapshot. Structured profiling will be expanded later.')
     return t('answerCatalog.sources.textHelp', 'Paste source material and create a draft fixed answer for review.')
   }, [sourceType, t])
+
+  const selectedConnector = useMemo(
+    () => connectors.find((connector) => connector.connector_id === selectedConnectorId) || null,
+    [connectors, selectedConnectorId]
+  )
 
   const resetForm = () => {
     setSourceUri('')
@@ -413,6 +467,125 @@ export default function AnswerSources() {
 
   const updateGuidanceCandidate = (index: number, patch: Partial<GuidanceCandidate>) => {
     setGuidanceCandidates((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item))
+  }
+
+  const handleCreateConnector = async () => {
+    if (!connectorName.trim()) {
+      toast.error(t('answerCatalog.sources.connectorNameRequired', 'Enter a connector name.'))
+      return
+    }
+    if (!connectorContent.trim()) {
+      toast.error(t('answerCatalog.sources.connectorContentRequired', 'Paste sample content before creating a connector.'))
+      return
+    }
+    setIsConnectorBusy(true)
+    try {
+      const workspaceId = currentWorkspaceId
+      const connector = await createAnswerSourceConnector({
+        name: connectorName.trim(),
+        connector_type: connectorType,
+        status: 'draft',
+        enabled: true,
+        config: {
+          source_uri: connectorUri.trim() || undefined,
+          raw_content: connectorContent,
+          source_type: inferStructuredSourceType(connectorContent),
+          created_from: 'answer_sources_connector_ui',
+        },
+        metadata: {
+          created_from: 'answer_sources_connector_ui',
+        },
+      })
+      if (workspaceId !== useWorkspaceStore.getState().currentWorkspaceId) return
+      setSelectedConnectorId(connector.connector_id)
+      setConnectorPreview(null)
+      toast.success(t('answerCatalog.sources.connectorCreated', 'Connector has been registered.'))
+      fetchConnectors()
+    } catch (err) {
+      toast.error(localizedErrorMessage(err, t))
+    } finally {
+      setIsConnectorBusy(false)
+    }
+  }
+
+  const handleSampleConnector = async () => {
+    if (!selectedConnectorId) {
+      toast.error(t('answerCatalog.sources.connectorRequired', 'Select a connector first.'))
+      return
+    }
+    setIsConnectorBusy(true)
+    try {
+      const workspaceId = currentWorkspaceId
+      const sample = await sampleAnswerSourceConnector(selectedConnectorId, { limit: 50 })
+      if (workspaceId !== useWorkspaceStore.getState().currentWorkspaceId) return
+      setSourceType('structured')
+      setContentFormat('plain')
+      setSourceUri(sample.source_uri || selectedConnector?.config?.source_uri || `connector://${sample.connector_id}`)
+      setTitle((current) => current || selectedConnector?.name || sample.connector_id)
+      setBody(sample.raw_content)
+      setTags((current) => current || [sample.connector_type, 'connector'].join(', '))
+      setCandidate(null)
+      toast.success(t('answerCatalog.sources.sampleLoaded', 'Connector sample has been loaded into the source editor.'))
+    } catch (err) {
+      toast.error(localizedErrorMessage(err, t))
+    } finally {
+      setIsConnectorBusy(false)
+    }
+  }
+
+  const handlePreviewConnector = async () => {
+    if (!selectedConnectorId) {
+      toast.error(t('answerCatalog.sources.connectorRequired', 'Select a connector first.'))
+      return
+    }
+    setIsConnectorBusy(true)
+    try {
+      const workspaceId = currentWorkspaceId
+      const preview = await previewAnswerSourceConnectorMapping(selectedConnectorId, {
+        materialization_mode: connectorMode,
+      })
+      if (workspaceId !== useWorkspaceStore.getState().currentWorkspaceId) return
+      setConnectorPreview(preview)
+      toast.success(t('answerCatalog.sources.mappingPreviewReady', 'Connector mapping preview is ready.'))
+    } catch (err) {
+      toast.error(localizedErrorMessage(err, t))
+    } finally {
+      setIsConnectorBusy(false)
+    }
+  }
+
+  const handleMaterializeConnector = async () => {
+    if (!selectedConnectorId) {
+      toast.error(t('answerCatalog.sources.connectorRequired', 'Select a connector first.'))
+      return
+    }
+    setIsConnectorBusy(true)
+    try {
+      const workspaceId = currentWorkspaceId
+      const result = await materializeAnswerSourceConnector(selectedConnectorId, {
+        title: selectedConnector?.name || connectorName || undefined,
+        mapping: connectorPreview?.mapping,
+        guidance_columns: connectorPreview?.guidance_columns,
+        materialization_mode: connectorMode,
+        status: 'draft',
+        tags: [selectedConnector?.connector_type || connectorType, 'connector'],
+        metadata: {
+          created_from: 'answer_sources_connector_ui',
+          connector_name: selectedConnector?.name,
+        },
+      })
+      if (workspaceId !== useWorkspaceStore.getState().currentWorkspaceId) return
+      toast.success(t('answerCatalog.sources.connectorMaterialized', {
+        defaultValue: 'Connector materialized into {{count}} answer draft(s).',
+        count: result.materialized.answers.length,
+      }))
+      fetchConnectors()
+      fetchSnapshots()
+    } catch (err) {
+      toast.error(localizedErrorMessage(err, t))
+    } finally {
+      setIsConnectorBusy(false)
+    }
   }
 
   const handleCreateDraft = async () => {
@@ -481,6 +654,180 @@ export default function AnswerSources() {
           <p className="mt-1 text-sm text-muted-foreground">
             {t('answerCatalog.sources.description', 'Connect text, HTML, markdown, URL, DB, NoSQL, and document sources for answer candidate generation.')}
           </p>
+        </div>
+      </div>
+
+      <div className="rounded-md border p-4">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <DatabaseIcon className="h-4 w-4" />
+            <div>
+              <div className="font-semibold">{t('answerCatalog.sources.connectorRegistry', 'Connector Registry')}</div>
+              <div className="text-xs text-muted-foreground">
+                {t('answerCatalog.sources.connectorRegistryDesc', 'Register DB, NoSQL, web, or manual table samples and materialize them into answer drafts.')}
+              </div>
+            </div>
+          </div>
+          <Button variant="outline" size="sm" onClick={fetchConnectors} disabled={isLoadingConnectors}>
+            {isLoadingConnectors ? <Loader2Icon className="h-4 w-4 animate-spin" /> : <EyeIcon className="h-4 w-4" />}
+            {t('common.refresh', 'Refresh')}
+          </Button>
+        </div>
+
+        <div className="grid gap-4 xl:grid-cols-[420px_1fr]">
+          <div className="grid gap-3 rounded-md border bg-muted/10 p-3">
+            <div className="grid gap-2 md:grid-cols-[150px_1fr]">
+              <div className="grid gap-2">
+                <Label>{t('answerCatalog.sources.connectorType', 'Connector Type')}</Label>
+                <Select value={connectorType} onValueChange={(value) => setConnectorType(value as AnswerSourceConnectorType)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {connectorTypes.map((type) => (
+                      <SelectItem key={type} value={type}>
+                        {t(`answerCatalog.sources.connectorTypes.${type}`, type.replace(/_/g, ' '))}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label>{t('answerCatalog.sources.connectorName', 'Connector Name')}</Label>
+                <Input
+                  value={connectorName}
+                  onChange={(event) => setConnectorName(event.target.value)}
+                  placeholder={t('answerCatalog.sources.connectorNamePlaceholder', 'Example: billing FAQ table')}
+                />
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label>{t('answerCatalog.sources.connectorUri', 'Connector URI')}</Label>
+              <Input
+                value={connectorUri}
+                onChange={(event) => setConnectorUri(event.target.value)}
+                placeholder="db://schema.table, mongo://collection, https://example.com/feed"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>{t('answerCatalog.sources.connectorContent', 'Sample Content')}</Label>
+              <Textarea
+                className="min-h-36 font-mono text-xs"
+                value={connectorContent}
+                onChange={(event) => setConnectorContent(event.target.value)}
+                placeholder={t('answerCatalog.sources.connectorContentPlaceholder', 'question,answer,category\nHow do I change my plan?,Open My Page > Plan.,Billing')}
+              />
+            </div>
+            <Button onClick={handleCreateConnector} disabled={isConnectorBusy}>
+              {isConnectorBusy ? <Loader2Icon className="h-4 w-4 animate-spin" /> : <PlusIcon className="h-4 w-4" />}
+              {t('answerCatalog.sources.createConnector', 'Register Connector')}
+            </Button>
+          </div>
+
+          <div className="grid gap-3 rounded-md border bg-muted/10 p-3">
+            <div className="grid gap-2 lg:grid-cols-[1fr_190px]">
+              <div className="grid gap-2">
+                <Label>{t('answerCatalog.sources.selectConnector', 'Registered Connector')}</Label>
+                <Select value={selectedConnectorId || 'none'} onValueChange={(value) => {
+                  setSelectedConnectorId(value === 'none' || value === 'empty' ? '' : value)
+                  setConnectorPreview(null)
+                }}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">{t('answerCatalog.sources.selectConnectorPlaceholder', 'Select a connector')}</SelectItem>
+                    {connectors.length === 0 ? (
+                      <SelectItem value="empty" disabled>{t('answerCatalog.sources.connectorsEmpty', 'No connectors registered yet.')}</SelectItem>
+                    ) : connectors.map((connector) => (
+                      <SelectItem key={connector.connector_id} value={connector.connector_id}>
+                        {connector.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label>{t('answerCatalog.sources.connectorMode', 'Materialization Mode')}</Label>
+                <Select value={connectorMode} onValueChange={(value) => {
+                  setConnectorMode(value as ConnectorMaterializationMode)
+                  setConnectorPreview(null)
+                }}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="table_as_dataset">{t('answerCatalog.sources.connectorModeDataset', 'One dataset answer')}</SelectItem>
+                    <SelectItem value="row_per_answer">{t('answerCatalog.sources.connectorModeRows', 'One answer per row')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {selectedConnector ? (
+              <div className="grid gap-2 rounded-md border bg-background p-3 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium">{selectedConnector.name}</span>
+                  <Badge variant="outline">{t(`answerCatalog.sources.connectorTypes.${selectedConnector.connector_type}`, selectedConnector.connector_type)}</Badge>
+                  <Badge variant="outline">{selectedConnector.status}</Badge>
+                  {!selectedConnector.enabled && <Badge variant="outline">{t('common.disabled', 'Disabled')}</Badge>}
+                </div>
+                <div className="truncate font-mono text-xs text-muted-foreground">
+                  {selectedConnector.config?.source_uri || `connector://${selectedConnector.connector_id}`}
+                </div>
+                {Array.isArray(selectedConnector.metadata?.last_materialized_answer_ids) && (
+                  <div className="text-xs text-muted-foreground">
+                    {t('answerCatalog.sources.lastMaterialized', 'Last materialized answers')}: {selectedConnector.metadata.last_materialized_answer_ids.length}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="rounded-md border border-dashed bg-background p-3 text-sm text-muted-foreground">
+                {t('answerCatalog.sources.connectorsEmpty', 'No connectors registered yet.')}
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={handleSampleConnector} disabled={isConnectorBusy || !selectedConnectorId}>
+                {isConnectorBusy ? <Loader2Icon className="h-4 w-4 animate-spin" /> : <FileTextIcon className="h-4 w-4" />}
+                {t('answerCatalog.sources.sampleConnector', 'Load Sample')}
+              </Button>
+              <Button variant="outline" onClick={handlePreviewConnector} disabled={isConnectorBusy || !selectedConnectorId}>
+                {isConnectorBusy ? <Loader2Icon className="h-4 w-4 animate-spin" /> : <EyeIcon className="h-4 w-4" />}
+                {t('answerCatalog.sources.mappingPreview', 'Preview Mapping')}
+              </Button>
+              <Button onClick={handleMaterializeConnector} disabled={isConnectorBusy || !selectedConnectorId}>
+                {isConnectorBusy ? <Loader2Icon className="h-4 w-4 animate-spin" /> : <SparklesIcon className="h-4 w-4" />}
+                {t('answerCatalog.sources.materializeConnector', 'Materialize')}
+              </Button>
+            </div>
+
+            {connectorPreview ? (
+              <div className="grid gap-3 rounded-md border bg-background p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-medium">{t('answerCatalog.sources.connectorPreview', 'Connector Preview')}</span>
+                  <Badge variant="outline">{connectorPreview.sample.row_count.toLocaleString()} {t('answerCatalog.sources.rows', 'Rows')}</Badge>
+                  <Badge variant="outline">{connectorPreview.sample.source_type.toUpperCase()}</Badge>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {connectorPreview.sample.columns.map((column) => (
+                    <Badge key={column} variant="outline">{column}</Badge>
+                  ))}
+                </div>
+                <div className="grid gap-2 md:grid-cols-2">
+                  <PreviewList
+                    title={t('answerCatalog.sources.mappingFields', 'Mapped Fields')}
+                    items={Object.entries(connectorPreview.mapping).map(([target, source]) => `${target}: ${source}`)}
+                  />
+                  <PreviewList
+                    title={t('answerCatalog.sources.guidanceColumns', 'Guidance Columns')}
+                    items={connectorPreview.guidance_columns}
+                  />
+                </div>
+                {connectorPreview.sample.warnings.length > 0 && (
+                  <PreviewList title={t('common.warnings', 'Warnings')} items={connectorPreview.sample.warnings} />
+                )}
+              </div>
+            ) : (
+              <div className="rounded-md border border-dashed bg-background p-3 text-sm text-muted-foreground">
+                {t('answerCatalog.sources.connectorPreviewHint', 'Preview a connector to inspect detected columns, answer mapping, and guidance fields before materialization.')}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
