@@ -9,6 +9,7 @@ import aiofiles
 import shutil
 import traceback
 import mimetypes
+import httpx
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Literal
@@ -23,7 +24,7 @@ from fastapi import (
     Request,
     UploadFile,
 )
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from lightrag import LightRAG
@@ -4161,11 +4162,14 @@ def create_document_routes(
         doc_id: str,
         http_request: Request,
         download: bool = False,
+        proxy: bool = False,
     ):
         """
         Stream or redirect to a document's original asset for inline preview.
 
-        If an S3 URL is available, this endpoint redirects to it. Otherwise text
+        If an S3 URL is available, this endpoint redirects to it by default.
+        Set proxy=true when the browser needs same-origin bytes for inline
+        rendering, such as PDF preview in the WebUI dialog. Otherwise text
         documents are served from full_docs, while unsupported binary documents
         return 415 so the UI can show a clear fallback.
         """
@@ -4190,6 +4194,43 @@ def create_document_routes(
             s3_url = _resolve_s3_url(status_data, first_structured)
 
             if s3_url:
+                if proxy:
+                    filename = (
+                        status_data.get("doc_nm")
+                        or status_data.get("file_path")
+                        or f"{doc_id}"
+                    )
+                    safe_name = Path(str(filename)).name or doc_id
+                    from urllib.parse import quote as urlquote
+
+                    ascii_fallback = safe_name.encode("ascii", "ignore").decode() or doc_id
+                    encoded = urlquote(safe_name, safe="")
+                    disposition_type = "attachment" if download else "inline"
+                    headers = {
+                        "Content-Disposition": (
+                            f'{disposition_type}; filename="{ascii_fallback}"; '
+                            f"filename*=UTF-8''{encoded}"
+                        ),
+                        "Cache-Control": "private, max-age=300",
+                    }
+
+                    async def stream_s3_asset():
+                        timeout = httpx.Timeout(60.0, connect=10.0)
+                        async with httpx.AsyncClient(
+                            timeout=timeout,
+                            follow_redirects=True,
+                        ) as client:
+                            async with client.stream("GET", s3_url) as response:
+                                response.raise_for_status()
+                                async for chunk in response.aiter_bytes():
+                                    yield chunk
+
+                    return StreamingResponse(
+                        stream_s3_asset(),
+                        media_type=mime or "application/octet-stream",
+                        headers=headers,
+                    )
+
                 return RedirectResponse(url=s3_url, status_code=302)
 
             if raw_kind == "text" and has_full_content:

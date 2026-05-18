@@ -1299,10 +1299,11 @@ export const getDocumentPreview = async (docId: string): Promise<DocumentPreview
 
 export const buildDocumentRawUrl = (
   docId: string,
-  opts?: { download?: boolean; workspace?: string }
+  opts?: { download?: boolean; workspace?: string; proxy?: boolean }
 ): string => {
   const params = new URLSearchParams()
   if (opts?.download) params.set('download', 'true')
+  if (opts?.proxy) params.set('proxy', 'true')
   const workspace = opts?.workspace ?? useWorkspaceStore.getState().currentWorkspaceId
   if (workspace) params.set('workspace', workspace)
   const query = params.toString()

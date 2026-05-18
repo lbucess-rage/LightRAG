@@ -59,6 +59,11 @@ function isMarkdownPath(filePath?: string | null): boolean {
   return /\.(md|markdown)$/i.test(filePath)
 }
 
+function getInitialPreviewTab(preview: DocumentPreview): string {
+  if (preview.raw_kind === 'pdf' && preview.chunks?.length) return 'extracted'
+  return preview.can_preview_inline ? 'original' : 'extracted'
+}
+
 function ChunkCard({ chunk, t }: { chunk: DocumentPreviewChunk; t: (key: string) => string }) {
   const structuredContent = chunk.structured_content
   const structuredType = (structuredContent?.type as string | undefined)?.toLowerCase()
@@ -166,7 +171,7 @@ export default function DocumentPreviewDialog({ docId, onClose }: DocumentPrevie
       .then((preview) => {
         if (cancelled) return
         setData(preview)
-        setActiveTab(preview.can_preview_inline ? 'original' : 'extracted')
+        setActiveTab(getInitialPreviewTab(preview))
       })
       .catch((err) => {
         if (cancelled) return
@@ -202,6 +207,7 @@ export default function DocumentPreviewDialog({ docId, onClose }: DocumentPrevie
   }, [data, docId])
 
   const rawUrl = docId ? buildDocumentRawUrl(docId) : ''
+  const proxiedPdfUrl = docId ? buildDocumentRawUrl(docId, { proxy: data?.raw_kind === 'pdf' }) : ''
   const downloadUrl = docId ? buildDocumentRawUrl(docId, { download: true }) : ''
 
   return (
@@ -305,7 +311,7 @@ export default function DocumentPreviewDialog({ docId, onClose }: DocumentPrevie
                       </Button>
                     </a>
                   </div>
-                  <iframe src={data.s3_url || rawUrl} title={title} className="h-[70vh] w-full rounded border bg-muted/30" />
+                  <iframe src={proxiedPdfUrl || rawUrl} title={title} className="h-[70vh] w-full rounded border bg-muted/30" />
                 </div>
               )}
 
