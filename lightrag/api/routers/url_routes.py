@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from lightrag.api.utils_api import decode_workspace_header
 from lightrag.utils import logger
 from lightrag.url.config import URLIngestConfig
 from lightrag.url.detector import URLDetector
@@ -42,7 +43,7 @@ async def get_workspace_rag(workspace: str):
 
 
 def _get_workspace_from_request(request: Request) -> str:
-    return request.headers.get("LIGHTRAG-WORKSPACE", "")
+    return decode_workspace_header(request.headers.get("LIGHTRAG-WORKSPACE", ""))
 
 
 # ============================================================================

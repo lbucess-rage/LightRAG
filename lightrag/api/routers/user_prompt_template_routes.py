@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from lightrag.utils import logger
 from lightrag.kg.shared_storage import get_default_workspace
-from ..utils_api import get_combined_auth_dependency
+from ..utils_api import decode_workspace_header, get_combined_auth_dependency
 
 router = APIRouter(
     prefix="/user-prompt-templates",
@@ -56,7 +56,7 @@ def create_user_prompt_template_routes(rag, api_key: Optional[str] = None):
 
     def _get_workspace_from_request(request: Request) -> str:
         """Extract workspace from request header, fall back to server default."""
-        workspace = request.headers.get("LIGHTRAG-WORKSPACE", "").strip()
+        workspace = decode_workspace_header(request.headers.get("LIGHTRAG-WORKSPACE", ""))
         if workspace:
             return workspace
         return get_default_workspace() or "base"

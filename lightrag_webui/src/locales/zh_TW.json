@@ -8,16 +8,28 @@
   },
   "header": {
     "documents": "文件",
+    "chunks": "區塊",
     "knowledgeGraph": "知識圖譜",
     "retrieval": "檢索",
     "api": "API",
     "projectRepository": "專案庫",
+    "answers": "答案",
+    "answerSources": "資料來源",
+    "answerMatching": "匹配",
+    "structuredData": "結構化資料",
+    "answerTest": "測試主控台",
+    "answerAnalytics": "分析",
+    "answerHelp": "說明",
     "logout": "登出",
     "frontendNeedsRebuild": "前端程式碼需重新建置",
     "themeToggle": {
       "switchToLight": "切換至淺色主題",
       "switchToDark": "切換至深色主題"
     }
+  },
+  "chunkPanel": {
+    "title": "區塊管理",
+    "description": "檢視並管理文件區塊結構、關聯實體、關係與刪除影響。"
   },
   "login": {
     "description": "請輸入您的帳號和密碼登入系統",
@@ -37,7 +49,12 @@
     "cancel": "取消",
     "save": "儲存",
     "saving": "儲存中...",
-    "saveFailed": "儲存失敗"
+    "saveFailed": "儲存失敗",
+    "refresh": "重新整理",
+    "add": "新增",
+    "close": "關閉",
+    "delete": "刪除",
+    "edit": "編輯"
   },
   "documentPanel": {
     "clearDocuments": {
@@ -165,6 +182,8 @@
       "progress": "進度",
       "unit": "批",
       "pipelineMessages": "流水線消息",
+      "asyncTasks": "非同步任務",
+      "noAsyncTasks": "沒有可顯示的非同步任務",
       "cancelButton": "中斷",
       "cancelTooltip": "中斷流水線處理",
       "cancelConfirmTitle": "確認中斷流水線",
@@ -468,5 +487,178 @@
     "prevPage": "上一頁",
     "nextPage": "下一頁",
     "lastPage": "最後一頁"
+  },
+  "workspace": {
+    "requiredFields": "請填寫所有必填欄位",
+    "createDescription": "建立用於資料隔離的新工作區。",
+    "editDescription": "更新工作區資訊。",
+    "mode": "工作區類型",
+    "modeKms": "KMS",
+    "modeKmsDesc": "使用現有文件、圖譜、結構描述與 RAG 檢索流程。",
+    "modeAnswerCatalog": "FAQ / 固定答案",
+    "modeAnswerCatalogDesc": "管理已核准答案、匹配資料、來源與查詢分析。",
+    "modeHybrid": "混合",
+    "modeHybridDesc": "將固定答案查詢與現有 KMS/RAG 流程搭配使用。",
+    "answerItems": "答案",
+    "publishedAnswers": "已發布",
+    "resolveEvents": "查詢"
+  },
+  "answerCatalog": {
+    "errors": {
+      "workspaceModeRequired": "此功能僅適用於 FAQ / 固定答案或混合工作區。"
+    },
+    "status": {
+      "draft": "草稿",
+      "published": "已發布",
+      "archived": "已封存",
+      "expired": "已過期"
+    },
+    "display": {
+      "summary": "摘要",
+      "full": "全文",
+      "both": "摘要+全文"
+    },
+    "guidance": {
+      "keyword": "關鍵字",
+      "question": "問題",
+      "synonym": "同義詞",
+      "negative_keyword": "排除詞",
+      "note": "備註"
+    },
+    "help": {
+      "openHelp": "說明",
+      "title": "FAQ 固定答案說明",
+      "description": "逐步說明如何建立固定答案、管理匹配規則並驗證使用者問題會選擇哪個答案。"
+    },
+    "library": {
+      "title": "答案庫",
+      "description": "管理已核准的固定答案、版本、有效期與匹配指引。",
+      "published": "答案已發布。",
+      "archived": "答案已封存。",
+      "created": "答案已建立。",
+      "saved": "答案已儲存。",
+      "required": "標題和正文為必填。",
+      "total": "全部",
+      "draft": "草稿",
+      "publishedCount": "已發布",
+      "archivedCount": "已封存",
+      "search": "搜尋答案...",
+      "empty": "尚無答案",
+      "emptyDesc": "為此工作區建立第一個固定答案。",
+      "publish": "發布",
+      "archive": "封存",
+      "create": "建立答案",
+      "createTitle": "建立固定答案",
+      "createDesc": "先建立草稿答案，審核後再發布。",
+      "detailTitle": "答案詳情",
+      "contentSection": "內容",
+      "guidanceSection": "指引",
+      "revisionsSection": "版本",
+      "answerTitle": "標題",
+      "status": "狀態",
+      "displayPolicy": "顯示方式",
+      "priority": "優先級",
+      "contentFormat": "格式",
+      "validFrom": "有效開始",
+      "validUntil": "有效結束",
+      "summary": "核准摘要",
+      "body": "正文",
+      "tags": "標籤",
+      "tagsPlaceholder": "帳單, 退款, 會員",
+      "guidance": "指引問題 / 關鍵字",
+      "guidancePlaceholder": "如何退款？\n取消付款\n退款政策",
+      "guidanceType": "類型",
+      "guidanceText": "指引文字",
+      "weight": "權重",
+      "guidanceAdded": "指引已新增。",
+      "guidanceDeleted": "指引已刪除。",
+      "noGuidance": "尚未註冊指引。",
+      "revisionDesc": "每次儲存都會建立可還原的答案快照。",
+      "noRevisions": "沒有記錄版本。",
+      "restoreRevision": "還原",
+      "revisionRestored": "版本已還原。"
+    },
+    "test": {
+      "title": "答案測試主控台",
+      "description": "執行使用者查詢並檢查固定答案候選、分數與選定答案。",
+      "queryRequired": "請輸入要測試的查詢。",
+      "query": "使用者查詢",
+      "placeholder": "範例：如何退款？",
+      "topK": "Top K",
+      "strategy": "策略",
+      "strategyBalanced": "均衡",
+      "strategyFast": "快速",
+      "minScore": "最低分數",
+      "includeDrafts": "包含草稿答案",
+      "run": "解析",
+      "selected": "選定答案",
+      "candidates": "候選",
+      "noCandidates": "未找到候選答案。",
+      "trace": "追蹤"
+    },
+    "placeholder": {
+      "pending": "此區域已預留，用於先分離工作區體驗；具體實作將在下一階段繼續。"
+    },
+    "sources": {
+      "title": "答案來源",
+      "description": "連接文字、HTML、Markdown、URL、DB、NoSQL 與文件來源以產生答案候選。",
+      "urlHelp": "URL 會儲存為來源中繼資料。請貼上相關內容以建立可審核的答案草稿。",
+      "fileHelp": "可在本機讀取文字、Markdown 與 HTML 檔案並轉換為答案草稿。",
+      "structuredHelp": "貼上表格列、JSON 記錄、DB 擷取或 NoSQL 文件快照。結構化分析將於後續擴充。",
+      "textHelp": "貼上來源材料並建立待審核的固定答案草稿。",
+      "sourceSetup": "來源設定",
+      "sourceType": "來源類型",
+      "sourceUri": "來源 URI",
+      "file": "檔案",
+      "materialize": "生成草稿",
+      "sourceBody": "來源內容 / 答案正文",
+      "created": "已從來源建立答案草稿。",
+      "reviewHint": "草稿會以未發布狀態建立，方便上線前審核。",
+      "createDraft": "建立草稿",
+      "types": {
+        "plain": "純文字",
+        "markdown": "Markdown",
+        "html": "HTML",
+        "url": "URL",
+        "file": "文字檔",
+        "structured": "結構化快照"
+      },
+      "items": {
+        "connectorRegistry": "連接器登錄檔",
+        "snapshotHistory": "來源快照歷史",
+        "profilingPreview": "分析與映射預覽",
+        "draftMaterialization": "答案草稿生成"
+      }
+    },
+    "matching": {
+      "title": "匹配設定",
+      "description": "管理關鍵字、標準問題、排除詞、KG 指引與可選 LLM 建議。",
+      "items": {
+        "guidanceCrud": "指引 CRUD",
+        "weighting": "關鍵字/問題權重",
+        "scoreInspection": "候選分數檢查",
+        "llmSuggestions": "LLM 建議流程"
+      }
+    },
+    "structured": {
+      "title": "結構化資料",
+      "description": "分析 DB/NoSQL/表格來源，並提供用於確定性查詢的安全語義檢視。",
+      "items": {
+        "datasetProfiling": "資料集分析",
+        "fieldMapping": "欄位角色映射",
+        "semanticViews": "語義檢視生成",
+        "safeSql": "安全 SQL 預覽/執行"
+      }
+    },
+    "analytics": {
+      "title": "答案分析",
+      "description": "檢視答案使用情況、未匹配查詢、模糊匹配、回饋與過期答案候選。",
+      "items": {
+        "resolveEvents": "解析事件",
+        "topQueries": "熱門查詢",
+        "noMatchReview": "未匹配審查",
+        "feedbackLoop": "回饋閉環"
+      }
+    }
   }
 }

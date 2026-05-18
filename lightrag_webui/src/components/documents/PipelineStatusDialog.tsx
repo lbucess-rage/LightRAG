@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { AlignLeft, AlignCenter, AlignRight } from 'lucide-react'
+import { ActivityIcon, AlignLeft, AlignCenter, AlignRight, EyeIcon, XCircleIcon } from 'lucide-react'
 
 import {
   Dialog,
@@ -11,7 +11,17 @@ import {
   DialogDescription
 } from '@/components/ui/Dialog'
 import Button from '@/components/ui/Button'
-import { getPipelineStatus, cancelPipeline, PipelineStatusResponse } from '@/api/lightrag'
+import Badge from '@/components/ui/Badge'
+import Progress from '@/components/ui/Progress'
+import {
+  cancelPipeline,
+  cancelTask,
+  getPipelineStatus,
+  listTasks,
+  PipelineStatusResponse,
+  TaskStatusResponse
+} from '@/api/lightrag'
+import TaskResultDialog from '@/components/documents/TaskResultDialog'
 import { errorMessage } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 
@@ -20,6 +30,25 @@ type DialogPosition = 'left' | 'center' | 'right'
 interface PipelineStatusDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+}
+
+const isActiveTask = (task: TaskStatusResponse) =>
+  task.status === 'pending' || task.status === 'running'
+
+const taskLabel = (task: TaskStatusResponse) =>
+  task.metadata?.file_name ||
+  task.metadata?.file_path_label ||
+  task.metadata?.url ||
+  task.metadata?.track_id ||
+  task.task_id.slice(0, 8)
+
+const taskTypeLabel = (taskType: string) => {
+  if (taskType === 'multimodal_process') return 'MM'
+  if (taskType === 'document_ingest') return 'DOC'
+  if (taskType === 'document_scan') return 'SCAN'
+  if (taskType === 'url_ingest') return 'URL'
+  if (taskType === 'board_ingest') return 'BOARD'
+  return taskType
 }
 
 export default function PipelineStatusDialog({
@@ -31,6 +60,9 @@ export default function PipelineStatusDialog({
   const [position, setPosition] = useState<DialogPosition>('center')
   const [isUserScrolled, setIsUserScrolled] = useState(false)
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
+  const [asyncTasks, setAsyncTasks] = useState<TaskStatusResponse[]>([])
+  const [selectedTask, setSelectedTask] = useState<TaskStatusResponse | null>(null)
+  const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null)
   const historyRef = useRef<HTMLDivElement>(null)
 
   // Reset position when dialog opens
@@ -73,8 +105,16 @@ export default function PipelineStatusDialog({
 
     const fetchStatus = async () => {
       try {
-        const data = await getPipelineStatus()
+        const [data, tasks] = await Promise.all([
+          getPipelineStatus(),
+          listTasks(),
+        ])
         setStatus(data)
+        setAsyncTasks(
+          tasks
+            .sort((a, b) => b.created_at - a.created_at)
+            .filter((task, index) => isActiveTask(task) || index < 5)
+        )
       } catch (err) {
         toast.error(t('documentPanel.pipelineStatus.errors.fetchFailed', { error: errorMessage(err) }))
       }
@@ -97,6 +137,24 @@ export default function PipelineStatusDialog({
       }
     } catch (err) {
       toast.error(t('documentPanel.pipelineStatus.cancelFailed', { error: errorMessage(err) }))
+    }
+  }
+
+  const handleCancelTask = async (taskId: string) => {
+    try {
+      setCancellingTaskId(taskId)
+      await cancelTask(taskId)
+      toast.success(t('documentPanel.taskProgress.cancellationRequested'))
+      const tasks = await listTasks()
+      setAsyncTasks(
+        tasks
+          .sort((a, b) => b.created_at - a.created_at)
+          .filter((task, index) => isActiveTask(task) || index < 5)
+      )
+    } catch (err) {
+      toast.error(t('documentPanel.taskProgress.cancelFailed', { error: errorMessage(err) }))
+    } finally {
+      setCancellingTaskId(null)
     }
   }
 
@@ -221,6 +279,93 @@ export default function PipelineStatusDialog({
             </div>
           </div>
 
+          {/* Async Task Status */}
+          <div className="rounded-md border p-3 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <ActivityIcon className={cn(
+                  'h-4 w-4',
+                  asyncTasks.some(isActiveTask) ? 'animate-pulse text-blue-500' : 'text-muted-foreground'
+                )} />
+                {t('documentPanel.pipelineStatus.asyncTasks')}
+              </div>
+              {asyncTasks.some(isActiveTask) && (
+                <Badge variant="default">
+                  {asyncTasks.filter(isActiveTask).length}
+                </Badge>
+              )}
+            </div>
+
+            {asyncTasks.length === 0 ? (
+              <div className="rounded-md bg-muted/30 px-3 py-4 text-center text-sm text-muted-foreground">
+                {t('documentPanel.pipelineStatus.noAsyncTasks')}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {asyncTasks.map((task) => {
+                  const active = isActiveTask(task)
+                  const label = taskLabel(task)
+                  return (
+                    <div key={task.task_id} className="rounded-md border bg-background px-3 py-2">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <Badge variant="outline" className="shrink-0 text-[10px]">
+                              {taskTypeLabel(task.task_type)}
+                            </Badge>
+                            <span className="truncate text-sm font-medium" title={label}>
+                              {label}
+                            </span>
+                            <Badge
+                              variant={task.status === 'failed' ? 'destructive' : active ? 'default' : 'secondary'}
+                              className="shrink-0"
+                            >
+                              {t(`documentPanel.taskProgress.status.${task.status}`)}
+                            </Badge>
+                          </div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {task.message || task.task_id}
+                          </div>
+                          <div className="mt-2 flex items-center gap-2">
+                            <Progress value={task.progress} className="h-2 flex-1" />
+                            <span className="w-10 text-right text-xs text-muted-foreground">
+                              {Math.round(task.progress)}%
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          {(task.status === 'completed' || task.status === 'failed') && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
+                              onClick={() => setSelectedTask(task)}
+                              tooltip={t('documentPanel.activeTasks.viewResult')}
+                            >
+                              <EyeIcon className="h-4 w-4" />
+                            </Button>
+                          )}
+                          {active && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-destructive hover:text-destructive"
+                              onClick={() => handleCancelTask(task.task_id)}
+                              disabled={cancellingTaskId === task.task_id}
+                              tooltip={t('common.cancel')}
+                            >
+                              <XCircleIcon className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
           {/* History Messages */}
           <div className="space-y-2">
             <div className="text-sm font-medium">{t('documentPanel.pipelineStatus.pipelineMessages')}:</div>
@@ -264,6 +409,7 @@ export default function PipelineStatusDialog({
           </div>
         </DialogContent>
       </Dialog>
+      <TaskResultDialog task={selectedTask} onClose={() => setSelectedTask(null)} />
     </Dialog>
   )
 }

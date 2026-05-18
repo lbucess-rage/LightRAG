@@ -65,6 +65,11 @@ async def _find_orphan_chunks(
     Uses SQL query on entity_chunks/relation_chunks tables to check if any
     remaining entry references each chunk_id via JSONB containment.
     """
+    chunk_ids = [
+        chunk_id
+        for chunk_id in chunk_ids
+        if chunk_id and str(chunk_id).startswith("chunk-")
+    ]
     if not chunk_ids:
         return []
 
@@ -348,7 +353,11 @@ async def adelete_by_entity(
 
             # Delete orphaned chunks (chunks not referenced by any remaining entity/relation)
             orphan_count = 0
-            all_candidate_chunk_ids = list(set(entity_chunk_ids + relation_chunk_ids))
+            all_candidate_chunk_ids = [
+                chunk_id
+                for chunk_id in set(entity_chunk_ids + relation_chunk_ids)
+                if chunk_id and str(chunk_id).startswith("chunk-")
+            ]
             if all_candidate_chunk_ids and (text_chunks_storage or chunks_vdb):
                 orphan_ids = await _find_orphan_chunks(
                     all_candidate_chunk_ids,
@@ -525,9 +534,14 @@ async def adelete_by_relation(
 
             # Delete orphaned chunks (chunks not referenced by any remaining entity/relation)
             orphan_count = 0
+            relation_chunk_ids = [
+                chunk_id
+                for chunk_id in set(relation_chunk_ids)
+                if chunk_id and str(chunk_id).startswith("chunk-")
+            ]
             if relation_chunk_ids and (text_chunks_storage or chunks_vdb):
                 orphan_ids = await _find_orphan_chunks(
-                    list(set(relation_chunk_ids)),
+                    relation_chunk_ids,
                     entity_chunks_storage,
                     relation_chunks_storage,
                 )

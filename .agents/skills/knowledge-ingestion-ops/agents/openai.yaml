@@ -1,0 +1,4 @@
+interface:
+  display_name: "Knowledge Ingestion Ops"
+  short_description: "문서, URL, Board API, 멀티모달 지식화 흐름을 점검합니다."
+  default_prompt: "LightRAG 지식화 파이프라인과 데이터 소스별 처리 상태를 점검해줘."

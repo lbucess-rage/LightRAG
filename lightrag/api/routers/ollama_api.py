@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 import asyncio
 from lightrag import LightRAG, QueryParam
 from lightrag.utils import TiktokenTokenizer
-from lightrag.api.utils_api import get_combined_auth_dependency
+from lightrag.api.utils_api import decode_workspace_header, get_combined_auth_dependency
 from lightrag.kg.shared_storage import get_default_workspace
 from fastapi import Depends
 
@@ -27,7 +27,7 @@ def set_rag_workspace_getter(getter_func):
 
 def _get_workspace_from_request(request: Request) -> str:
     """Extract workspace from request header, fall back to server default."""
-    workspace = request.headers.get("LIGHTRAG-WORKSPACE", "").strip()
+    workspace = decode_workspace_header(request.headers.get("LIGHTRAG-WORKSPACE", ""))
     if workspace:
         return workspace
     return get_default_workspace() or "base"

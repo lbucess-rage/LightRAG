@@ -8,16 +8,28 @@
   },
   "header": {
     "documents": "المستندات",
+    "chunks": "المقاطع",
     "knowledgeGraph": "شبكة المعرفة",
     "retrieval": "الاسترجاع",
     "api": "واجهة برمجة التطبيقات",
     "projectRepository": "مستودع المشروع",
+    "answers": "الإجابات",
+    "answerSources": "المصادر",
+    "answerMatching": "المطابقة",
+    "structuredData": "البيانات المنظمة",
+    "answerTest": "وحدة الاختبار",
+    "answerAnalytics": "التحليلات",
+    "answerHelp": "المساعدة",
     "logout": "تسجيل الخروج",
     "frontendNeedsRebuild": "الواجهة الأمامية تحتاج إلى إعادة البناء",
     "themeToggle": {
       "switchToLight": "التحويل إلى السمة الفاتحة",
       "switchToDark": "التحويل إلى السمة الداكنة"
     }
+  },
+  "chunkPanel": {
+    "title": "إدارة المقاطع",
+    "description": "افحص وأدر بنية مقاطع المستندات والكيانات والعلاقات المرتبطة وتأثير الحذف."
   },
   "login": {
     "description": "الرجاء إدخال حسابك وكلمة المرور لتسجيل الدخول إلى النظام",
@@ -37,7 +49,12 @@
     "cancel": "إلغاء",
     "save": "حفظ",
     "saving": "جارٍ الحفظ...",
-    "saveFailed": "فشل الحفظ"
+    "saveFailed": "فشل الحفظ",
+    "refresh": "تحديث",
+    "add": "إضافة",
+    "close": "إغلاق",
+    "delete": "حذف",
+    "edit": "تعديل"
   },
   "documentPanel": {
     "clearDocuments": {
@@ -165,6 +182,8 @@
       "progress": "التقدم",
       "unit": "دفعة",
       "pipelineMessages": "رسائل خط الأنابيب",
+      "asyncTasks": "المهام غير المتزامنة",
+      "noAsyncTasks": "لا توجد مهام غير متزامنة للعرض",
       "cancelButton": "إلغاء",
       "cancelTooltip": "إلغاء معالجة خط الأنابيب",
       "cancelConfirmTitle": "تأكيد إلغاء خط الأنابيب",
@@ -468,5 +487,178 @@
     "prevPage": "الصفحة السابقة",
     "nextPage": "الصفحة التالية",
     "lastPage": "الصفحة الأخيرة"
+  },
+  "workspace": {
+    "requiredFields": "يرجى ملء جميع الحقول المطلوبة",
+    "createDescription": "أنشئ مساحة عمل جديدة لعزل البيانات.",
+    "editDescription": "حدّث معلومات مساحة العمل.",
+    "mode": "نوع مساحة العمل",
+    "modeKms": "KMS",
+    "modeKmsDesc": "استخدم تدفق المستندات والشبكة والمخطط وبحث RAG الحالي.",
+    "modeAnswerCatalog": "FAQ / إجابة ثابتة",
+    "modeAnswerCatalogDesc": "أدر الإجابات المعتمدة وبيانات المطابقة والمصادر وتحليلات البحث.",
+    "modeHybrid": "هجين",
+    "modeHybridDesc": "استخدم بحث الإجابات الثابتة مع تدفق KMS/RAG الحالي.",
+    "answerItems": "الإجابات",
+    "publishedAnswers": "منشورة",
+    "resolveEvents": "عمليات البحث"
+  },
+  "answerCatalog": {
+    "errors": {
+      "workspaceModeRequired": "هذه الميزة متاحة فقط في مساحات عمل FAQ / الإجابة الثابتة أو الهجينة."
+    },
+    "status": {
+      "draft": "مسودة",
+      "published": "منشور",
+      "archived": "مؤرشف",
+      "expired": "منتهي"
+    },
+    "display": {
+      "summary": "ملخص",
+      "full": "كامل",
+      "both": "ملخص + كامل"
+    },
+    "guidance": {
+      "keyword": "كلمة مفتاحية",
+      "question": "سؤال",
+      "synonym": "مرادف",
+      "negative_keyword": "سلبي",
+      "note": "ملاحظة"
+    },
+    "help": {
+      "openHelp": "المساعدة",
+      "title": "مساعدة FAQ للإجابات الثابتة",
+      "description": "إرشاد خطوة بخطوة لإنشاء الإجابات الثابتة وإدارة قواعد المطابقة والتحقق من الإجابة المختارة."
+    },
+    "library": {
+      "title": "مكتبة الإجابات",
+      "description": "إدارة الإجابات الثابتة المعتمدة والإصدارات والصلاحية وإرشادات المطابقة.",
+      "published": "تم نشر الإجابة.",
+      "archived": "تمت أرشفة الإجابة.",
+      "created": "تم إنشاء الإجابة.",
+      "saved": "تم حفظ الإجابة.",
+      "required": "العنوان والمتن مطلوبان.",
+      "total": "الإجمالي",
+      "draft": "مسودة",
+      "publishedCount": "منشور",
+      "archivedCount": "مؤرشف",
+      "search": "ابحث في الإجابات...",
+      "empty": "لا توجد إجابات بعد",
+      "emptyDesc": "أنشئ أول إجابة ثابتة لمساحة العمل هذه.",
+      "publish": "نشر",
+      "archive": "أرشفة",
+      "create": "إنشاء إجابة",
+      "createTitle": "إنشاء إجابة ثابتة",
+      "createDesc": "أنشئ إجابة كمسودة أولاً، ثم انشرها بعد المراجعة.",
+      "detailTitle": "تفاصيل الإجابة",
+      "contentSection": "المحتوى",
+      "guidanceSection": "الإرشادات",
+      "revisionsSection": "المراجعات",
+      "answerTitle": "العنوان",
+      "status": "الحالة",
+      "displayPolicy": "سياسة العرض",
+      "priority": "الأولوية",
+      "contentFormat": "التنسيق",
+      "validFrom": "صالحة من",
+      "validUntil": "صالحة حتى",
+      "summary": "الملخص المعتمد",
+      "body": "المتن",
+      "tags": "الوسوم",
+      "tagsPlaceholder": "الفوترة، الاسترداد، العضوية",
+      "guidance": "أسئلة / كلمات إرشادية",
+      "guidancePlaceholder": "كيف أسترد المبلغ؟\nإلغاء الدفع\nسياسة الاسترداد",
+      "guidanceType": "النوع",
+      "guidanceText": "نص الإرشاد",
+      "weight": "الوزن",
+      "guidanceAdded": "تمت إضافة الإرشاد.",
+      "guidanceDeleted": "تم حذف الإرشاد.",
+      "noGuidance": "لا توجد إرشادات مسجلة.",
+      "revisionDesc": "كل عملية حفظ تنشئ لقطة إجابة قابلة للاستعادة.",
+      "noRevisions": "لا توجد مراجعات مسجلة.",
+      "restoreRevision": "استعادة",
+      "revisionRestored": "تمت استعادة المراجعة."
+    },
+    "test": {
+      "title": "وحدة اختبار الإجابات",
+      "description": "شغّل استعلام مستخدم وافحص مرشحي الإجابة الثابتة والدرجات والإجابة المختارة.",
+      "queryRequired": "أدخل استعلاماً للاختبار.",
+      "query": "استعلام المستخدم",
+      "placeholder": "مثال: كيف أسترد المبلغ؟",
+      "topK": "Top K",
+      "strategy": "الاستراتيجية",
+      "strategyBalanced": "متوازنة",
+      "strategyFast": "سريعة",
+      "minScore": "الحد الأدنى للدرجة",
+      "includeDrafts": "تضمين الإجابات المسودة",
+      "run": "حل",
+      "selected": "الإجابة المختارة",
+      "candidates": "المرشحون",
+      "noCandidates": "لم يتم العثور على مرشحين.",
+      "trace": "التتبع"
+    },
+    "placeholder": {
+      "pending": "هذه المنطقة محجوزة لفصل تجربة مساحة العمل الآن بينما يستمر التنفيذ في المرحلة التالية."
+    },
+    "sources": {
+      "title": "مصادر الإجابات",
+      "description": "اربط مصادر النص وHTML وMarkdown والروابط وقواعد البيانات وNoSQL والمستندات لإنشاء مرشحي إجابات.",
+      "urlHelp": "يتم حفظ الرابط كبيانات وصفية للمصدر. الصق المحتوى ذي الصلة لإنشاء مسودة إجابة قابلة للمراجعة.",
+      "fileHelp": "يمكن قراءة ملفات النص وMarkdown وHTML محليًا وتحويلها إلى مسودة إجابة.",
+      "structuredHelp": "الصق صف جدول أو سجل JSON أو استخراج DB أو لقطة NoSQL. سيتم توسيع التحليل المنظم لاحقًا.",
+      "textHelp": "الصق مادة المصدر وأنشئ مسودة إجابة ثابتة للمراجعة.",
+      "sourceSetup": "إعداد المصدر",
+      "sourceType": "نوع المصدر",
+      "sourceUri": "URI المصدر",
+      "file": "ملف",
+      "materialize": "إنشاء المسودة",
+      "sourceBody": "محتوى المصدر / متن الإجابة",
+      "created": "تم إنشاء مسودة الإجابة من المصدر.",
+      "reviewHint": "يتم إنشاء المسودات غير منشورة حتى يمكن مراجعتها قبل الاستخدام.",
+      "createDraft": "إنشاء مسودة",
+      "types": {
+        "plain": "نص عادي",
+        "markdown": "Markdown",
+        "html": "HTML",
+        "url": "URL",
+        "file": "ملف نصي",
+        "structured": "لقطة منظمة"
+      },
+      "items": {
+        "connectorRegistry": "سجل الموصلات",
+        "snapshotHistory": "سجل لقطات المصدر",
+        "profilingPreview": "معاينة التحليل والتخطيط",
+        "draftMaterialization": "توليد مسودة الإجابة"
+      }
+    },
+    "matching": {
+      "title": "إعداد المطابقة",
+      "description": "أدر الكلمات المفتاحية والأسئلة المعيارية والمصطلحات السلبية وإرشادات KG واقتراحات LLM الاختيارية.",
+      "items": {
+        "guidanceCrud": "CRUD للإرشادات",
+        "weighting": "ترجيح الكلمات/الأسئلة",
+        "scoreInspection": "فحص درجات المرشحين",
+        "llmSuggestions": "تدفق اقتراحات LLM"
+      }
+    },
+    "structured": {
+      "title": "البيانات المنظمة",
+      "description": "حلّل مصادر DB/NoSQL/الجداول واعرض طرق عرض دلالية آمنة للبحث الحتمي.",
+      "items": {
+        "datasetProfiling": "تحليل مجموعة البيانات",
+        "fieldMapping": "تخطيط أدوار الحقول",
+        "semanticViews": "إنشاء طرق العرض الدلالية",
+        "safeSql": "معاينة/تنفيذ SQL آمن"
+      }
+    },
+    "analytics": {
+      "title": "تحليلات الإجابات",
+      "description": "راجع استخدام الإجابات والاستعلامات بلا نتيجة والمطابقات الغامضة والتغذية الراجعة والإجابات القديمة.",
+      "items": {
+        "resolveEvents": "أحداث الحل",
+        "topQueries": "أهم الاستعلامات",
+        "noMatchReview": "مراجعة عدم المطابقة",
+        "feedbackLoop": "حلقة التغذية الراجعة"
+      }
+    }
   }
 }

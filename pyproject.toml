@@ -97,8 +97,9 @@ api = [
 # Advanced document processing engine (optional)
 docling = [
     # On macOS, pytorch and frameworks use Objective-C are not fork-safe,
-    # and not compatible to gunicorn multi-worker mode
-    "docling>=2.0.0,<3.0.0; sys_platform != 'darwin'",
+    # and not compatible to gunicorn multi-worker mode.
+    # Local macOS development uses single-process uvicorn, so allow explicit installation.
+    "docling>=2.0.0,<3.0.0",
 ]
 
 # Offline deployment dependencies (layered design for flexibility)

@@ -19,6 +19,17 @@ export function errorMessage(error: any) {
   return error instanceof Error ? error.message : `${error}`
 }
 
+export function localizedErrorMessage(error: any, t: (key: string, fallback?: string) => string) {
+  const message = errorMessage(error)
+  if (message.includes('Answer catalog APIs require an answer_catalog or hybrid workspace')) {
+    return t(
+      'answerCatalog.errors.workspaceModeRequired',
+      'This feature is available only in FAQ / Fixed Answer or Hybrid workspaces.'
+    )
+  }
+  return message
+}
+
 /**
  * Creates a throttled function that limits how often the original function can be called
  * @param fn The function to throttle

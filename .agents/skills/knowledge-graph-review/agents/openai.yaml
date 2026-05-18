@@ -1,0 +1,4 @@
+interface:
+  display_name: "Knowledge Graph Review"
+  short_description: "지식 그래프 조회, 라벨 검색, 시각화 상태를 점검합니다."
+  default_prompt: "LightRAG 지식 그래프 시각화와 그래프 API 상태를 분석해줘."

@@ -12,7 +12,8 @@ import {
 import Input from '@/components/ui/Input'
 import { toast } from 'sonner'
 import { errorMessage } from '@/lib/utils'
-import { deleteDocuments } from '@/api/lightrag'
+import { DeletionPreviewResponse, executeDeletion, previewDeletion } from '@/api/lightrag'
+import DeletionImpactSummary from '@/components/deletion/DeletionImpactSummary'
 
 import { TrashIcon, AlertTriangleIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -43,10 +44,12 @@ export default function DeleteDocumentsDialog({ selectedDocIds, onDocumentsDelet
   const [open, setOpen] = useState(false)
   const [confirmText, setConfirmText] = useState('')
   const [deleteFile, setDeleteFile] = useState(false)
+  const [preview, setPreview] = useState<DeletionPreviewResponse | null>(null)
+  const [isPreviewing, setIsPreviewing] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteLLMCache, setDeleteLLMCache] = useState(false)
   const [deleteS3File, setDeleteS3File] = useState(false)
-  const isConfirmEnabled = confirmText.toLowerCase() === 'yes' && !isDeleting
+  const isConfirmEnabled = !!preview && confirmText.toLowerCase() === 'yes' && !isDeleting && !isPreviewing
 
   // Reset state when dialog closes
   useEffect(() => {
@@ -55,31 +58,68 @@ export default function DeleteDocumentsDialog({ selectedDocIds, onDocumentsDelet
       setDeleteFile(false)
       setDeleteLLMCache(false)
       setDeleteS3File(false)
+      setPreview(null)
+      setIsPreviewing(false)
       setIsDeleting(false)
     }
   }, [open])
+
+  useEffect(() => {
+    setPreview(null)
+    setConfirmText('')
+  }, [selectedDocIds, deleteFile, deleteLLMCache, deleteS3File])
+
+  const buildRequest = useCallback(() => ({
+    target_type: 'document' as const,
+    policy: 'delete_documents' as const,
+    ids: selectedDocIds,
+    relations: [],
+    delete_file: deleteFile,
+    delete_s3_file: deleteS3File,
+    delete_llm_cache: deleteLLMCache,
+    invalidate_cache: true,
+  }), [selectedDocIds, deleteFile, deleteS3File, deleteLLMCache])
+
+  const handlePreview = useCallback(async () => {
+    if (selectedDocIds.length === 0) return
+
+    setIsPreviewing(true)
+    try {
+      const result = await previewDeletion(buildRequest())
+      setPreview(result)
+    } catch (err) {
+      toast.error(t('documentPanel.deleteDocuments.error', { error: errorMessage(err) }))
+    } finally {
+      setIsPreviewing(false)
+    }
+  }, [buildRequest, selectedDocIds.length, t])
 
   const handleDelete = useCallback(async () => {
     if (!isConfirmEnabled || selectedDocIds.length === 0) return
 
     setIsDeleting(true)
     try {
-      const result = await deleteDocuments(selectedDocIds, deleteFile, deleteLLMCache, deleteS3File)
+      const result = await executeDeletion(buildRequest())
+      const statuses = result.results.map((item) => String(item.status || ''))
 
-      if (result.status === 'deletion_started') {
+      if (statuses.some((status) => status === 'deletion_started' || status === 'success')) {
         toast.success(t('documentPanel.deleteDocuments.success', { count: selectedDocIds.length }))
-      } else if (result.status === 'busy') {
+      } else if (statuses.some((status) => status === 'busy')) {
         toast.error(t('documentPanel.deleteDocuments.busy'))
         setConfirmText('')
         setIsDeleting(false)
         return
-      } else if (result.status === 'not_allowed') {
+      } else if (statuses.some((status) => status === 'not_allowed')) {
         toast.error(t('documentPanel.deleteDocuments.notAllowed'))
         setConfirmText('')
         setIsDeleting(false)
         return
       } else {
-        toast.error(t('documentPanel.deleteDocuments.failed', { message: result.message }))
+        const message = result.results
+          .map((item) => typeof item.message === 'string' ? item.message : '')
+          .filter(Boolean)
+          .join('\n')
+        toast.error(t('documentPanel.deleteDocuments.failed', { message }))
         setConfirmText('')
         setIsDeleting(false)
         return
@@ -98,7 +138,7 @@ export default function DeleteDocumentsDialog({ selectedDocIds, onDocumentsDelet
     } finally {
       setIsDeleting(false)
     }
-  }, [isConfirmEnabled, selectedDocIds, deleteFile, deleteLLMCache, deleteS3File, setOpen, t, onDocumentsDeleted])
+  }, [isConfirmEnabled, selectedDocIds, buildRequest, setOpen, t, onDocumentsDeleted])
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -108,6 +148,7 @@ export default function DeleteDocumentsDialog({ selectedDocIds, onDocumentsDelet
           side="bottom"
           tooltip={t('documentPanel.deleteDocuments.tooltip', { count: selectedDocIds.length })}
           size="sm"
+          disabled={selectedDocIds.length === 0}
         >
           <TrashIcon/> {t('documentPanel.deleteDocuments.button')}
         </Button>
@@ -132,6 +173,17 @@ export default function DeleteDocumentsDialog({ selectedDocIds, onDocumentsDelet
         </div>
 
         <div className="space-y-4">
+          <Button
+            variant="outline"
+            onClick={handlePreview}
+            disabled={selectedDocIds.length === 0 || isPreviewing || isDeleting}
+            className="w-full"
+          >
+            {isPreviewing ? t('common.loading', 'Loading...') : t('documentPanel.deleteDocuments.previewImpact', 'Preview deletion impact')}
+          </Button>
+
+          {preview && <DeletionImpactSummary preview={preview} />}
+
           <div className="space-y-2">
             <Label htmlFor="confirm-text" className="text-sm font-medium">
               {t('documentPanel.deleteDocuments.confirmPrompt')}
@@ -142,7 +194,7 @@ export default function DeleteDocumentsDialog({ selectedDocIds, onDocumentsDelet
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConfirmText(e.target.value)}
               placeholder={t('documentPanel.deleteDocuments.confirmPlaceholder')}
               className="w-full"
-              disabled={isDeleting}
+              disabled={isDeleting || !preview}
             />
           </div>
 

@@ -6,7 +6,7 @@ import json
 from typing import Any, Dict, List, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from lightrag.base import QueryParam
-from lightrag.api.utils_api import get_combined_auth_dependency
+from lightrag.api.utils_api import decode_workspace_header, get_combined_auth_dependency
 from lightrag.utils import logger
 from pydantic import BaseModel, Field, field_validator
 from lightrag.api.citation_utils import (
@@ -44,7 +44,7 @@ def _get_workspace_from_request(http_request: Request, body_workspace: str | Non
     if body_workspace and body_workspace.strip():
         return body_workspace.strip()
     # Priority 2: LIGHTRAG-WORKSPACE header
-    workspace = http_request.headers.get("LIGHTRAG-WORKSPACE", "").strip()
+    workspace = decode_workspace_header(http_request.headers.get("LIGHTRAG-WORKSPACE", ""))
     if workspace:
         return workspace
     # Priority 3: default workspace
@@ -1342,6 +1342,32 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
 
             # aquery_data returns the new format with status, message, data, and metadata
             if isinstance(response, dict):
+                if not all(key in response for key in ("status", "message", "data", "metadata")):
+                    response = {
+                        "status": "success",
+                        "message": "No relevant data found.",
+                        "data": {
+                            "entities": [],
+                            "relationships": [],
+                            "chunks": [],
+                            "references": [],
+                        },
+                        "metadata": {
+                            "query_mode": request.mode,
+                            "keywords": {
+                                "high_level": request.hl_keywords,
+                                "low_level": request.ll_keywords,
+                            },
+                            "processing_info": {
+                                "total_entities_found": 0,
+                                "total_relations_found": 0,
+                                "entities_after_truncation": 0,
+                                "relations_after_truncation": 0,
+                                "merged_chunks_count": 0,
+                                "final_chunks_count": 0,
+                            },
+                        },
+                    }
                 return QueryDataResponse(**response)
             else:
                 # Handle unexpected response format
@@ -1349,6 +1375,7 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                     status="failure",
                     message="Invalid response type",
                     data={},
+                    metadata={},
                 )
         except Exception as e:
             logger.error(f"Error processing data query: {str(e)}", exc_info=True)

@@ -48,8 +48,6 @@ const TabsContent = React.forwardRef<
       'h-full w-full',
       className
     )}
-    // Force mounting of inactive tabs to preserve WebGL contexts
-    forceMount
     {...props}
   />
 ))

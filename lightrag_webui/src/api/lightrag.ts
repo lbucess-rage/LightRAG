@@ -4,6 +4,7 @@ import { errorMessage } from '@/lib/utils'
 import { useSettingsStore } from '@/stores/settings'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { navigationService } from '@/services/navigation'
+import { encodeWorkspaceHeader } from '@/lib/workspaceHeader'
 
 // Types
 export type LightragNodeType = {
@@ -196,12 +197,16 @@ export type DocActionResponse = {
   status: 'success' | 'partial_success' | 'failure' | 'duplicated'
   message: string
   track_id?: string
+  task_id?: string
+  stream_url?: string
 }
 
 export type ScanResponse = {
   status: 'scanning_started'
   message: string
   track_id: string
+  task_id?: string
+  stream_url?: string
 }
 
 export type ReprocessFailedResponse = {
@@ -334,8 +339,9 @@ axiosInstance.interceptors.request.use((config) => {
     config.headers['X-API-Key'] = apiKey
   }
   // Include workspace header for multi-tenant support
-  if (workspaceId) {
-    config.headers['LIGHTRAG-WORKSPACE'] = workspaceId
+  const workspaceHeader = encodeWorkspaceHeader(workspaceId)
+  if (workspaceHeader && !config.headers['LIGHTRAG-WORKSPACE']) {
+    config.headers['LIGHTRAG-WORKSPACE'] = workspaceHeader
   }
   return config
 })
@@ -450,8 +456,9 @@ export const queryTextStream = async (
   if (apiKey) {
     headers['X-API-Key'] = apiKey;
   }
-  if (workspaceId) {
-    headers['LIGHTRAG-WORKSPACE'] = workspaceId;
+  const workspaceHeader = encodeWorkspaceHeader(workspaceId);
+  if (workspaceHeader) {
+    headers['LIGHTRAG-WORKSPACE'] = workspaceHeader;
   }
 
   try {
@@ -1248,6 +1255,61 @@ export const quickIngestImage = async (
   return response.data
 }
 
+// =====================================================
+// Document Preview (single-doc deep view for UI dialog)
+// =====================================================
+
+export type DocumentPreviewChunk = {
+  id: string
+  chunk_order_index?: number | null
+  tokens?: number | null
+  content?: string | null
+  structured_content?: Record<string, any> | null
+}
+
+export type DocumentRawKind = 'text' | 'image' | 'pdf' | 'binary'
+
+export type DocumentPreview = {
+  id: string
+  status: string
+  file_path?: string | null
+  doc_nm?: string | null
+  content_summary?: string | null
+  content_length?: number | null
+  chunks_count?: number | null
+  track_id?: string | null
+  error_msg?: string | null
+  metadata?: Record<string, any> | null
+  created_at?: string | null
+  updated_at?: string | null
+  s3_url?: string | null
+  mime_type?: string | null
+  raw_kind: DocumentRawKind
+  can_preview_inline: boolean
+  content?: string | null
+  chunks: DocumentPreviewChunk[]
+}
+
+export const getDocumentPreview = async (docId: string): Promise<DocumentPreview> => {
+  const response = await axiosInstance.get<DocumentPreview>(
+    `/documents/${encodeURIComponent(docId)}/preview`
+  )
+  return response.data
+}
+
+export const buildDocumentRawUrl = (
+  docId: string,
+  opts?: { download?: boolean; workspace?: string }
+): string => {
+  const params = new URLSearchParams()
+  if (opts?.download) params.set('download', 'true')
+  const workspace = opts?.workspace ?? useWorkspaceStore.getState().currentWorkspaceId
+  if (workspace) params.set('workspace', workspace)
+  const query = params.toString()
+  const path = `/documents/${encodeURIComponent(docId)}/raw${query ? `?${query}` : ''}`
+  return `${backendBaseUrl}${path}`
+}
+
 export const batchDeleteEntities = async (entityIds: string[], cascade: boolean = true): Promise<BatchDeleteResponse> => {
   const response = await axiosInstance.post('/entities/batch-delete', { entity_ids: entityIds, cascade })
   return response.data
@@ -1260,6 +1322,288 @@ export const batchDeleteEntities = async (entityIds: string[], cascade: boolean 
  */
 export const deleteRelation = async (request: DeleteRelationRequest, cascade: boolean = true): Promise<DeleteRelationResponse> => {
   const response = await axiosInstance.delete(`/relations?cascade=${cascade}`, { data: request })
+  return response.data
+}
+
+export type DeletionTargetType = 'document' | 'chunk' | 'entity' | 'relation'
+export type DeletionPolicy = 'graph_only' | 'cascade_safe' | 'cascade_full' | 'delete_documents' | 'force_delete_chunks'
+
+export type DeletionRelationSelector = {
+  source_id: string
+  target_id: string
+}
+
+export type DeletionRequest = {
+  target_type: DeletionTargetType
+  policy?: DeletionPolicy
+  ids?: string[]
+  relations?: DeletionRelationSelector[]
+  delete_file?: boolean
+  delete_s3_file?: boolean
+  delete_llm_cache?: boolean
+  invalidate_cache?: boolean
+}
+
+export type DeletionPreviewResponse = {
+  status: string
+  workspace: string
+  target_type: DeletionTargetType
+  policy: DeletionPolicy
+  executable: boolean
+  summary: Record<string, unknown>
+  impact: Record<string, unknown>
+  warnings: string[]
+  missing: string[]
+}
+
+export type DeletionExecuteResponse = {
+  status: string
+  workspace: string
+  target_type: DeletionTargetType
+  policy: DeletionPolicy
+  job_id?: string | null
+  preview: DeletionPreviewResponse
+  results: Array<Record<string, unknown>>
+  warnings: string[]
+}
+
+export const previewDeletion = async (request: DeletionRequest): Promise<DeletionPreviewResponse> => {
+  const response = await axiosInstance.post('/deletions/preview', request)
+  return response.data
+}
+
+export const executeDeletion = async (request: DeletionRequest): Promise<DeletionExecuteResponse> => {
+  const response = await axiosInstance.post('/deletions/execute', request)
+  return response.data
+}
+
+export type DeletionJobSummary = {
+  job_id: string
+  workspace: string
+  target_type: DeletionTargetType
+  policy: DeletionPolicy
+  created_at?: string | null
+  restored_at?: string | null
+  summary: Record<string, unknown>
+  counts: Record<string, number>
+}
+
+export type DeletionJobListResponse = {
+  jobs: DeletionJobSummary[]
+  total_count: number
+}
+
+export type DeletionJobDetail = DeletionJobSummary & {
+  request: Record<string, unknown>
+  preview: Record<string, unknown>
+}
+
+export type RestoreRequest = {
+  overwrite?: boolean
+  invalidate_cache?: boolean
+}
+
+export type RestorePreviewResponse = {
+  status: string
+  workspace: string
+  job_id: string
+  executable: boolean
+  already_restored: boolean
+  counts: Record<string, number>
+  conflicts: Record<string, number>
+  warnings: string[]
+}
+
+export type RestoreExecuteResponse = {
+  status: string
+  workspace: string
+  job_id: string
+  preview: RestorePreviewResponse
+  restored: Record<string, number>
+  warnings: string[]
+}
+
+export const listDeletionJobs = async (limit: number = 20, offset: number = 0): Promise<DeletionJobListResponse> => {
+  const response = await axiosInstance.get('/deletions/jobs', { params: { limit, offset } })
+  return response.data
+}
+
+export const getDeletionJob = async (jobId: string): Promise<DeletionJobDetail> => {
+  const response = await axiosInstance.get(`/deletions/jobs/${encodeURIComponent(jobId)}`)
+  return response.data
+}
+
+export const previewRestoreDeletionJob = async (
+  jobId: string,
+  request: RestoreRequest = {}
+): Promise<RestorePreviewResponse> => {
+  const response = await axiosInstance.post(
+    `/deletions/jobs/${encodeURIComponent(jobId)}/restore/preview`,
+    request
+  )
+  return response.data
+}
+
+export const executeRestoreDeletionJob = async (
+  jobId: string,
+  request: RestoreRequest = {}
+): Promise<RestoreExecuteResponse> => {
+  const response = await axiosInstance.post(
+    `/deletions/jobs/${encodeURIComponent(jobId)}/restore/execute`,
+    request
+  )
+  return response.data
+}
+
+export type DocumentHistoryOperation = {
+  operation_id: string
+  operation_type: string
+  status: string
+  source: string
+  target_type: string
+  target_id?: string | null
+  doc_id?: string | null
+  title: string
+  summary?: string | null
+  created_at?: string | null
+  completed_at?: string | null
+  can_restore: boolean
+  restore_job_id?: string | null
+  restored_at?: string | null
+  counts: Record<string, number>
+  metadata: Record<string, unknown>
+}
+
+export type DocumentHistoryResponse = {
+  workspace: string
+  doc_id: string
+  file_path?: string | null
+  current_document?: Record<string, unknown> | null
+  operations: DocumentHistoryOperation[]
+  total_count: number
+}
+
+export const getDocumentHistory = async (
+  docId: string,
+  limit: number = 50
+): Promise<DocumentHistoryResponse> => {
+  const response = await axiosInstance.get(`/history/documents/${encodeURIComponent(docId)}`, {
+    params: { limit }
+  })
+  return response.data
+}
+
+export type ChunkSortField =
+  | 'id'
+  | 'file_path'
+  | 'full_doc_id'
+  | 'chunk_order_index'
+  | 'tokens'
+  | 'create_time'
+  | 'update_time'
+
+export type ChunksRequest = {
+  page: number
+  page_size: number
+  doc_id?: string | null
+  search?: string | null
+  chunk_type?: string | null
+  sort_field: ChunkSortField
+  sort_direction: 'asc' | 'desc'
+}
+
+export type ChunkListItem = {
+  chunk_id: string
+  doc_id?: string | null
+  file_path?: string | null
+  chunk_order_index?: number | null
+  tokens?: number | null
+  content_preview: string
+  content_length: number
+  chunk_type: string
+  has_structured_content: boolean
+  entity_count: number
+  relation_count: number
+  created_at?: number | null
+  updated_at?: number | null
+}
+
+export type ChunksPaginatedResponse = {
+  chunks: ChunkListItem[]
+  pagination: PaginationInfo
+}
+
+export type ChunkEntityRef = {
+  entity_id: string
+  entity_type?: string | null
+  description?: string | null
+  degree: number
+}
+
+export type ChunkRelationRef = {
+  source_id: string
+  target_id: string
+  keywords?: string | null
+  description?: string | null
+  weight?: number | null
+}
+
+export type ChunkDocumentRef = {
+  doc_id?: string | null
+  file_path?: string | null
+  status?: string | null
+  chunks_count?: number | null
+}
+
+export type ChunkDetail = {
+  chunk_id: string
+  doc_id?: string | null
+  file_path?: string | null
+  chunk_order_index?: number | null
+  tokens?: number | null
+  content: string
+  content_length: number
+  chunk_type: string
+  structured_content?: any
+  llm_cache_list: string[]
+  created_at?: number | null
+  updated_at?: number | null
+  document?: ChunkDocumentRef | null
+  entities: ChunkEntityRef[]
+  relations: ChunkRelationRef[]
+  deletion_impact: Record<string, any>
+}
+
+export type ChunkUpdateRequest = {
+  content?: string
+  structured_content?: any
+  clear_structured_content?: boolean
+  invalidate_cache?: boolean
+}
+
+export const getChunksPaginated = async (request: ChunksRequest): Promise<ChunksPaginatedResponse> => {
+  const response = await axiosInstance.post('/chunks', request)
+  return response.data
+}
+
+export const getDocumentChunks = async (
+  docId: string,
+  page: number = 1,
+  pageSize: number = 100
+): Promise<ChunksPaginatedResponse> => {
+  const response = await axiosInstance.get(
+    `/chunks/by-document/${encodeURIComponent(docId)}?page=${page}&page_size=${pageSize}`
+  )
+  return response.data
+}
+
+export const getChunkDetail = async (chunkId: string): Promise<ChunkDetail> => {
+  const response = await axiosInstance.get(`/chunks/${encodeURIComponent(chunkId)}`)
+  return response.data
+}
+
+export const updateChunk = async (chunkId: string, request: ChunkUpdateRequest): Promise<ChunkDetail> => {
+  const response = await axiosInstance.patch(`/chunks/${encodeURIComponent(chunkId)}`, request)
   return response.data
 }
 
@@ -1279,6 +1623,14 @@ export type WorkspaceInfo = {
   create_time?: number
   update_time?: number
   is_busy: boolean
+}
+
+export type WorkspaceMode = 'kms' | 'answer_catalog' | 'hybrid'
+
+export const getWorkspaceMode = (workspace?: WorkspaceInfo | null): WorkspaceMode => {
+  const mode = workspace?.metadata?.workspace_mode
+  if (mode === 'answer_catalog' || mode === 'hybrid' || mode === 'kms') return mode
+  return 'kms'
 }
 
 export type WorkspaceListResponse = {
@@ -1328,13 +1680,42 @@ export type CopyDataRequest = {
  * Get paginated list of workspaces
  * @param page Page number (1-based)
  * @param pageSize Number of items per page
+ * @param force Bypass the short client-side dedupe cache
  * @returns Promise with paginated workspaces response
  */
-export const getWorkspaces = async (page: number = 1, pageSize: number = 50): Promise<WorkspaceListResponse> => {
-  const response = await axiosInstance.get('/workspaces', {
-    params: { page, page_size: pageSize }
-  })
-  return response.data
+const WORKSPACE_LIST_DEDUPE_MS = 1500
+let workspaceListPromise: Promise<WorkspaceListResponse> | null = null
+let workspaceListCache: { key: string; timestamp: number; data: WorkspaceListResponse } | null = null
+
+export const getWorkspaces = async (
+  page: number = 1,
+  pageSize: number = 50,
+  force: boolean = false
+): Promise<WorkspaceListResponse> => {
+  const key = `${page}:${pageSize}`
+  const now = Date.now()
+
+  if (!force && workspaceListCache?.key === key && now - workspaceListCache.timestamp < WORKSPACE_LIST_DEDUPE_MS) {
+    return workspaceListCache.data
+  }
+
+  if (!force && workspaceListPromise) {
+    return workspaceListPromise
+  }
+
+  workspaceListPromise = axiosInstance
+    .get('/workspaces', {
+      params: { page, page_size: pageSize }
+    })
+    .then((response) => {
+      workspaceListCache = { key, timestamp: Date.now(), data: response.data }
+      return response.data
+    })
+    .finally(() => {
+      workspaceListPromise = null
+    })
+
+  return workspaceListPromise
 }
 
 /**
@@ -1468,6 +1849,259 @@ export const moveWorkspaceData = async (
     `/workspaces/${encodeURIComponent(sourceWorkspaceId)}/move-data`,
     request
   )
+  return response.data
+}
+
+// =====================================================
+// Answer Catalog Types and API
+// =====================================================
+
+export type AnswerStatus = 'draft' | 'published' | 'archived' | 'expired'
+export type AnswerDisplayPolicy = 'summary' | 'full' | 'both'
+export type AnswerContentFormat = 'plain' | 'markdown' | 'html'
+export type AnswerGuidanceType = 'keyword' | 'question' | 'synonym' | 'negative_keyword' | 'note'
+
+export type AnswerItem = {
+  answer_id: string
+  workspace: string
+  title: string
+  body: string
+  approved_summary?: string | null
+  content_format: AnswerContentFormat
+  display_policy: AnswerDisplayPolicy
+  status: AnswerStatus
+  version: number
+  valid_from?: string | null
+  valid_until?: string | null
+  priority: number
+  tags: string[]
+  metadata: Record<string, any>
+  publish_time?: string | null
+  create_time?: string | null
+  update_time?: string | null
+}
+
+export type AnswerGuidance = {
+  guidance_id: string
+  answer_id: string
+  workspace: string
+  guidance_type: AnswerGuidanceType
+  text: string
+  weight: number
+  metadata: Record<string, any>
+  create_time?: string | null
+}
+
+export type AnswerRevision = {
+  revision_id: string
+  answer_id: string
+  workspace: string
+  version: number
+  snapshot: Record<string, any>
+  created_at?: string | null
+}
+
+export type AnswerEvent = {
+  event_id: string
+  workspace: string
+  event_type: string
+  query?: string | null
+  selected_answer_id?: string | null
+  candidate_ids: string[]
+  scores: Record<string, number>
+  metadata: Record<string, any>
+  create_time?: string | null
+}
+
+export type AnswerStructuredDataset = {
+  answer_id: string
+  title: string
+  status: AnswerStatus
+  source_type: string
+  source_uri?: string | null
+  kind: string
+  columns: string[]
+  row_count: number
+  sample_rows: Record<string, any>[]
+  metadata: Record<string, any>
+}
+
+export type AnswerStructuredFilter = {
+  field: string
+  operator: 'contains' | 'equals' | 'starts_with' | 'ends_with'
+  value: string
+}
+
+export type AnswerStructuredQueryRequest = {
+  answer_id: string
+  filters?: AnswerStructuredFilter[]
+  limit?: number
+  preview_only?: boolean
+}
+
+export type AnswerStructuredQueryResponse = {
+  answer_id: string
+  title: string
+  pseudo_sql: string
+  columns: string[]
+  rows: Record<string, any>[]
+  row_count: number
+  preview_only: boolean
+}
+
+export type AnswerListResponse = {
+  answers: AnswerItem[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export type AnswerCreateRequest = {
+  answer_id?: string
+  title: string
+  body: string
+  approved_summary?: string | null
+  content_format?: AnswerContentFormat
+  display_policy?: AnswerDisplayPolicy
+  status?: AnswerStatus
+  valid_from?: string | null
+  valid_until?: string | null
+  priority?: number
+  tags?: string[]
+  metadata?: Record<string, any>
+  guidance?: string[]
+}
+
+export type AnswerUpdateRequest = Partial<Omit<AnswerCreateRequest, 'answer_id' | 'guidance'>>
+
+export type AnswerResolveRequest = {
+  query: string
+  top_k?: number
+  min_score?: number
+  include_drafts?: boolean
+  strategy?: 'fast' | 'balanced'
+}
+
+export type AnswerResolveCandidate = {
+  answer: AnswerItem
+  score: number
+  matched_guidance: string[]
+  reason: string
+  score_details?: Record<string, number>
+}
+
+export type AnswerResolveResponse = {
+  selected_answer?: AnswerItem | null
+  confidence: number
+  candidates: AnswerResolveCandidate[]
+  trace_id: string
+  rationale: string
+}
+
+export const listAnswers = async (params?: {
+  status?: string
+  search?: string
+  page?: number
+  page_size?: number
+}): Promise<AnswerListResponse> => {
+  const response = await axiosInstance.get('/api/answers', { params })
+  return response.data
+}
+
+export const createAnswer = async (request: AnswerCreateRequest): Promise<AnswerItem> => {
+  const response = await axiosInstance.post('/api/answers', request)
+  return response.data
+}
+
+export const getAnswer = async (answerId: string): Promise<AnswerItem> => {
+  const response = await axiosInstance.get(`/api/answers/${encodeURIComponent(answerId)}`)
+  return response.data
+}
+
+export const updateAnswer = async (answerId: string, request: AnswerUpdateRequest): Promise<AnswerItem> => {
+  const response = await axiosInstance.patch(`/api/answers/${encodeURIComponent(answerId)}`, request)
+  return response.data
+}
+
+export const publishAnswer = async (answerId: string): Promise<AnswerItem> => {
+  const response = await axiosInstance.post(`/api/answers/${encodeURIComponent(answerId)}/publish`)
+  return response.data
+}
+
+export const archiveAnswer = async (answerId: string): Promise<AnswerItem> => {
+  const response = await axiosInstance.post(`/api/answers/${encodeURIComponent(answerId)}/archive`)
+  return response.data
+}
+
+export const listAnswerGuidance = async (answerId: string): Promise<AnswerGuidance[]> => {
+  const response = await axiosInstance.get(`/api/answers/${encodeURIComponent(answerId)}/guidance`)
+  return response.data
+}
+
+export const addAnswerGuidance = async (
+  answerId: string,
+  request: { guidance_type?: AnswerGuidanceType; text: string; weight?: number; metadata?: Record<string, any> }
+): Promise<AnswerGuidance> => {
+  const response = await axiosInstance.post(`/api/answers/${encodeURIComponent(answerId)}/guidance`, request)
+  return response.data
+}
+
+export const deleteAnswerGuidance = async (answerId: string, guidanceId: string): Promise<{ message: string }> => {
+  const response = await axiosInstance.delete(`/api/answers/${encodeURIComponent(answerId)}/guidance/${encodeURIComponent(guidanceId)}`)
+  return response.data
+}
+
+export const listAnswerRevisions = async (answerId: string): Promise<AnswerRevision[]> => {
+  const response = await axiosInstance.get(`/api/answers/${encodeURIComponent(answerId)}/revisions`)
+  return response.data
+}
+
+export const restoreAnswerRevision = async (answerId: string, revisionId: string): Promise<AnswerItem> => {
+  const response = await axiosInstance.post(
+    `/api/answers/${encodeURIComponent(answerId)}/revisions/${encodeURIComponent(revisionId)}/restore`
+  )
+  return response.data
+}
+
+export const resolveAnswer = async (request: AnswerResolveRequest): Promise<AnswerResolveResponse> => {
+  const response = await axiosInstance.post('/api/answers/resolve', request)
+  return response.data
+}
+
+export const listAnswerEvents = async (params?: {
+  event_type?: string
+  selected_answer_id?: string
+  limit?: number
+}): Promise<AnswerEvent[]> => {
+  const response = await axiosInstance.get('/api/answers/events', { params })
+  return response.data
+}
+
+export const listAnswerStructuredDatasets = async (params?: {
+  structured_only?: boolean
+  status?: string
+}): Promise<AnswerStructuredDataset[]> => {
+  const response = await axiosInstance.get('/api/answers/structured/datasets', { params })
+  return response.data
+}
+
+export const queryAnswerStructuredDataset = async (
+  request: AnswerStructuredQueryRequest
+): Promise<AnswerStructuredQueryResponse> => {
+  const response = await axiosInstance.post('/api/answers/structured/query', request)
+  return response.data
+}
+
+export type AnswerStatsResponse = {
+  workspace: string
+  answers: Record<string, number>
+  events: Record<string, number>
+}
+
+export const getAnswerStats = async (workspaceId?: string): Promise<AnswerStatsResponse> => {
+  const response = await axiosInstance.get('/api/answers/stats/summary', {
+    headers: workspaceId ? { 'LIGHTRAG-WORKSPACE': encodeWorkspaceHeader(workspaceId) } : undefined,
+  })
   return response.data
 }
 
@@ -1717,7 +2351,8 @@ export const streamTaskProgress = (
   }
   if (token) headers['Authorization'] = `Bearer ${token}`
   if (apiKey) headers['X-API-Key'] = apiKey
-  if (workspaceId) headers['LIGHTRAG-WORKSPACE'] = workspaceId
+  const workspaceHeader = encodeWorkspaceHeader(workspaceId)
+  if (workspaceHeader) headers['LIGHTRAG-WORKSPACE'] = workspaceHeader
 
   const run = async () => {
     try {

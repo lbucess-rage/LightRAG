@@ -16,6 +16,8 @@ import PaginationControls from '@/components/ui/PaginationControls'
 import { SearchIcon, RefreshCwIcon, ArrowUpIcon, ArrowDownIcon, Trash2Icon, Loader2Icon, AlertTriangleIcon, Network } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/Dialog'
 import { toast } from 'sonner'
+import { DeletionPolicy, DeletionPreviewResponse, executeDeletion, previewDeletion } from '@/api/lightrag'
+import DeletionImpactSummary from '@/components/deletion/DeletionImpactSummary'
 
 // Debounce hook
 function useDebounce<T>(value: T, delay: number): T {
@@ -38,7 +40,25 @@ export default function RelationExplorer() {
   const { t } = useTranslation()
   const [searchInput, setSearchInput] = useState('')
   const [deleteLoading, setDeleteLoading] = useState<string | null>(null)
-  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; sourceId: string | null; targetId: string | null }>({ open: false, sourceId: null, targetId: null })
+  const [deleteDialog, setDeleteDialog] = useState<{
+    open: boolean
+    sourceId: string | null
+    targetId: string | null
+    step: 'choose' | 'preview'
+    policy: Extract<DeletionPolicy, 'graph_only' | 'cascade_safe' | 'cascade_full'>
+    preview: DeletionPreviewResponse | null
+    loadingPreview: boolean
+    executing: boolean
+  }>({
+    open: false,
+    sourceId: null,
+    targetId: null,
+    step: 'choose',
+    policy: 'cascade_safe',
+    preview: null,
+    loadingPreview: false,
+    executing: false,
+  })
 
   // Store state
   const relations = useEntityManagementStore.use.relations()
@@ -54,7 +74,6 @@ export default function RelationExplorer() {
   const selectEntity = useEntityManagementStore.use.selectEntity()
   const setGraphSelectedEdge = useEntityManagementStore.use.setGraphSelectedEdge()
   const fetchRelations = useEntityManagementStore.use.fetchRelations()
-  const removeRelation = useEntityManagementStore.use.removeRelation()
   const graphSelectedEdge = useEntityManagementStore.use.graphSelectedEdge()
 
   // Debounced search
@@ -128,24 +147,67 @@ export default function RelationExplorer() {
 
   const handleDelete = useCallback((e: React.MouseEvent, sourceId: string, targetId: string) => {
     e.stopPropagation()
-    setDeleteDialog({ open: true, sourceId, targetId })
+    setDeleteDialog({
+      open: true,
+      sourceId,
+      targetId,
+      step: 'choose',
+      policy: 'cascade_safe',
+      preview: null,
+      loadingPreview: false,
+      executing: false,
+    })
   }, [])
 
-  const executeDelete = useCallback(async (cascade: boolean) => {
+  const previewRelationDelete = useCallback(async (
+    policy: Extract<DeletionPolicy, 'graph_only' | 'cascade_safe' | 'cascade_full'>
+  ) => {
     const { sourceId, targetId } = deleteDialog
     if (!sourceId || !targetId) return
-    setDeleteDialog({ open: false, sourceId: null, targetId: null })
+
+    setDeleteDialog(prev => ({ ...prev, policy, step: 'preview', loadingPreview: true, preview: null }))
+    try {
+      const result = await previewDeletion({
+        target_type: 'relation',
+        policy,
+        ids: [],
+        relations: [{ source_id: sourceId, target_id: targetId }],
+        invalidate_cache: true,
+      })
+      setDeleteDialog(prev => ({ ...prev, preview: result, loadingPreview: false }))
+    } catch {
+      toast.error(t('entityManagement.relationExplorer.deleteFailed'))
+      setDeleteDialog(prev => ({ ...prev, loadingPreview: false }))
+    }
+  }, [deleteDialog, t])
+
+  const executeDelete = useCallback(async () => {
+    const { sourceId, targetId } = deleteDialog
+    if (!sourceId || !targetId || !deleteDialog.preview) return
     const key = `${sourceId}-${targetId}`
     setDeleteLoading(key)
+    setDeleteDialog(prev => ({ ...prev, executing: true }))
     try {
-      await removeRelation(sourceId, targetId, cascade)
+      await executeDeletion({
+        target_type: 'relation',
+        policy: deleteDialog.policy,
+        ids: [],
+        relations: [{ source_id: sourceId, target_id: targetId }],
+        invalidate_cache: true,
+      })
+      await fetchRelations(pagination.page)
+      if (graphSelectedEdge?.source === sourceId && graphSelectedEdge?.target === targetId) {
+        setGraphSelectedEdge(null)
+      }
       toast.success(t('entityManagement.relationExplorer.deleteSuccess'))
+      setDeleteDialog(prev => ({ ...prev, open: false, executing: false }))
     } catch (error) {
       toast.error(t('entityManagement.relationExplorer.deleteFailed'))
     } finally {
       setDeleteLoading(null)
+      setDeleteDialog(prev => ({ ...prev, executing: false }))
     }
-  }, [deleteDialog, removeRelation, t])
+  }, [deleteDialog, fetchRelations, graphSelectedEdge, pagination.page, setGraphSelectedEdge, t])
 
   const SortIcon = ({ field }: { field: string }) => {
     if (sortField !== field) return null
@@ -304,8 +366,11 @@ export default function RelationExplorer() {
         />
       </div>
 
-      <Dialog open={deleteDialog.open} onOpenChange={(open) => !open && setDeleteDialog({ open: false, sourceId: null, targetId: null })}>
-        <DialogContent className="sm:max-w-md">
+      <Dialog
+        open={deleteDialog.open}
+        onOpenChange={(open) => !open && setDeleteDialog(prev => ({ ...prev, open: false }))}
+      >
+        <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <AlertTriangleIcon className="h-5 w-5 text-destructive" />
@@ -315,34 +380,89 @@ export default function RelationExplorer() {
               {t('entityManagement.deleteDialog.relationDescription', { sourceId: deleteDialog.sourceId, targetId: deleteDialog.targetId })}
             </DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col gap-3 py-2">
-            <Button
-              variant="destructive"
-              className="w-full justify-start gap-3 h-auto py-3 px-4"
-              onClick={() => executeDelete(true)}
-            >
-              <Trash2Icon className="h-5 w-5 shrink-0" />
-              <div className="text-left">
-                <div className="font-semibold">{t('entityManagement.deleteDialog.cascadeButton')}</div>
-                <div className="text-xs font-normal opacity-80">{t('entityManagement.deleteDialog.cascadeDescription')}</div>
-              </div>
-            </Button>
-            <Button
-              variant="outline"
-              className="w-full justify-start gap-3 h-auto py-3 px-4"
-              onClick={() => executeDelete(false)}
-            >
-              <Network className="h-5 w-5 shrink-0" />
-              <div className="text-left">
-                <div className="font-semibold">{t('entityManagement.deleteDialog.graphOnlyButton')}</div>
-                <div className="text-xs font-normal opacity-70">{t('entityManagement.deleteDialog.graphOnlyDescription')}</div>
-              </div>
-            </Button>
-          </div>
+          {deleteDialog.step === 'choose' && (
+            <div className="flex min-w-0 flex-col gap-3 py-2">
+              <Button
+                variant="outline"
+                className="h-auto w-full min-w-0 max-w-full items-start justify-start gap-3 whitespace-normal px-4 py-3 text-left"
+                onClick={() => previewRelationDelete('cascade_safe')}
+              >
+                <Trash2Icon className="mt-0.5 h-5 w-5 shrink-0" />
+                <div className="min-w-0 flex-1 whitespace-normal text-left">
+                  <div className="font-semibold">{t('entityManagement.deleteDialog.safeButton')}</div>
+                  <div className="whitespace-normal break-words text-xs font-normal leading-5 opacity-70">{t('entityManagement.deleteDialog.safeDescription')}</div>
+                </div>
+              </Button>
+              <Button
+                variant="destructive"
+                className="h-auto w-full min-w-0 max-w-full items-start justify-start gap-3 whitespace-normal px-4 py-3 text-left"
+                onClick={() => previewRelationDelete('cascade_full')}
+              >
+                <Trash2Icon className="mt-0.5 h-5 w-5 shrink-0" />
+                <div className="min-w-0 flex-1 whitespace-normal text-left">
+                  <div className="font-semibold">{t('entityManagement.deleteDialog.fullButton')}</div>
+                  <div className="whitespace-normal break-words text-xs font-normal leading-5 opacity-80">{t('entityManagement.deleteDialog.fullDescription')}</div>
+                </div>
+              </Button>
+              <Button
+                variant="outline"
+                className="h-auto w-full min-w-0 max-w-full items-start justify-start gap-3 whitespace-normal px-4 py-3 text-left"
+                onClick={() => previewRelationDelete('graph_only')}
+              >
+                <Network className="mt-0.5 h-5 w-5 shrink-0" />
+                <div className="min-w-0 flex-1 whitespace-normal text-left">
+                  <div className="font-semibold">{t('entityManagement.deleteDialog.graphOnlyButton')}</div>
+                  <div className="whitespace-normal break-words text-xs font-normal leading-5 opacity-70">{t('entityManagement.deleteDialog.graphOnlyDescription')}</div>
+                </div>
+              </Button>
+            </div>
+          )}
+
+          {deleteDialog.step === 'preview' && (
+            <div className="py-2">
+              {deleteDialog.loadingPreview ? (
+                <div className="flex items-center justify-center py-6">
+                  <Loader2Icon className="h-5 w-5 animate-spin mr-2" />
+                  {t('entityManagement.deleteDialog.loadingPreview', 'Calculating deletion impact...')}
+                </div>
+              ) : deleteDialog.preview ? (
+                <DeletionImpactSummary preview={deleteDialog.preview} />
+              ) : (
+                <div className="text-sm text-muted-foreground">
+                  {t('entityManagement.deleteDialog.noPreview', 'No preview available.')}
+                </div>
+              )}
+            </div>
+          )}
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setDeleteDialog({ open: false, sourceId: null, targetId: null })}>
+            {deleteDialog.step === 'preview' && (
+              <Button
+                variant="ghost"
+                disabled={deleteDialog.executing}
+                onClick={() => setDeleteDialog(prev => ({ ...prev, step: 'choose', preview: null }))}
+              >
+                {t('common.back')}
+              </Button>
+            )}
+            <div className="flex-1" />
+            <Button
+              variant="ghost"
+              disabled={deleteDialog.executing}
+              onClick={() => setDeleteDialog(prev => ({ ...prev, open: false }))}
+            >
               {t('common.cancel')}
             </Button>
+            {deleteDialog.step === 'preview' && (
+              <Button
+                variant="destructive"
+                onClick={executeDelete}
+                disabled={deleteDialog.executing || !deleteDialog.preview?.executable}
+              >
+                {deleteDialog.executing
+                  ? t('documentPanel.deleteDocuments.deleting', 'Deleting...')
+                  : t('entityManagement.deleteDialog.confirmDelete', { count: 1 })}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

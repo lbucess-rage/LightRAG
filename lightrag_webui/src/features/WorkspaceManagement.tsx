@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { WorkspaceDialog, DeleteWorkspaceDialog, CopyWorkspaceDialog } from '@/components/workspace'
 import Button from '@/components/ui/Button'
+import Badge from '@/components/ui/Badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
 import { cn } from '@/lib/utils'
+import { AnswerStatsResponse, getAnswerStats, getWorkspaceMode, WorkspaceInfo } from '@/api/lightrag'
 import {
   PlusIcon,
   RefreshCwIcon,
@@ -51,6 +53,8 @@ function StatCard({ title, value, icon, description }: StatCardProps) {
 export default function WorkspaceManagement() {
   const { t } = useTranslation()
   const [refreshingId, setRefreshingId] = useState<string | null>(null)
+  const [answerStatsByWorkspace, setAnswerStatsByWorkspace] = useState<Record<string, AnswerStatsResponse>>({})
+  const fetchedOnMountRef = useRef(false)
 
   const workspaces = useWorkspaceStore.use.workspaces()
   const totalWorkspaces = useWorkspaceStore.use.totalWorkspaces()
@@ -77,8 +81,43 @@ export default function WorkspaceManagement() {
   const closeDeleteDialog = useWorkspaceStore.use.closeDeleteDialog()
 
   useEffect(() => {
-    fetchWorkspaces()
-  }, [fetchWorkspaces])
+    if (fetchedOnMountRef.current) return
+    fetchedOnMountRef.current = true
+    useWorkspaceStore.getState().fetchWorkspaces()
+  }, [])
+
+  useEffect(() => {
+    const answerWorkspaces = workspaces.filter((workspace) => {
+      const mode = getWorkspaceMode(workspace)
+      return mode === 'answer_catalog' || mode === 'hybrid'
+    })
+    if (answerWorkspaces.length === 0) return
+
+    let cancelled = false
+    Promise.all(
+      answerWorkspaces.map(async (workspace) => {
+        try {
+          const stats = await getAnswerStats(workspace.workspace_id)
+          return [workspace.workspace_id, stats] as const
+        } catch {
+          return [workspace.workspace_id, null] as const
+        }
+      })
+    ).then((entries) => {
+      if (cancelled) return
+      setAnswerStatsByWorkspace((previous) => {
+        const next = { ...previous }
+        for (const [workspaceId, stats] of entries) {
+          if (stats) next[workspaceId] = stats
+        }
+        return next
+      })
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [workspaces])
 
   const handleRefreshStats = async (workspaceId: string) => {
     setRefreshingId(workspaceId)
@@ -111,6 +150,36 @@ export default function WorkspaceManagement() {
   const totalEntities = workspaces.reduce((sum, ws) => sum + ws.entity_count, 0)
   const totalRelations = workspaces.reduce((sum, ws) => sum + ws.relation_count, 0)
 
+  const getWorkspaceStats = (workspace: WorkspaceInfo) => {
+    const mode = getWorkspaceMode(workspace)
+    const answerStats = answerStatsByWorkspace[workspace.workspace_id]
+    const answerTotal = Number(answerStats?.answers?.total || 0)
+    const publishedAnswers = Number(answerStats?.answers?.published || 0)
+    const resolves = Number(answerStats?.events?.resolves || 0)
+
+    if (mode === 'answer_catalog') {
+      return [
+        { label: t('workspace.answerItems', 'Answers'), value: answerTotal },
+        { label: t('workspace.publishedAnswers', 'Published'), value: publishedAnswers },
+        { label: t('workspace.resolveEvents', 'Lookups'), value: resolves },
+      ]
+    }
+
+    if (mode === 'hybrid') {
+      return [
+        { label: t('workspace.documents'), value: workspace.document_count },
+        { label: t('workspace.answerItems', 'Answers'), value: answerTotal },
+        { label: t('workspace.resolveEvents', 'Lookups'), value: resolves },
+      ]
+    }
+
+    return [
+      { label: t('workspace.documents'), value: workspace.document_count },
+      { label: t('workspace.entities'), value: workspace.entity_count },
+      { label: t('workspace.relations'), value: workspace.relation_count },
+    ]
+  }
+
   return (
     <div className="container mx-auto py-6 px-4 max-w-7xl">
       {/* Header */}
@@ -123,7 +192,7 @@ export default function WorkspaceManagement() {
           <p className="text-muted-foreground mt-1">{t('workspaceManagement.description')}</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => fetchWorkspaces()} disabled={isLoading}>
+          <Button variant="outline" size="sm" onClick={() => fetchWorkspaces(true)} disabled={isLoading}>
             {isLoading ? (
               <Loader2Icon className="h-4 w-4 animate-spin" />
             ) : (
@@ -203,6 +272,15 @@ export default function WorkspaceManagement() {
                   <CardDescription className="truncate">
                     {workspace.description || workspace.workspace_id}
                   </CardDescription>
+                  <div className="mt-2">
+                    <Badge variant="outline">
+                      {getWorkspaceMode(workspace) === 'answer_catalog'
+                        ? t('workspace.modeAnswerCatalog', 'FAQ / Fixed Answer')
+                        : getWorkspaceMode(workspace) === 'hybrid'
+                          ? t('workspace.modeHybrid', 'Hybrid')
+                          : t('workspace.modeKms', 'KMS')}
+                    </Badge>
+                  </div>
                 </div>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -266,24 +344,14 @@ export default function WorkspaceManagement() {
                 </div>
               )}
               <div className="grid grid-cols-3 gap-2">
-                <div className="text-center p-2 bg-muted/50 rounded-md">
-                  <p className="text-xl font-bold text-foreground/80">
-                    {workspace.document_count.toLocaleString()}
-                  </p>
-                  <p className="text-xs text-muted-foreground">{t('workspace.documents')}</p>
-                </div>
-                <div className="text-center p-2 bg-muted/50 rounded-md">
-                  <p className="text-xl font-bold text-foreground/80">
-                    {workspace.entity_count.toLocaleString()}
-                  </p>
-                  <p className="text-xs text-muted-foreground">{t('workspace.entities')}</p>
-                </div>
-                <div className="text-center p-2 bg-muted/50 rounded-md">
-                  <p className="text-xl font-bold text-foreground/80">
-                    {workspace.relation_count.toLocaleString()}
-                  </p>
-                  <p className="text-xs text-muted-foreground">{t('workspace.relations')}</p>
-                </div>
+                {getWorkspaceStats(workspace).map((stat) => (
+                  <div key={stat.label} className="text-center p-2 bg-muted/50 rounded-md">
+                    <p className="text-xl font-bold text-foreground/80">
+                      {stat.value.toLocaleString()}
+                    </p>
+                    <p className="text-xs text-muted-foreground">{stat.label}</p>
+                  </div>
+                ))}
               </div>
               {workspace.update_time && (
                 <p className="text-xs text-muted-foreground mt-3">

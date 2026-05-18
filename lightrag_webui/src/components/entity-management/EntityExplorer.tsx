@@ -18,7 +18,8 @@ import Checkbox from '@/components/ui/Checkbox'
 import { SearchIcon, RefreshCwIcon, ArrowUpIcon, ArrowDownIcon, Trash2Icon, Loader2Icon, AlertTriangleIcon, Network } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/Dialog'
 import { toast } from 'sonner'
-import { getRelatedEntities, batchDeleteEntities, RelatedEntityItem } from '@/api/lightrag'
+import { DeletionPolicy, DeletionPreviewResponse, executeDeletion, getRelatedEntities, previewDeletion, RelatedEntityItem } from '@/api/lightrag'
+import DeletionImpactSummary from '@/components/deletion/DeletionImpactSummary'
 
 // Debounce hook
 function useDebounce<T>(value: T, delay: number): T {
@@ -44,12 +45,26 @@ export default function EntityExplorer() {
   const [deleteDialog, setDeleteDialog] = useState<{
     open: boolean
     entityId: string | null
-    step: 'choose' | 'related'
-    cascade: boolean
+    step: 'choose' | 'related' | 'preview'
+    policy: Extract<DeletionPolicy, 'graph_only' | 'cascade_safe' | 'cascade_full'>
     relatedEntities: RelatedEntityItem[]
     selectedRelated: Set<string>
     loadingRelated: boolean
-  }>({ open: false, entityId: null, step: 'choose', cascade: true, relatedEntities: [], selectedRelated: new Set(), loadingRelated: false })
+    preview: DeletionPreviewResponse | null
+    loadingPreview: boolean
+    executing: boolean
+  }>({
+    open: false,
+    entityId: null,
+    step: 'choose',
+    policy: 'cascade_safe',
+    relatedEntities: [],
+    selectedRelated: new Set(),
+    loadingRelated: false,
+    preview: null,
+    loadingPreview: false,
+    executing: false,
+  })
 
   // Store state
   const entities = useEntityManagementStore.use.entities()
@@ -69,7 +84,7 @@ export default function EntityExplorer() {
   const selectEntity = useEntityManagementStore.use.selectEntity()
   const fetchEntities = useEntityManagementStore.use.fetchEntities()
   const fetchEntityTypes = useEntityManagementStore.use.fetchEntityTypes()
-  const removeEntity = useEntityManagementStore.use.removeEntity()
+  const fetchRelations = useEntityManagementStore.use.fetchRelations()
 
   // Debounced search
   const debouncedSearch = useDebounce(searchInput, 300)
@@ -120,32 +135,70 @@ export default function EntityExplorer() {
 
   const handleDelete = useCallback((e: React.MouseEvent, entityId: string) => {
     e.stopPropagation()
-    setDeleteDialog({ open: true, entityId, step: 'choose', cascade: true, relatedEntities: [], selectedRelated: new Set(), loadingRelated: false })
+    setDeleteDialog({
+      open: true,
+      entityId,
+      step: 'choose',
+      policy: 'cascade_safe',
+      relatedEntities: [],
+      selectedRelated: new Set(),
+      loadingRelated: false,
+      preview: null,
+      loadingPreview: false,
+      executing: false,
+    })
   }, [])
 
-  const handleChooseScope = useCallback(async (cascade: boolean) => {
+  const previewEntityDelete = useCallback(async (
+    policy: Extract<DeletionPolicy, 'graph_only' | 'cascade_safe' | 'cascade_full'>,
+    idsToDelete?: string[]
+  ) => {
     const entityId = deleteDialog.entityId
     if (!entityId) return
 
-    if (!cascade) {
-      // Graph-only: just delete directly, no need to check related
-      setDeleteDialog(prev => ({ ...prev, open: false }))
-      setDeleteLoading(entityId)
-      try {
-        await removeEntity(entityId, false)
-        toast.success(t('entityManagement.entityExplorer.deleteSuccess', { entityId }))
-      } catch (error) {
-        toast.error(t('entityManagement.entityExplorer.deleteFailed'))
-      } finally {
-        setDeleteLoading(null)
-      }
+    const ids = idsToDelete || [entityId, ...Array.from(deleteDialog.selectedRelated)]
+    setDeleteDialog(prev => ({
+      ...prev,
+      policy,
+      step: 'preview',
+      loadingRelated: false,
+      loadingPreview: true,
+      preview: null,
+    }))
+    try {
+      const result = await previewDeletion({
+        target_type: 'entity',
+        policy,
+        ids,
+        relations: [],
+        invalidate_cache: true,
+      })
+      setDeleteDialog(prev => ({ ...prev, preview: result, loadingPreview: false }))
+    } catch {
+      toast.error(t('entityManagement.entityExplorer.deleteFailed'))
+      setDeleteDialog(prev => ({ ...prev, loadingPreview: false }))
+    }
+  }, [deleteDialog.entityId, deleteDialog.selectedRelated, t])
+
+  const handleChooseScope = useCallback(async (
+    policy: Extract<DeletionPolicy, 'graph_only' | 'cascade_safe' | 'cascade_full'>
+  ) => {
+    const entityId = deleteDialog.entityId
+    if (!entityId) return
+
+    if (policy !== 'cascade_safe') {
+      previewEntityDelete(policy, [entityId])
       return
     }
 
-    // Cascade: fetch related entities first
-    setDeleteDialog(prev => ({ ...prev, cascade: true, loadingRelated: true, step: 'related' }))
+    // Safe delete: first check same-name/similar-name candidates for optional batch deletion.
+    setDeleteDialog(prev => ({ ...prev, policy: 'cascade_safe', loadingRelated: true, step: 'related' }))
     try {
       const result = await getRelatedEntities(entityId)
+      if (result.related.length === 0) {
+        await previewEntityDelete('cascade_safe', [entityId])
+        return
+      }
       setDeleteDialog(prev => ({
         ...prev,
         relatedEntities: result.related,
@@ -155,8 +208,9 @@ export default function EntityExplorer() {
     } catch {
       // If related fetch fails, proceed with single delete
       setDeleteDialog(prev => ({ ...prev, relatedEntities: [], loadingRelated: false }))
+      await previewEntityDelete('cascade_safe', [entityId])
     }
-  }, [deleteDialog.entityId, removeEntity, t])
+  }, [deleteDialog.entityId, previewEntityDelete])
 
   const toggleRelatedEntity = useCallback((eid: string) => {
     setDeleteDialog(prev => {
@@ -176,28 +230,39 @@ export default function EntityExplorer() {
 
   const executeDelete = useCallback(async () => {
     const entityId = deleteDialog.entityId
-    if (!entityId) return
+    if (!entityId || !deleteDialog.preview) return
 
     const idsToDelete = [entityId, ...Array.from(deleteDialog.selectedRelated)]
-    setDeleteDialog(prev => ({ ...prev, open: false }))
+    setDeleteDialog(prev => ({ ...prev, executing: true }))
     setDeleteLoading(entityId)
     try {
+      const result = await executeDeletion({
+        target_type: 'entity',
+        policy: deleteDialog.policy,
+        ids: idsToDelete,
+        relations: [],
+        invalidate_cache: true,
+      })
+      const deleted = result.results.filter((item) => item.status === 'success').length
       if (idsToDelete.length === 1) {
-        await removeEntity(entityId, deleteDialog.cascade)
         toast.success(t('entityManagement.entityExplorer.deleteSuccess', { entityId }))
       } else {
-        const result = await batchDeleteEntities(idsToDelete, deleteDialog.cascade)
-        toast.success(t('entityManagement.entityExplorer.batchDeleteSuccess', { deleted: result.deleted, total: idsToDelete.length }))
-        // Refresh after batch delete
-        await fetchEntities(pagination.page)
-        await fetchEntityTypes()
+        toast.success(t('entityManagement.entityExplorer.batchDeleteSuccess', { deleted, total: idsToDelete.length }))
       }
+      await fetchEntities(pagination.page)
+      await fetchEntityTypes()
+      await fetchRelations()
+      if (idsToDelete.includes(selectedEntityId || '')) {
+        selectEntity(null)
+      }
+      setDeleteDialog(prev => ({ ...prev, open: false, executing: false }))
     } catch (error) {
       toast.error(t('entityManagement.entityExplorer.deleteFailed'))
     } finally {
       setDeleteLoading(null)
+      setDeleteDialog(prev => ({ ...prev, executing: false }))
     }
-  }, [deleteDialog, removeEntity, t, fetchEntities, fetchEntityTypes, pagination.page])
+  }, [deleteDialog, t, fetchEntities, fetchEntityTypes, fetchRelations, pagination.page, selectedEntityId, selectEntity])
 
   const SortIcon = ({ field }: { field: string }) => {
     if (sortField !== field) return null
@@ -353,7 +418,7 @@ export default function EntityExplorer() {
       </div>
 
       <Dialog open={deleteDialog.open} onOpenChange={(open) => !open && setDeleteDialog(prev => ({ ...prev, open: false }))}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <AlertTriangleIcon className="h-5 w-5 text-destructive" />
@@ -365,27 +430,38 @@ export default function EntityExplorer() {
           </DialogHeader>
 
           {deleteDialog.step === 'choose' && (
-            <div className="flex flex-col gap-3 py-2">
+            <div className="flex min-w-0 flex-col gap-3 py-2">
+              <Button
+                variant="outline"
+                className="h-auto w-full min-w-0 max-w-full items-start justify-start gap-3 whitespace-normal px-4 py-3 text-left"
+                onClick={() => handleChooseScope('cascade_safe')}
+              >
+                <Trash2Icon className="mt-0.5 h-5 w-5 shrink-0" />
+                <div className="min-w-0 flex-1 whitespace-normal text-left">
+                  <div className="font-semibold">{t('entityManagement.deleteDialog.safeButton')}</div>
+                  <div className="whitespace-normal break-words text-xs font-normal leading-5 opacity-70">{t('entityManagement.deleteDialog.safeDescription')}</div>
+                </div>
+              </Button>
               <Button
                 variant="destructive"
-                className="w-full justify-start gap-3 h-auto py-3 px-4"
-                onClick={() => handleChooseScope(true)}
+                className="h-auto w-full min-w-0 max-w-full items-start justify-start gap-3 whitespace-normal px-4 py-3 text-left"
+                onClick={() => handleChooseScope('cascade_full')}
               >
-                <Trash2Icon className="h-5 w-5 shrink-0" />
-                <div className="text-left">
-                  <div className="font-semibold">{t('entityManagement.deleteDialog.cascadeButton')}</div>
-                  <div className="text-xs font-normal opacity-80">{t('entityManagement.deleteDialog.cascadeDescription')}</div>
+                <Trash2Icon className="mt-0.5 h-5 w-5 shrink-0" />
+                <div className="min-w-0 flex-1 whitespace-normal text-left">
+                  <div className="font-semibold">{t('entityManagement.deleteDialog.fullButton')}</div>
+                  <div className="whitespace-normal break-words text-xs font-normal leading-5 opacity-80">{t('entityManagement.deleteDialog.fullDescription')}</div>
                 </div>
               </Button>
               <Button
                 variant="outline"
-                className="w-full justify-start gap-3 h-auto py-3 px-4"
-                onClick={() => handleChooseScope(false)}
+                className="h-auto w-full min-w-0 max-w-full items-start justify-start gap-3 whitespace-normal px-4 py-3 text-left"
+                onClick={() => handleChooseScope('graph_only')}
               >
-                <Network className="h-5 w-5 shrink-0" />
-                <div className="text-left">
+                <Network className="mt-0.5 h-5 w-5 shrink-0" />
+                <div className="min-w-0 flex-1 whitespace-normal text-left">
                   <div className="font-semibold">{t('entityManagement.deleteDialog.graphOnlyButton')}</div>
-                  <div className="text-xs font-normal opacity-70">{t('entityManagement.deleteDialog.graphOnlyDescription')}</div>
+                  <div className="whitespace-normal break-words text-xs font-normal leading-5 opacity-70">{t('entityManagement.deleteDialog.graphOnlyDescription')}</div>
                 </div>
               </Button>
             </div>
@@ -402,6 +478,9 @@ export default function EntityExplorer() {
                 <>
                   <div className="text-sm text-muted-foreground">
                     {t('entityManagement.deleteDialog.relatedFound', { count: deleteDialog.relatedEntities.length })}
+                  </div>
+                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+                    {t('entityManagement.deleteDialog.similarCandidateHelp')}
                   </div>
                   <div className="border rounded-md max-h-[240px] overflow-auto">
                     <div className="flex items-center gap-2 px-3 py-2 border-b bg-muted/50">
@@ -441,19 +520,64 @@ export default function EntityExplorer() {
             </div>
           )}
 
+          {deleteDialog.step === 'preview' && (
+            <div className="py-2">
+              {deleteDialog.loadingPreview ? (
+                <div className="flex items-center justify-center py-6">
+                  <Loader2Icon className="h-5 w-5 animate-spin mr-2" />
+                  {t('entityManagement.deleteDialog.loadingPreview', 'Calculating deletion impact...')}
+                </div>
+              ) : deleteDialog.preview ? (
+                <DeletionImpactSummary preview={deleteDialog.preview} />
+              ) : (
+                <div className="text-sm text-muted-foreground">
+                  {t('entityManagement.deleteDialog.noPreview', 'No preview available.')}
+                </div>
+              )}
+            </div>
+          )}
+
           <DialogFooter className="gap-2">
-            {deleteDialog.step === 'related' && (
-              <Button variant="ghost" onClick={() => setDeleteDialog(prev => ({ ...prev, step: 'choose' }))}>
+            {deleteDialog.step !== 'choose' && (
+              <Button
+                variant="ghost"
+                disabled={deleteDialog.loadingPreview || deleteDialog.executing}
+                onClick={() => setDeleteDialog(prev => ({
+                  ...prev,
+                  step: prev.step === 'preview' && prev.policy === 'cascade_safe' && prev.relatedEntities.length > 0 ? 'related' : 'choose'
+                }))}
+              >
                 {t('common.back')}
               </Button>
             )}
             <div className="flex-1" />
-            <Button variant="ghost" onClick={() => setDeleteDialog(prev => ({ ...prev, open: false }))}>
+            <Button
+              variant="ghost"
+              disabled={deleteDialog.executing}
+              onClick={() => setDeleteDialog(prev => ({ ...prev, open: false }))}
+            >
               {t('common.cancel')}
             </Button>
             {deleteDialog.step === 'related' && (
-              <Button variant="destructive" onClick={executeDelete}>
-                {t('entityManagement.deleteDialog.confirmDelete', { count: 1 + deleteDialog.selectedRelated.size })}
+              <Button
+                variant="destructive"
+                onClick={() => previewEntityDelete('cascade_safe')}
+                disabled={deleteDialog.loadingPreview}
+              >
+                {deleteDialog.loadingPreview
+                  ? t('common.loading', 'Loading...')
+                  : t('entityManagement.deleteDialog.previewImpact', 'Preview impact')}
+              </Button>
+            )}
+            {deleteDialog.step === 'preview' && (
+              <Button
+                variant="destructive"
+                onClick={executeDelete}
+                disabled={deleteDialog.executing || !deleteDialog.preview?.executable}
+              >
+                {deleteDialog.executing
+                  ? t('documentPanel.deleteDocuments.deleting', 'Deleting...')
+                  : t('entityManagement.deleteDialog.confirmDelete', { count: 1 + deleteDialog.selectedRelated.size })}
               </Button>
             )}
           </DialogFooter>

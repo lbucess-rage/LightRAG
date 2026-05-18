@@ -14,7 +14,7 @@ import {
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/Card'
 import EmptyCard from '@/components/ui/EmptyCard'
 import Checkbox from '@/components/ui/Checkbox'
-import UploadDocumentsDialog from '@/components/documents/UploadDocumentsDialog'
+import DataSourceWizardDialog from '@/components/documents/DataSourceWizardDialog'
 import ClearDocumentsDialog from '@/components/documents/ClearDocumentsDialog'
 import ClearLLMCacheDialog from '@/components/documents/ClearLLMCacheDialog'
 import DeleteDocumentsDialog from '@/components/documents/DeleteDocumentsDialog'
@@ -28,6 +28,7 @@ import {
   DocStatusResponse,
   DocumentsRequest,
   PaginationInfo,
+  getTrackStatus,
   listTasks,
   TaskStatusResponse
 } from '@/api/lightrag'
@@ -36,14 +37,13 @@ import { toast } from 'sonner'
 import { useBackendState } from '@/stores/state'
 import { useWorkspaceStore } from '@/stores/workspace'
 
-import { RefreshCwIcon, ActivityIcon, ArrowUpIcon, ArrowDownIcon, RotateCcwIcon, CheckSquareIcon, XIcon, AlertTriangle, Info, MessageSquareText, ClipboardList, FileTextIcon, GlobeIcon, LayersIcon } from 'lucide-react'
+import { RefreshCwIcon, ActivityIcon, ArrowUpIcon, ArrowDownIcon, RotateCcwIcon, CheckSquareIcon, XIcon, AlertTriangle, Info, MessageSquareText, ClipboardList, FileTextIcon, GlobeIcon, LayersIcon, HistoryIcon } from 'lucide-react'
 import PipelineStatusDialog from '@/components/documents/PipelineStatusDialog'
-import URLIngestDialog from '@/components/documents/URLIngestDialog'
-import BoardIngestDialog from '@/components/documents/BoardIngestDialog'
-import MultimodalUploadDialog from '@/components/documents/MultimodalUploadDialog'
-import QuickIngestDialog from '@/components/documents/QuickIngestDialog'
 import ActiveTasksPanel from '@/components/documents/ActiveTasksPanel'
 import TaskResultDialog from '@/components/documents/TaskResultDialog'
+import DocumentPreviewDialog from '@/components/documents/DocumentPreviewDialog'
+import DocumentHistoryDialog from '@/components/documents/DocumentHistoryDialog'
+import DeletionRecoveryDialog from '@/components/deletion/DeletionRecoveryDialog'
 import { BoardPostDialog, useBoardPostView } from '@/components/board/BoardPostDialog'
 
 type StatusFilter = DocStatus | 'all';
@@ -354,9 +354,13 @@ export default function DocumentManager() {
 
   // State for task result dialog from document row
   const [selectedTaskForDoc, setSelectedTaskForDoc] = useState<TaskStatusResponse | null>(null)
+  const [historyDoc, setHistoryDoc] = useState<DocStatusResponse | null>(null)
 
   // Board post view for URL-type documents
   const boardView = useBoardPostView()
+
+  // Preview dialog for regular documents
+  const [previewDocId, setPreviewDocId] = useState<string | null>(null)
 
   // Add refs to track previous pipelineBusy state and current interval
   const prevPipelineBusyRef = useRef<boolean | undefined>(undefined);
@@ -398,15 +402,25 @@ export default function DocumentManager() {
   const handleViewTaskResult = useCallback(async (doc: DocStatusResponse) => {
     try {
       const allTasks = await listTasks()
-      // Match by file_name, url, or file_path_label
+      // Match by track_id first, then by source labels used by different ingest paths.
       const matched = allTasks
         .filter(t => {
           const meta = t.metadata || {}
+          const result = t.result || {}
+          if (
+            doc.track_id &&
+            (meta.track_id === doc.track_id || result.track_id === doc.track_id)
+          ) return true
           // Direct match: multimodal upload, URL ingest
           if (
             (meta.file_name && meta.file_name === doc.file_path) ||
             (meta.url && meta.url === doc.file_path) ||
-            (meta.file_path_label && meta.file_path_label === doc.file_path)
+            (meta.file_path_label && meta.file_path_label === doc.file_path) ||
+            (result.results || []).some((item: Record<string, any>) => (
+              item.doc_id === doc.id ||
+              item.entity_name === doc.file_path ||
+              item.file_path === doc.file_path
+            ))
           ) return true
           // Board ingest: file_path starts with api_url (e.g. https://host/api/posts/123)
           if (t.task_type === 'board_ingest' && meta.api_url && doc.file_path?.startsWith(meta.api_url.replace(/\/$/, ''))) {
@@ -418,6 +432,54 @@ export default function DocumentManager() {
 
       if (matched.length > 0) {
         setSelectedTaskForDoc(matched[0])
+      } else if (doc.track_id) {
+        const track = await getTrackStatus(doc.track_id)
+        if (track.documents.length > 0) {
+          const hasRunning = track.documents.some(item => item.status === 'pending' || item.status === 'processing' || item.status === 'preprocessed')
+          const hasFailed = track.documents.some(item => item.status === 'failed')
+          const successCount = track.documents.filter(item => item.status === 'processed').length
+          const createdAt = Math.min(...track.documents.map(item => Date.parse(item.created_at) / 1000).filter(Number.isFinite))
+          const updatedAt = Math.max(...track.documents.map(item => Date.parse(item.updated_at) / 1000).filter(Number.isFinite))
+          const syntheticTask: TaskStatusResponse = {
+            task_id: doc.track_id,
+            task_type: 'document_ingest',
+            workspace: useWorkspaceStore.getState().currentWorkspaceId || '',
+            status: hasRunning ? 'running' : hasFailed && successCount === 0 ? 'failed' : 'completed',
+            progress: hasRunning ? 50 : 100,
+            message: 'Track status',
+            created_at: Number.isFinite(createdAt) ? createdAt : Date.parse(doc.created_at) / 1000,
+            updated_at: Number.isFinite(updatedAt) ? updatedAt : Date.parse(doc.updated_at) / 1000,
+            metadata: {
+              track_id: doc.track_id,
+              file_path_label: doc.file_path,
+              source_type: 'track_status',
+            },
+            result: {
+              track_id: track.track_id,
+              total_items: track.total_count,
+              success_count: successCount,
+              error_count: track.documents.filter(item => item.error_msg).length,
+              status_summary: track.status_summary,
+              results: track.documents.map(item => ({
+                type: 'document',
+                entity_name: item.file_path,
+                entity_type: item.status,
+                description: item.content_summary,
+                doc_id: item.id,
+                chunk_id: item.id,
+                chunks_count: item.chunks_count,
+                success: item.status === 'processed',
+                error: item.error_msg || null,
+              })),
+              errors: track.documents
+                .filter(item => item.error_msg)
+                .map(item => `${item.file_path}: ${item.error_msg}`),
+            },
+          }
+          setSelectedTaskForDoc(syntheticTask)
+        } else {
+          toast.info(t('documentPanel.taskResult.noTaskFound'))
+        }
       } else {
         toast.info(t('documentPanel.taskResult.noTaskFound'))
       }
@@ -1263,6 +1325,7 @@ export default function DocumentManager() {
       failed: 1,
     });
     setSelectedDocIds([]);
+    useSettingsStore.getState().setChunkDocumentFilter(null);
 
     // Reset error states
     setRetryState({
@@ -1351,11 +1414,8 @@ export default function DocumentManager() {
               <ClearDocumentsDialog onDocumentsCleared={handleDocumentsCleared} />
             ) : null}
             <ClearLLMCacheDialog />
-            <URLIngestDialog onDocumentsUploaded={fetchDocuments} />
-            <BoardIngestDialog onDocumentsUploaded={fetchDocuments} />
-            <MultimodalUploadDialog onDocumentsUploaded={fetchDocuments} />
-            <QuickIngestDialog onDocumentsUploaded={fetchDocuments} />
-            <UploadDocumentsDialog onDocumentsUploaded={fetchDocuments} />
+            <DeletionRecoveryDialog onRestored={fetchDocuments} />
+            <DataSourceWizardDialog onDocumentsUploaded={fetchDocuments} />
             <PipelineStatusDialog
               open={showPipelineStatus}
               onOpenChange={setShowPipelineStatus}
@@ -1545,30 +1605,40 @@ export default function DocumentManager() {
                       </TableRow>
                     </TableHeader>
                     <TableBody className="text-sm overflow-auto">
-                      {filteredAndSortedDocs && filteredAndSortedDocs.map((doc) => (
-                        <TableRow key={doc.id}>
+                      {filteredAndSortedDocs && filteredAndSortedDocs.map((doc) => {
+                        const isZeroChunk = (doc.chunks_count ?? 0) === 0
+                        return (
+                        <TableRow
+                          key={doc.id}
+                          className={cn(
+                            isZeroChunk && 'border-l-4 border-l-red-500 bg-red-50/80 hover:bg-red-100/80 dark:bg-red-950/20 dark:hover:bg-red-950/30'
+                          )}
+                        >
                           <TableCell className="truncate font-mono overflow-visible max-w-[250px]">
                             {(() => {
                               const docType = getDocSourceType(doc)
-                              const isClickable = docType === 'board' || docType === 'url'
-                              const handleFileClick = isClickable ? async () => {
+                              const handleFileClick = async () => {
                                 const fp = doc.file_path || ''
-                                if (/^https?:\/\//.test(fp)) {
+                                if (docType === 'url' && /^https?:\/\//.test(fp)) {
                                   // Try board popup first (silent); falls back to new tab
                                   const ok = await boardView.open(fp, { silentOnError: true })
                                   if (!ok) window.open(fp, '_blank')
-                                } else if (/^board:\/\//.test(fp)) {
+                                  return
+                                }
+                                if (docType === 'board' && /^board:\/\//.test(fp)) {
                                   // board:// protocol — convert to https and try popup
                                   const httpsUrl = fp.replace(/^board:\/\//, 'https://')
                                   boardView.open(httpsUrl)
+                                  return
                                 }
-                              } : undefined
+                                setPreviewDocId(doc.id)
+                              }
                               return showFileName ? (
                                 <>
                                   <div className="group relative overflow-visible tooltip-container">
                                     <div className={cn(
                                       'flex items-center gap-1.5 truncate',
-                                      isClickable && 'cursor-pointer text-primary hover:underline'
+                                      'cursor-pointer text-primary hover:underline'
                                     )}
                                       onClick={handleFileClick}
                                       title={t(`documentPanel.documentManager.docType.${docType}`)}
@@ -1584,7 +1654,9 @@ export default function DocumentManager() {
                                 </>
                               ) : (
                                 <div className="group relative overflow-visible tooltip-container">
-                                  <div className="flex items-center gap-1.5 truncate"
+                                  <div
+                                    className="flex cursor-pointer items-center gap-1.5 truncate text-primary hover:underline"
+                                    onClick={handleFileClick}
                                     title={t(`documentPanel.documentManager.docType.${docType}`)}
                                   >
                                     <DocTypeIcon type={docType} />
@@ -1634,6 +1706,15 @@ export default function DocumentManager() {
                               {hasCustomPrompts(doc.metadata) && (
                                 <MessageSquareText className="ml-1 h-4 w-4 text-violet-500" />
                               )}
+                              {isZeroChunk && (
+                                <span
+                                  className="ml-2 inline-flex shrink-0 items-center gap-1 rounded-md border border-red-300 bg-red-100 px-1.5 py-0.5 text-xs font-semibold text-red-700 dark:border-red-800 dark:bg-red-950/60 dark:text-red-300"
+                                  title={t('documentPanel.documentManager.zeroChunksTooltip')}
+                                >
+                                  <AlertTriangle className="h-3 w-3" />
+                                  {t('documentPanel.documentManager.zeroChunks')}
+                                </span>
+                              )}
                               <button
                                 className="ml-1 p-0.5 rounded hover:bg-muted shrink-0"
                                 onClick={(e) => {
@@ -1643,6 +1724,16 @@ export default function DocumentManager() {
                                 title={t('documentPanel.taskResult.viewResult')}
                               >
                                 <ClipboardList className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
+                              </button>
+                              <button
+                                className="ml-1 p-0.5 rounded hover:bg-muted shrink-0"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setHistoryDoc(doc)
+                                }}
+                                title={t('documentPanel.history.view')}
+                              >
+                                <HistoryIcon className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
                               </button>
 
                               {/* Tooltip rendering logic */}
@@ -1668,7 +1759,31 @@ export default function DocumentManager() {
                             </div>
                           </TableCell>
                           <TableCell>{doc.content_length ?? '-'}</TableCell>
-                          <TableCell>{doc.chunks_count ?? '-'}</TableCell>
+                          <TableCell>
+                            {isZeroChunk ? (
+                              <span
+                                className="inline-flex h-7 items-center gap-1 rounded-md border border-red-300 bg-red-100 px-2 text-sm font-semibold text-red-700 dark:border-red-800 dark:bg-red-950/60 dark:text-red-300"
+                                title={t('documentPanel.documentManager.zeroChunksTooltip')}
+                              >
+                                <AlertTriangle className="h-3.5 w-3.5" />
+                                0
+                              </span>
+                            ) : (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 px-2"
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  useSettingsStore.getState().setChunkDocumentFilter(doc.id)
+                                  useSettingsStore.getState().setCurrentTab('chunks')
+                                }}
+                                tooltip={t('documentPanel.documentManager.viewChunks')}
+                              >
+                                {doc.chunks_count ?? '-'}
+                              </Button>
+                            )}
+                          </TableCell>
                           <TableCell className="truncate">
                             {new Date(doc.created_at).toLocaleString()}
                           </TableCell>
@@ -1684,7 +1799,8 @@ export default function DocumentManager() {
                             />
                           </TableCell>
                         </TableRow>
-                      ))}
+                        )
+                      })}
                     </TableBody>
                   </Table>
                 </div>
@@ -1695,6 +1811,12 @@ export default function DocumentManager() {
       </CardContent>
 
       <TaskResultDialog task={selectedTaskForDoc} onClose={() => setSelectedTaskForDoc(null)} />
+      <DocumentPreviewDialog docId={previewDocId} onClose={() => setPreviewDocId(null)} />
+      <DocumentHistoryDialog
+        doc={historyDoc}
+        onClose={() => setHistoryDoc(null)}
+        onRestored={fetchDocuments}
+      />
 
       {boardView.data && (
         <BoardPostDialog isOpen={true} onClose={boardView.close} data={boardView.data} />

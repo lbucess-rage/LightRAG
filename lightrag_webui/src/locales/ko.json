@@ -8,6 +8,7 @@
   },
   "header": {
     "documents": "문서",
+    "chunks": "청크",
     "knowledgeGraph": "지식 그래프",
     "entityManagement": "엔티티-관계 탐색",
     "schema": "스키마",
@@ -16,12 +17,23 @@
     "projectRepository": "프로젝트 저장소",
     "prompts": "프롬프트",
     "workspaces": "워크스페이스",
+    "answers": "답변",
+    "answerSources": "소스",
+    "answerMatching": "매칭",
+    "structuredData": "구조화 데이터",
+    "answerTest": "테스트 콘솔",
+    "answerAnalytics": "분석",
+    "answerHelp": "도움말",
     "logout": "로그아웃",
     "frontendNeedsRebuild": "프론트엔드 재빌드 필요",
     "themeToggle": {
       "switchToLight": "라이트 테마로 전환",
       "switchToDark": "다크 테마로 전환"
     }
+  },
+  "chunkPanel": {
+    "title": "청크 관리",
+    "description": "문서별 청크 구조와 연결된 엔티티, 관계, 삭제 영향도를 확인하고 관리합니다."
   },
   "login": {
     "description": "시스템에 로그인하려면 계정과 비밀번호를 입력하세요",
@@ -43,7 +55,54 @@
     "save": "저장",
     "saving": "저장 중...",
     "saveFailed": "저장 실패",
-    "refresh": "새로고침"
+    "refresh": "새로고침",
+    "loading": "로딩 중...",
+    "add": "추가",
+    "close": "닫기",
+    "delete": "삭제",
+    "edit": "수정",
+    "confirm": "확인",
+    "yes": "예",
+    "no": "아니오"
+  },
+  "deletionImpact": {
+    "affectedTargets": "영향 대상",
+    "missingTargets": "찾을 수 없는 대상",
+    "executable": "실행 가능",
+    "previewOnly": "미리보기 전용",
+    "noAffectedTargets": "영향 대상이 없습니다.",
+    "summary": {
+      "documents": "문서",
+      "documents_affected": "영향 문서",
+      "chunks_to_delete": "삭제될 청크",
+      "entities_to_delete": "삭제될 엔티티",
+      "entities_to_update": "수정될 엔티티",
+      "relations_to_delete": "삭제될 관계",
+      "relations_to_update": "수정될 관계",
+      "orphan_chunks_to_delete": "삭제될 고아 청크",
+      "shared_chunks_to_scrub": "정리될 공유 청크",
+      "graph_only": "그래프만 삭제"
+    },
+    "meta": {
+      "doc": "문서",
+      "chunks": "청크",
+      "contentLength": "본문 길이",
+      "type": "타입",
+      "relations": "관계",
+      "orphanChunks": "고아 청크",
+      "sharedChunks": "공유 청크",
+      "relationChunks": "관계 청크"
+    },
+    "warnings": {
+      "cascadeSafeSharedChunks": "안전 삭제는 그래프, 벡터, 청크 매핑을 삭제하지만 공유 원본 청크는 고아 상태가 아닌 경우 유지됩니다.",
+      "cascadeFullDeletesChunks": "완전 삭제는 대상을 지탱하는 원본 청크까지 삭제하며, 해당 청크에서 파생된 다른 엔티티와 관계도 수정되거나 삭제될 수 있습니다.",
+      "forceDeleteChunks": "청크 강제 삭제는 청크 본문/벡터 데이터를 제거하고 그래프 참조를 갱신합니다. 원본 전체 문서 본문은 다시 작성되지 않습니다.",
+      "forceDeleteChunksWithTracking": "청크 강제 삭제는 청크 본문/벡터 데이터를 제거하고 그래프 참조를 갱신하며, 남은 청크가 없는 문서 추적 정보도 정리합니다.",
+      "documentPolicy": "문서 대상은 일반적으로 delete_documents 정책을 사용해야 합니다.",
+      "documentMayRemainZeroChunks": "문서 '{{docId}}'는 청크 삭제 후 0개 청크 상태로 남을 수 있습니다.",
+      "documentWillBeRemovedZeroChunks": "문서 '{{docId}}'는 선택된 청크가 전부 삭제되므로 문서 목록에서도 제거됩니다.",
+      "policyNotExecutable": "'{{policy}}' 정책은 '{{targetType}}' 대상 유형에서 실행할 수 없습니다."
+    }
   },
   "documentPanel": {
     "clearDocuments": {
@@ -89,6 +148,8 @@
       "deleteFileTooltip": "이 옵션을 선택하면 서버에 업로드된 파일도 함께 삭제됩니다",
       "deleteLLMCacheOption": "추출된 LLM 캐시도 함께 삭제",
       "deleteS3FileOption": "S3에 업로드된 파일도 함께 삭제",
+      "previewImpact": "삭제 영향도 미리보기",
+      "deleting": "삭제 중...",
       "success": "문서 삭제 파이프라인이 성공적으로 시작되었습니다",
       "failed": "문서 삭제 실패:\n{{message}}",
       "error": "문서 삭제 실패:\n{{error}}",
@@ -291,6 +352,40 @@
       "imageFailed": "이미지 업로드 실패: {{error}}",
       "duplicateSource": "이 소스의 문서가 이미 존재합니다"
     },
+    "preview": {
+      "loading": "문서 정보 불러오는 중...",
+      "tabs": {
+        "original": "원본",
+        "extracted": "추출 내용",
+        "metadata": "메타데이터"
+      },
+      "tokens": "토큰",
+      "summary": "요약",
+      "analysis": "분석",
+      "copyContent": "복사",
+      "copied": "복사됨",
+      "download": "다운로드",
+      "openOriginal": "원본 열기",
+      "unsupportedTitle": "브라우저에서 직접 열 수 없는 파일 형식입니다",
+      "unsupportedHint": "DOCX/XLSX/PPTX 같은 형식은 다운로드해서 본인 환경에서 열거나, '추출 내용' 탭에서 분석된 본문을 확인하세요.",
+      "goToExtracted": "추출 내용 탭으로",
+      "noChunks": "추출된 청크가 없습니다.",
+      "fields": {
+        "id": "문서 ID",
+        "status": "상태",
+        "filePath": "파일 경로",
+        "docName": "표시 이름",
+        "mime": "MIME 타입",
+        "size": "크기",
+        "chunksCount": "청크 수",
+        "trackId": "트랙 ID",
+        "createdAt": "생성 시각",
+        "updatedAt": "수정 시각",
+        "s3Url": "S3 URL",
+        "error": "오류",
+        "metadata": "메타데이터"
+      }
+    },
     "taskProgress": {
       "status": {
         "pending": "대기 중",
@@ -347,6 +442,13 @@
       "pipelineStatusTooltip": "문서 처리 파이프라인 상태 보기",
       "uploadedTitle": "업로드된 문서",
       "uploadedDescription": "업로드된 문서 목록과 상태입니다.",
+      "views": {
+        "documents": "문서",
+        "chunks": "청크"
+      },
+      "viewChunks": "이 문서의 청크 보기",
+      "zeroChunks": "청크 없음",
+      "zeroChunksTooltip": "청크가 0개인 문서입니다. 삭제 정합성 확인 또는 복구가 필요할 수 있습니다.",
       "emptyTitle": "문서 없음",
       "emptyDescription": "아직 업로드된 문서가 없습니다.",
       "columns": {
@@ -392,6 +494,110 @@
         "multimodal": "멀티모달"
       }
     },
+    "recovery": {
+      "button": "복구",
+      "tooltip": "최근 삭제 작업에서 문서와 그래프 데이터를 복구합니다",
+      "title": "삭제 복구",
+      "description": "삭제 실행 직전에 저장된 스냅샷을 선택해 영향도를 확인한 뒤 복구합니다.",
+      "recentJobs": "최근 삭제 작업",
+      "empty": "복구 가능한 삭제 작업이 없습니다.",
+      "restorable": "복구 가능",
+      "restored": "복구됨",
+      "restoreOptions": "복구 옵션",
+      "overwrite": "기존 데이터 덮어쓰기",
+      "overwriteDescription": "끄면 이미 존재하는 행과 그래프 항목은 건너뜁니다.",
+      "selectedJob": "선택한 작업",
+      "noSelection": "선택된 작업 없음",
+      "preview": "복구 미리보기",
+      "restore": "복구 실행",
+      "restoring": "복구 중...",
+      "alreadyRestored": "이미 복구된 삭제 작업입니다. 필요하면 다시 미리보기 후 재복구할 수 있습니다.",
+      "conflicts": "충돌 항목",
+      "warningAlreadyRestored": "이미 복구된 삭제 작업입니다. 필요하면 다시 복구할 수 있습니다.",
+      "warningConflicts": "이미 존재하는 스냅샷 행은 덮어쓰기를 켜지 않으면 건너뜁니다.",
+      "warningFilesNotRestored": "DB와 그래프 데이터는 복구되지만 삭제된 물리 파일이나 S3 객체는 다시 생성되지 않습니다.",
+      "loadFailed": "복구 작업 목록 조회 실패\n{{error}}",
+      "previewFailed": "복구 미리보기 실패\n{{error}}",
+      "restoreFailed": "복구 실패\n{{error}}",
+      "restoreSuccess": "삭제 스냅샷이 복구되었습니다"
+    },
+    "history": {
+      "view": "문서 히스토리 보기",
+      "title": "문서 작업 히스토리",
+      "description": "현재 상태, 지식화 태스크, 삭제 및 복구 작업을 문서 기준으로 모아 보여줍니다.",
+      "empty": "이 문서의 히스토리가 없습니다.",
+      "restorePreview": "복구 미리보기",
+      "loadFailed": "문서 히스토리 조회 실패\n{{error}}",
+      "sources": {
+        "doc_status": "문서 상태",
+        "task": "태스크",
+        "deletion": "삭제 스냅샷"
+      },
+      "status": {
+        "processed": "완료",
+        "completed": "완료",
+        "running": "진행 중",
+        "pending": "대기",
+        "failed": "실패",
+        "restored": "복구됨"
+      },
+      "operations": {
+        "document_current_state": "현재 문서 상태",
+        "document_ingest": "문서 지식화",
+        "document_scan": "문서 스캔",
+        "delete_document": "문서 삭제",
+        "delete_chunk": "청크 삭제",
+        "delete_entity": "엔티티 삭제",
+        "delete_relation": "관계 삭제",
+        "restore_deletion": "삭제 스냅샷 복구"
+      }
+    },
+    "chunkManager": {
+      "title": "청크 관리",
+      "searchPlaceholder": "청크 ID, 본문, 파일 경로 검색...",
+      "docFilterPlaceholder": "문서 ID로 필터",
+      "clearDocFilter": "문서 필터 해제",
+      "empty": "조건에 맞는 청크가 없습니다.",
+      "loadFailed": "청크 목록 조회 실패\n{{error}}",
+      "detailFailed": "청크 상세 조회 실패\n{{error}}",
+      "deletePreviewFailed": "청크 삭제 영향도 조회 실패\n{{error}}",
+      "deleteFailed": "청크 삭제 실패\n{{error}}",
+      "deleteSuccess": "청크가 삭제되었습니다",
+      "deleteTitle": "청크 삭제",
+      "confirmDelete": "청크 삭제",
+      "saveSuccess": "청크가 저장되었습니다",
+      "saveFailed": "청크 저장 실패\n{{error}}",
+      "invalidJson": "structured_content가 올바른 JSON이 아닙니다.",
+      "viewDetail": "청크 상세 보기",
+      "detailTitle": "청크 상세",
+      "content": "본문",
+      "structuredContent": "구조화 콘텐츠",
+      "document": "문서",
+      "entities": "연결 엔티티",
+      "relations": "연결 관계",
+      "noEntities": "연결된 엔티티가 없습니다.",
+      "noRelations": "연결된 관계가 없습니다.",
+      "columns": {
+        "chunk": "청크",
+        "document": "문서",
+        "order": "순서",
+        "type": "타입",
+        "preview": "본문 미리보기",
+        "links": "연결"
+      },
+      "types": {
+        "all": "전체",
+        "text": "텍스트",
+        "image": "이미지",
+        "table": "테이블",
+        "equation": "수식"
+      },
+      "meta": {
+        "tokens": "토큰",
+        "length": "길이",
+        "status": "상태"
+      }
+    },
     "pipelineStatus": {
       "title": "파이프라인 상태",
       "busy": "파이프라인 사용 중",
@@ -402,6 +608,8 @@
       "progress": "진행률",
       "unit": "배치",
       "pipelineMessages": "파이프라인 메시지",
+      "asyncTasks": "비동기 작업",
+      "noAsyncTasks": "표시할 비동기 작업이 없습니다",
       "cancelButton": "취소",
       "cancelTooltip": "파이프라인 처리 취소",
       "cancelConfirmTitle": "파이프라인 취소 확인",
@@ -801,14 +1009,22 @@
       "title": "삭제 범위 선택",
       "entityDescription": "'{{entityId}}' 엔티티를 삭제합니다. 삭제 범위를 선택하세요.",
       "relationDescription": "'{{sourceId}}' → '{{targetId}}' 관계를 삭제합니다. 삭제 범위를 선택하세요.",
-      "cascadeButton": "완전 삭제 (권장)",
-      "cascadeDescription": "그래프, 벡터 임베딩, 청크 매핑을 모두 삭제하고 관련 캐시를 초기화합니다.",
+      "cascadeButton": "안전 삭제 (권장)",
+      "cascadeDescription": "그래프, 벡터 임베딩, 청크 매핑을 삭제하고 공유 청크는 보존합니다.",
+      "safeButton": "안전 삭제 (권장)",
+      "safeDescription": "그래프, 벡터 임베딩, 청크 매핑을 삭제하고 공유 청크는 보존합니다.",
+      "fullButton": "완전 삭제",
+      "fullDescription": "대상을 지탱하는 원본 청크까지 삭제합니다. 같은 청크에서 파생된 다른 엔티티와 관계도 영향받을 수 있습니다.",
       "graphOnlyButton": "그래프만 삭제",
       "graphOnlyDescription": "그래프 노드/관계만 삭제합니다. 벡터 임베딩과 청크 매핑은 유지됩니다.",
-      "loadingRelated": "관련 엔티티 검색 중...",
-      "relatedFound": "유사한 이름의 엔티티 {{count}}건이 발견되었습니다. 함께 삭제할 항목을 선택하세요.",
-      "noRelated": "관련 엔티티가 없습니다. 선택한 엔티티만 삭제됩니다.",
+      "loadingRelated": "유사 엔티티 후보 검색 중...",
+      "relatedFound": "이름이 유사한 추가 삭제 후보 {{count}}건이 발견되었습니다. 함께 삭제할 항목을 선택하세요.",
+      "noRelated": "유사 엔티티 후보가 없습니다. 그래프 관계 영향도는 다음 미리보기에서 확인됩니다.",
+      "similarCandidateHelp": "이 목록은 그래프에 연결된 이웃 엔티티가 아니라 이름이 유사한 추가 삭제 후보입니다. 실제 관계, 청크, 캐시 영향도는 다음 미리보기 단계에서 계산됩니다.",
       "selectAll": "전체 선택",
+      "previewImpact": "영향도 미리보기",
+      "loadingPreview": "삭제 영향도 계산 중...",
+      "noPreview": "미리보기 정보가 없습니다.",
       "confirmDelete": "{{count}}건 삭제"
     },
     "tabs": {
@@ -1204,10 +1420,23 @@
     "updateError": "워크스페이스 수정 실패",
     "deleteError": "워크스페이스 삭제 실패",
     "copyError": "복사 실패",
+    "requiredFields": "필수 항목을 모두 입력하세요",
+    "createDescription": "데이터 격리를 위한 새 워크스페이스를 생성합니다.",
+    "editDescription": "워크스페이스 정보를 수정합니다.",
+    "mode": "워크스페이스 유형",
+    "modeKms": "KMS",
+    "modeKmsDesc": "기존 문서, 그래프, 스키마, RAG 검색 흐름을 사용합니다.",
+    "modeAnswerCatalog": "FAQ / 고정 답변",
+    "modeAnswerCatalogDesc": "승인 답변, 매칭 데이터, 소스, 조회 분석을 관리합니다.",
+    "modeHybrid": "하이브리드",
+    "modeHybridDesc": "고정 답변 조회와 기존 KMS/RAG 흐름을 함께 사용합니다.",
     "statistics": "통계",
     "documents": "문서",
     "entities": "엔티티",
     "relations": "관계",
+    "answerItems": "답변",
+    "publishedAnswers": "게시됨",
+    "resolveEvents": "조회",
     "refreshStats": "통계 새로고침",
     "lastUpdated": "마지막 업데이트"
   },
@@ -1224,5 +1453,273 @@
     "statsRefreshed": "통계가 새로고침되었습니다",
     "statsRefreshFailed": "통계 새로고침 실패",
     "setDefaultFailed": "기본 워크스페이스 설정 실패"
+  },
+  "answerCatalog": {
+    "errors": {
+      "workspaceModeRequired": "이 기능은 FAQ / 고정 답변 또는 하이브리드 워크스페이스에서만 사용할 수 있습니다."
+    },
+    "status": {
+      "draft": "초안",
+      "published": "게시됨",
+      "archived": "보관됨",
+      "expired": "만료됨"
+    },
+    "display": {
+      "summary": "요약",
+      "full": "원문",
+      "both": "요약+원문"
+    },
+    "guidance": {
+      "keyword": "키워드",
+      "question": "질문",
+      "synonym": "동의어",
+      "negative_keyword": "제외어",
+      "note": "메모"
+    },
+    "guidanceTypes": {
+      "keyword": "키워드",
+      "question": "질문",
+      "synonym": "동의어",
+      "negative_keyword": "제외어",
+      "note": "메모"
+    },
+    "help": {
+      "openHelp": "도움말",
+      "title": "FAQ 고정답변 도움말",
+      "description": "운영자가 고정 답변을 만들고, 매칭 기준을 관리하고, 실제 질문에서 어떤 답변이 선택되는지 검증하는 흐름을 단계별로 안내합니다.",
+      "tutorial": "단계별 튜터",
+      "nextStep": "다음 단계",
+      "screenGuide": "화면별 캡처형 안내",
+      "replaceable": "나중에 실제 스크린샷으로 교체 가능",
+      "openScreen": "화면 열기",
+      "glossary": "용어 설명",
+      "scoreReading": "매칭 점수 읽는 법",
+      "steps": {
+        "create": {
+          "title": "1. 답변 초안 만들기",
+          "description": "직접 답변을 만들거나 소스 위저드에서 원자료를 미리보기로 분석한 뒤 답변 초안으로 변환합니다. 초안은 바로 서비스되지 않습니다.",
+          "action": "소스 탭 열기"
+        },
+        "review": {
+          "title": "2. 답변 검토 및 정책 설정",
+          "description": "본문, 승인 요약, 표시 방식, 우선순위, 유효기간, 태그를 확인합니다. 잘못 저장해도 리비전에서 복구할 수 있습니다.",
+          "action": "답변 탭 열기"
+        },
+        "guidance": {
+          "title": "3. 매칭 규칙과 제외어 정리",
+          "description": "매칭 관리 화면에서 대표 질문과 키워드를 추가하고, 잘못 연결될 수 있는 질문은 제외어로 막습니다. 빠른 테스트로 후보 점수를 즉시 확인합니다.",
+          "action": "매칭 탭 열기"
+        },
+        "structured": {
+          "title": "4. 구조화 데이터 확인",
+          "description": "JSON, CSV, DB/NoSQL 스냅샷에서 감지된 필드와 샘플 행을 확인하고, Safe Query로 조건 검색을 미리보기/실행합니다.",
+          "action": "구조화 데이터 열기"
+        },
+        "test": {
+          "title": "5. 테스트 콘솔에서 검증",
+          "description": "실제 사용자 질문을 넣어 선택된 답변, 후보 점수, 점수 구성요소를 확인합니다. 최소 점수 기준도 함께 조정합니다.",
+          "action": "테스트 콘솔 열기"
+        },
+        "publish": {
+          "title": "6. 게시 후 운영 분석",
+          "description": "충분히 검증된 답변만 게시합니다. 운영 중에는 조회 이벤트, 미매칭 질문, 평균 지연, 상위 선택 답변을 보고 가이던스를 보강합니다.",
+          "action": "분석 탭 열기"
+        }
+      }
+    },
+    "library": {
+      "title": "답변 라이브러리",
+      "description": "승인된 고정 답변, 버전, 유효기간, 매칭 가이던스를 관리합니다.",
+      "published": "답변이 게시되었습니다.",
+      "archived": "답변이 보관되었습니다.",
+      "created": "답변이 생성되었습니다.",
+      "saved": "답변이 저장되었습니다.",
+      "required": "제목과 본문은 필수입니다.",
+      "total": "전체",
+      "draft": "초안",
+      "publishedCount": "게시됨",
+      "archivedCount": "보관됨",
+      "search": "답변 검색...",
+      "empty": "등록된 답변이 없습니다",
+      "emptyDesc": "이 워크스페이스의 첫 번째 고정 답변을 생성하세요.",
+      "publish": "게시",
+      "archive": "보관",
+      "create": "답변 생성",
+      "createTitle": "고정 답변 생성",
+      "createDesc": "먼저 초안 답변을 만들고 검토 후 게시하세요.",
+      "detailTitle": "답변 상세",
+      "contentSection": "본문",
+      "guidanceSection": "가이던스",
+      "revisionsSection": "리비전",
+      "answerTitle": "제목",
+      "status": "상태",
+      "displayPolicy": "표시 방식",
+      "priority": "우선순위",
+      "contentFormat": "형식",
+      "validFrom": "유효 시작",
+      "validUntil": "유효 종료",
+      "summary": "승인 요약",
+      "body": "본문",
+      "tags": "태그",
+      "tagsPlaceholder": "결제, 환불, 멤버십",
+      "guidance": "가이드 질문 / 키워드",
+      "guidancePlaceholder": "환불은 어떻게 하나요?\n결제 취소\n환불 정책",
+      "guidanceType": "유형",
+      "guidanceText": "가이던스 문구",
+      "weight": "가중치",
+      "guidanceAdded": "가이던스가 추가되었습니다.",
+      "guidanceDeleted": "가이던스가 삭제되었습니다.",
+      "noGuidance": "등록된 가이던스가 없습니다.",
+      "revisionDesc": "저장할 때마다 복구 가능한 답변 스냅샷이 생성됩니다.",
+      "noRevisions": "기록된 리비전이 없습니다.",
+      "restoreRevision": "복구",
+      "revisionRestored": "리비전이 복구되었습니다."
+    },
+    "test": {
+      "title": "답변 테스트 콘솔",
+      "description": "사용자 질문을 실행하고 고정 답변 후보, 점수, 선택된 답변을 확인합니다.",
+      "queryRequired": "테스트할 질문을 입력하세요.",
+      "query": "사용자 질문",
+      "placeholder": "예: 환불은 어떻게 하나요?",
+      "topK": "Top K",
+      "strategy": "전략",
+      "strategyBalanced": "균형",
+      "strategyFast": "빠름",
+      "minScore": "최소 점수",
+      "includeDrafts": "초안 답변 포함",
+      "run": "조회",
+      "selected": "선택된 답변",
+      "candidates": "후보",
+      "noCandidates": "후보를 찾지 못했습니다.",
+      "trace": "추적"
+    },
+    "placeholder": {
+      "pending": "워크스페이스 UX를 분리해 두기 위한 영역입니다. 다음 단계에서 구현을 이어갑니다."
+    },
+    "sources": {
+      "title": "답변 소스",
+      "description": "텍스트, HTML, 마크다운, URL, DB, NoSQL, 문서 소스를 연결해 답변 후보를 생성합니다.",
+      "urlHelp": "URL은 출처 메타데이터로 저장됩니다. 검토 가능한 답변 초안을 만들려면 관련 내용을 붙여넣으세요.",
+      "fileHelp": "텍스트, 마크다운, HTML 파일을 로컬에서 읽어 답변 초안으로 변환할 수 있습니다.",
+      "structuredHelp": "테이블 행, JSON 레코드, DB 추출값, NoSQL 문서 스냅샷을 붙여넣으세요. 구조화 프로파일링은 다음 단계에서 확장합니다.",
+      "textHelp": "소스 자료를 붙여넣고 검토용 고정 답변 초안을 생성합니다.",
+      "sourceSetup": "소스 설정",
+      "sourceType": "소스 유형",
+      "sourceUri": "소스 URI",
+      "file": "파일",
+      "materialize": "초안 생성",
+      "sourceBody": "소스 내용 / 답변 본문",
+      "created": "소스에서 답변 초안이 생성되었습니다.",
+      "reviewHint": "초안은 게시 전 검토할 수 있도록 미게시 상태로 생성됩니다.",
+      "createDraft": "초안 생성",
+      "preview": "소스 미리보기",
+      "bodyRequired": "미리보기 전에 소스 내용을 입력하세요.",
+      "previewReady": "검토할 소스 미리보기가 준비되었습니다.",
+      "previewTitle": "답변 후보 검토",
+      "previewHint": "초안을 생성하기 전에 소스 미리보기로 프로파일링, 후보 키워드, 구조화 필드를 확인하세요.",
+      "characters": "문자 수",
+      "lines": "라인 수",
+      "tokens": "토큰",
+      "rows": "행 수",
+      "detectedHeadings": "감지된 제목",
+      "detectedKeywords": "감지된 키워드",
+      "structuredProfile": "구조화 프로파일",
+      "guidanceCandidates": "가이던스 후보",
+      "types": {
+        "plain": "일반 텍스트",
+        "markdown": "마크다운",
+        "html": "HTML",
+        "url": "URL",
+        "file": "텍스트 파일",
+        "structured": "구조화 스냅샷"
+      },
+      "items": {
+        "connectorRegistry": "커넥터 레지스트리",
+        "snapshotHistory": "소스 스냅샷 이력",
+        "profilingPreview": "프로파일링 및 매핑 미리보기",
+        "draftMaterialization": "답변 초안 생성"
+      }
+    },
+    "matching": {
+      "title": "매칭 설정",
+      "description": "키워드, 대표 질문, 제외어, KG 가이던스, 선택적 LLM 제안을 관리합니다.",
+      "answerCount": "답변",
+      "guidanceCount": "가이던스",
+      "questionCount": "질문",
+      "negativeCount": "제외어",
+      "addGuidance": "매칭 가이던스 추가",
+      "answer": "답변",
+      "selectAnswer": "답변 선택",
+      "guidancePlaceholder": "예: 환불 기한, 주문 취소 방법",
+      "add": "가이던스 추가",
+      "addRequired": "답변을 선택하고 가이던스 문구를 입력하세요.",
+      "quickTest": "빠른 매칭 테스트",
+      "search": "답변 또는 가이던스 검색...",
+      "allTypes": "모든 유형",
+      "onlyUnguided": "가이던스 없음",
+      "unguidedAnswers": "가이던스가 없는 답변",
+      "noUnguided": "가이던스가 없는 답변이 없습니다.",
+      "rule": "규칙",
+      "type": "유형",
+      "items": {
+        "guidanceCrud": "가이던스 CRUD",
+        "weighting": "키워드/질문 가중치",
+        "scoreInspection": "후보 점수 확인",
+        "llmSuggestions": "LLM 제안 흐름"
+      }
+    },
+    "structured": {
+      "title": "구조화 데이터",
+      "description": "DB, NoSQL, 표 데이터를 프로파일링하고 결정적 조회를 위한 안전한 의미 뷰를 제공합니다.",
+      "profiledAnswers": "프로파일 답변",
+      "totalColumns": "감지 필드",
+      "tableRows": "확인 행 수",
+      "search": "답변 또는 필드 검색...",
+      "structuredOnly": "구조화만",
+      "fieldCloud": "감지된 필드 모음",
+      "empty": "구조화 프로파일을 찾지 못했습니다. 먼저 구조화 소스로 초안을 생성하세요.",
+      "safeQuery": "안전 쿼리 미리보기 / 실행",
+      "dataset": "데이터셋",
+      "selectDataset": "데이터셋 선택",
+      "selectDatasetRequired": "먼저 구조화 데이터셋을 선택하세요.",
+      "field": "필드",
+      "operator": "연산자",
+      "value": "값",
+      "limit": "제한",
+      "previewSql": "SQL 미리보기",
+      "execute": "실행",
+      "queryResult": "쿼리 결과",
+      "queryHint": "데이터셋을 선택하고 조건을 입력한 뒤 안전 쿼리를 미리보거나 실행하세요.",
+      "previewOnlyHint": "미리보기 모드에서는 안전 SQL 형태만 생성합니다.",
+      "noRows": "조건에 맞는 행이 없습니다.",
+      "operators": {
+        "contains": "포함",
+        "equals": "같음",
+        "starts_with": "시작",
+        "ends_with": "끝"
+      },
+      "items": {
+        "datasetProfiling": "데이터셋 프로파일링",
+        "fieldMapping": "필드 역할 매핑",
+        "semanticViews": "의미 뷰 생성",
+        "safeSql": "안전 SQL 미리보기/실행"
+      }
+    },
+    "analytics": {
+      "title": "답변 분석",
+      "description": "답변 사용량, 미매칭 질문, 모호한 매칭, 피드백, 오래된 답변 후보를 검토합니다.",
+      "resolveEvents": "조회 이벤트",
+      "noMatch": "미매칭",
+      "avgLatency": "평균 지연",
+      "search": "질문 또는 답변 검색...",
+      "topAnswers": "상위 선택 답변",
+      "noEvents": "기록된 이벤트가 없습니다.",
+      "items": {
+        "resolveEvents": "조회 이벤트",
+        "topQueries": "상위 질문",
+        "noMatchReview": "미매칭 검토",
+        "feedbackLoop": "피드백 루프"
+      }
+    }
   }
 }

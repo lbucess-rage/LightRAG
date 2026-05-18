@@ -1,0 +1,4 @@
+interface:
+  display_name: "Prompt Admin Ops"
+  short_description: "내부 프롬프트 조회, 수정, 초기화 흐름을 안전하게 점검합니다."
+  default_prompt: "LightRAG 내부 프롬프트 관리 기능과 워크스페이스별 적용 상태를 분석해줘."

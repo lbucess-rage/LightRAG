@@ -8,16 +8,28 @@
   },
   "header": {
     "documents": "Documents",
+    "chunks": "Chunks",
     "knowledgeGraph": "Graphe de connaissances",
     "retrieval": "Récupération",
     "api": "API",
     "projectRepository": "Référentiel du projet",
+    "answers": "Réponses",
+    "answerSources": "Sources",
+    "answerMatching": "Correspondance",
+    "structuredData": "Données structurées",
+    "answerTest": "Console de test",
+    "answerAnalytics": "Analytique",
+    "answerHelp": "Aide",
     "logout": "Déconnexion",
     "frontendNeedsRebuild": "Le frontend nécessite une reconstruction",
     "themeToggle": {
       "switchToLight": "Passer au thème clair",
       "switchToDark": "Passer au thème sombre"
     }
+  },
+  "chunkPanel": {
+    "title": "Gestion des chunks",
+    "description": "Inspectez et gérez la structure des chunks, les entités liées, les relations et l'impact de suppression."
   },
   "login": {
     "description": "Veuillez entrer votre compte et mot de passe pour vous connecter au système",
@@ -37,7 +49,12 @@
     "cancel": "Annuler",
     "save": "Sauvegarder",
     "saving": "Sauvegarde en cours...",
-    "saveFailed": "Échec de la sauvegarde"
+    "saveFailed": "Échec de la sauvegarde",
+    "refresh": "Actualiser",
+    "add": "Ajouter",
+    "close": "Fermer",
+    "delete": "Supprimer",
+    "edit": "Modifier"
   },
   "documentPanel": {
     "clearDocuments": {
@@ -165,6 +182,8 @@
       "progress": "Progrès",
       "unit": "Lot",
       "pipelineMessages": "Messages de Pipeline",
+      "asyncTasks": "Tâches asynchrones",
+      "noAsyncTasks": "Aucune tâche asynchrone à afficher",
       "cancelButton": "Annuler",
       "cancelTooltip": "Annuler le traitement du pipeline",
       "cancelConfirmTitle": "Confirmer l'Annulation du Pipeline",
@@ -468,5 +487,178 @@
     "prevPage": "Page précédente",
     "nextPage": "Page suivante",
     "lastPage": "Dernière page"
+  },
+  "workspace": {
+    "requiredFields": "Veuillez renseigner tous les champs obligatoires",
+    "createDescription": "Créez un nouvel espace de travail pour isoler les données.",
+    "editDescription": "Mettez à jour les informations de l'espace de travail.",
+    "mode": "Type d'espace de travail",
+    "modeKms": "KMS",
+    "modeKmsDesc": "Utilise le flux existant de documents, graphe, schéma et recherche RAG.",
+    "modeAnswerCatalog": "FAQ / Réponse fixe",
+    "modeAnswerCatalogDesc": "Gérez les réponses approuvées, les données de correspondance, les sources et les analyses de recherche.",
+    "modeHybrid": "Hybride",
+    "modeHybridDesc": "Utilise la recherche de réponses fixes avec le flux KMS/RAG existant.",
+    "answerItems": "Réponses",
+    "publishedAnswers": "Publiées",
+    "resolveEvents": "Recherches"
+  },
+  "answerCatalog": {
+    "errors": {
+      "workspaceModeRequired": "Cette fonctionnalité est disponible uniquement dans les espaces FAQ / Réponse fixe ou hybrides."
+    },
+    "status": {
+      "draft": "Brouillon",
+      "published": "Publié",
+      "archived": "Archivé",
+      "expired": "Expiré"
+    },
+    "display": {
+      "summary": "Résumé",
+      "full": "Complet",
+      "both": "Résumé + complet"
+    },
+    "guidance": {
+      "keyword": "Mot-clé",
+      "question": "Question",
+      "synonym": "Synonyme",
+      "negative_keyword": "Négatif",
+      "note": "Note"
+    },
+    "help": {
+      "openHelp": "Aide",
+      "title": "Aide FAQ réponses fixes",
+      "description": "Guide pas à pas pour créer des réponses fixes, gérer les règles de correspondance et vérifier quelle réponse est sélectionnée."
+    },
+    "library": {
+      "title": "Bibliothèque de réponses",
+      "description": "Gérez les réponses fixes approuvées, les versions, la validité et les indications de correspondance.",
+      "published": "Réponse publiée.",
+      "archived": "Réponse archivée.",
+      "created": "Réponse créée.",
+      "saved": "Réponse sauvegardée.",
+      "required": "Le titre et le contenu sont obligatoires.",
+      "total": "Total",
+      "draft": "Brouillon",
+      "publishedCount": "Publié",
+      "archivedCount": "Archivé",
+      "search": "Rechercher des réponses...",
+      "empty": "Aucune réponse pour le moment",
+      "emptyDesc": "Créez la première réponse fixe pour cet espace de travail.",
+      "publish": "Publier",
+      "archive": "Archiver",
+      "create": "Créer une réponse",
+      "createTitle": "Créer une réponse fixe",
+      "createDesc": "Créez d'abord une réponse brouillon. Publiez-la après révision.",
+      "detailTitle": "Détails de la réponse",
+      "contentSection": "Contenu",
+      "guidanceSection": "Guidage",
+      "revisionsSection": "Révisions",
+      "answerTitle": "Titre",
+      "status": "Statut",
+      "displayPolicy": "Politique d'affichage",
+      "priority": "Priorité",
+      "contentFormat": "Format",
+      "validFrom": "Valide à partir de",
+      "validUntil": "Valide jusqu'à",
+      "summary": "Résumé approuvé",
+      "body": "Contenu",
+      "tags": "Tags",
+      "tagsPlaceholder": "facturation, remboursement, abonnement",
+      "guidance": "Questions / mots-clés de guidage",
+      "guidancePlaceholder": "Comment obtenir un remboursement ?\nAnnuler le paiement\npolitique de remboursement",
+      "guidanceType": "Type",
+      "guidanceText": "Texte de guidage",
+      "weight": "Poids",
+      "guidanceAdded": "Guidage ajouté.",
+      "guidanceDeleted": "Guidage supprimé.",
+      "noGuidance": "Aucun guidage enregistré.",
+      "revisionDesc": "Chaque sauvegarde crée un instantané restaurable de la réponse.",
+      "noRevisions": "Aucune révision enregistrée.",
+      "restoreRevision": "Restaurer",
+      "revisionRestored": "Révision restaurée."
+    },
+    "test": {
+      "title": "Console de test des réponses",
+      "description": "Exécutez une requête utilisateur et inspectez les candidats, les scores et la réponse sélectionnée.",
+      "queryRequired": "Saisissez une requête à tester.",
+      "query": "Requête utilisateur",
+      "placeholder": "Exemple : comment obtenir un remboursement ?",
+      "topK": "Top K",
+      "strategy": "Stratégie",
+      "strategyBalanced": "Équilibrée",
+      "strategyFast": "Rapide",
+      "minScore": "Score minimum",
+      "includeDrafts": "Inclure les brouillons",
+      "run": "Résoudre",
+      "selected": "Réponse sélectionnée",
+      "candidates": "Candidats",
+      "noCandidates": "Aucun candidat trouvé.",
+      "trace": "Trace"
+    },
+    "placeholder": {
+      "pending": "Cette zone est réservée afin de séparer l'UX de l'espace de travail pendant que l'implémentation continue à la phase suivante."
+    },
+    "sources": {
+      "title": "Sources de réponses",
+      "description": "Connectez des sources texte, HTML, Markdown, URL, DB, NoSQL et documentaires pour générer des réponses candidates.",
+      "urlHelp": "L'URL est stockée comme métadonnée source. Collez le contenu pertinent pour créer un brouillon de réponse révisable.",
+      "fileHelp": "Les fichiers texte, Markdown et HTML peuvent être lus localement et convertis en brouillon de réponse.",
+      "structuredHelp": "Collez une ligne de tableau, un enregistrement JSON, un extrait DB ou un instantané NoSQL. Le profilage structuré sera étendu plus tard.",
+      "textHelp": "Collez le matériau source et créez un brouillon de réponse fixe à réviser.",
+      "sourceSetup": "Configuration de source",
+      "sourceType": "Type de source",
+      "sourceUri": "URI source",
+      "file": "Fichier",
+      "materialize": "Matérialiser le brouillon",
+      "sourceBody": "Contenu source / réponse",
+      "created": "Brouillon de réponse créé depuis la source.",
+      "reviewHint": "Les brouillons sont créés non publiés afin d'être révisés avant utilisation.",
+      "createDraft": "Créer un brouillon",
+      "types": {
+        "plain": "Texte brut",
+        "markdown": "Markdown",
+        "html": "HTML",
+        "url": "URL",
+        "file": "Fichier texte",
+        "structured": "Instantané structuré"
+      },
+      "items": {
+        "connectorRegistry": "Registre des connecteurs",
+        "snapshotHistory": "Historique des instantanés de source",
+        "profilingPreview": "Aperçu du profilage et du mapping",
+        "draftMaterialization": "Matérialisation du brouillon de réponse"
+      }
+    },
+    "matching": {
+      "title": "Configuration de correspondance",
+      "description": "Gérez les mots-clés, questions canoniques, termes négatifs, indications KG et suggestions LLM optionnelles.",
+      "items": {
+        "guidanceCrud": "CRUD des indications",
+        "weighting": "Pondération mots-clés/questions",
+        "scoreInspection": "Inspection des scores candidats",
+        "llmSuggestions": "Flux de suggestions LLM"
+      }
+    },
+    "structured": {
+      "title": "Données structurées",
+      "description": "Profilez les sources DB/NoSQL/tableaux et exposez des vues sémantiques sûres pour une recherche déterministe.",
+      "items": {
+        "datasetProfiling": "Profilage de jeu de données",
+        "fieldMapping": "Mapping des rôles de champs",
+        "semanticViews": "Matérialisation des vues sémantiques",
+        "safeSql": "Aperçu/exécution SQL sécurisés"
+      }
+    },
+    "analytics": {
+      "title": "Analyse des réponses",
+      "description": "Examinez l'utilisation des réponses, les requêtes sans résultat, les correspondances ambiguës, les retours et les réponses obsolètes.",
+      "items": {
+        "resolveEvents": "Événements de résolution",
+        "topQueries": "Requêtes principales",
+        "noMatchReview": "Revue des sans-résultat",
+        "feedbackLoop": "Boucle de retour"
+      }
+    }
   }
 }

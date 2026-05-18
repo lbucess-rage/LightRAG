@@ -1,0 +1,4 @@
+interface:
+  display_name: "Workspace Admin Ops"
+  short_description: "워크스페이스 생성, 수정, 삭제, 복사, 통계 동기화 기능을 점검합니다."
+  default_prompt: "LightRAG 워크스페이스 관리 기능과 운영 리스크를 분석해줘."

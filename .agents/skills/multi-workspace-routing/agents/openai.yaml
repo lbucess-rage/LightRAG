@@ -1,0 +1,4 @@
+interface:
+  display_name: "Multi Workspace Routing"
+  short_description: "LightRAG 워크스페이스 라우팅과 격리 동작을 점검합니다."
+  default_prompt: "LightRAG 멀티 워크스페이스 라우팅과 데이터 격리 상태를 분석해줘."

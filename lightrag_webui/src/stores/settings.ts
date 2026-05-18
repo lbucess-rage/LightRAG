@@ -3,11 +3,10 @@ import { persist, createJSONStorage } from 'zustand/middleware'
 import { createSelectors } from '@/lib/utils'
 import { defaultQueryLabel } from '@/lib/constants'
 import { Message, QueryRequest } from '@/api/lightrag'
+import { AppTab } from '@/lib/workspaceMode'
 
 type Theme = 'dark' | 'light' | 'system'
 type Language = 'en' | 'zh' | 'fr' | 'ar' | 'zh_TW'
-type Tab = 'documents' | 'knowledge-graph' | 'entity-management' | 'schema' | 'retrieval' | 'api' | 'prompts' | 'workspaces'
-
 interface SettingsState {
   // Document manager settings
   showFileName: boolean
@@ -15,6 +14,9 @@ interface SettingsState {
 
   documentsPageSize: number
   setDocumentsPageSize: (size: number) => void
+
+  chunkDocumentFilter: string | null
+  setChunkDocumentFilter: (docId: string | null) => void
 
   // User prompt history
   userPromptHistory: string[]
@@ -79,8 +81,8 @@ interface SettingsState {
   enableHealthCheck: boolean
   setEnableHealthCheck: (enable: boolean) => void
 
-  currentTab: Tab
-  setCurrentTab: (tab: Tab) => void
+  currentTab: AppTab
+  setCurrentTab: (tab: AppTab) => void
 
   // Search label dropdown refresh trigger (non-persistent, runtime only)
   searchLabelDropdownRefreshTrigger: number
@@ -91,7 +93,7 @@ const useSettingsStoreBase = create<SettingsState>()(
   persist(
     (set) => ({
       theme: 'system',
-      language: 'en',
+      language: 'ko',
       showPropertyPanel: true,
       showNodeSearchBar: true,
       showLegend: false,
@@ -120,6 +122,7 @@ const useSettingsStoreBase = create<SettingsState>()(
       currentTab: 'documents',
       showFileName: true,
       documentsPageSize: 10,
+      chunkDocumentFilter: null,
 
       retrievalHistory: [],
       showQuerySettings: true,
@@ -209,6 +212,7 @@ const useSettingsStoreBase = create<SettingsState>()(
       setShowQuerySettings: (show: boolean) => set({ showQuerySettings: show }),
       setShowLegend: (show: boolean) => set({ showLegend: show }),
       setDocumentsPageSize: (size: number) => set({ documentsPageSize: size }),
+      setChunkDocumentFilter: (chunkDocumentFilter: string | null) => set({ chunkDocumentFilter }),
 
       // User prompt history methods
       addUserPromptToHistory: (prompt: string) => {
@@ -247,7 +251,7 @@ const useSettingsStoreBase = create<SettingsState>()(
     {
       name: 'settings-storage',
       storage: createJSONStorage(() => localStorage),
-      version: 24,
+      version: 25,
       migrate: (state: any, version: number) => {
         if (version < 2) {
           state.showEdgeLabel = false
@@ -372,6 +376,9 @@ const useSettingsStoreBase = create<SettingsState>()(
           if (state.querySettings) {
             state.querySettings.highlight_entities ??= false
           }
+        }
+        if (version < 25) {
+          state.chunkDocumentFilter = null
         }
         return state
       }

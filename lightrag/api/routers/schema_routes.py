@@ -11,6 +11,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Request
 from pydantic import BaseModel, Field
 
+from lightrag.api.utils_api import decode_workspace_header
 from lightrag.schema import (
     DomainSchema,
     SchemaDiscoveryResult,
@@ -1045,7 +1046,7 @@ _schema_cache_loaded: set[str] = set()  # 이미 DB에서 로드한 워크스페
 
 def _get_workspace_from_request(request: Request) -> str:
     """Request 헤더에서 워크스페이스 ID 추출"""
-    workspace = request.headers.get("LIGHTRAG-WORKSPACE", "").strip()
+    workspace = decode_workspace_header(request.headers.get("LIGHTRAG-WORKSPACE", ""))
     if workspace:
         return workspace
     # 서버 기본 워크스페이스 사용 (보통 "base")

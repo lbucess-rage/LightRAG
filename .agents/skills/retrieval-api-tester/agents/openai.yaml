@@ -1,0 +1,4 @@
+interface:
+  display_name: "Retrieval API Tester"
+  short_description: "검색 API와 Retrieval UI의 쿼리 모드, 스트리밍, 레퍼런스를 점검합니다."
+  default_prompt: "LightRAG 검색 API와 Retrieval UI를 테스트하고 결과를 분석해줘."

@@ -18,8 +18,8 @@ export default function ApiSite() {
   })
 
   useEffect(() => {
-    if (!iframeLoaded) setIframeLoaded(true)
-  }, [iframeLoaded])
+    if (isApiTabVisible && !iframeLoaded) setIframeLoaded(true)
+  }, [iframeLoaded, isApiTabVisible])
 
   useEffect(() => {
     iframeRef.current?.contentWindow?.postMessage(
@@ -30,7 +30,7 @@ export default function ApiSite() {
 
   return (
     <div className={`size-full ${isApiTabVisible ? '' : 'hidden'}`}>
-      {iframeLoaded ? (
+      {isApiTabVisible && iframeLoaded ? (
         <iframe
           ref={iframeRef}
           src={docsUrl}
@@ -38,14 +38,14 @@ export default function ApiSite() {
           style={{ width: '100%', height: '100%', border: 'none' }}
           key="api-docs-iframe"
         />
-      ) : (
+      ) : isApiTabVisible ? (
         <div className="flex h-full w-full items-center justify-center bg-background">
           <div className="text-center">
             <div className="mb-2 h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
             <p>{t('apiSite.loading')}</p>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   )
 }

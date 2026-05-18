@@ -2,6 +2,7 @@ import axios from 'axios'
 import { backendBaseUrl } from '@/lib/constants'
 import { errorMessage } from '@/lib/utils'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { encodeWorkspaceHeader } from '@/lib/workspaceHeader'
 
 // =============================================================================
 // Types
@@ -94,8 +95,9 @@ const schemaApi = axios.create({
 // Add workspace header interceptor
 schemaApi.interceptors.request.use((config) => {
   const workspaceId = useWorkspaceStore.getState().currentWorkspaceId
-  if (workspaceId) {
-    config.headers['LIGHTRAG-WORKSPACE'] = workspaceId
+  const workspaceHeader = encodeWorkspaceHeader(workspaceId)
+  if (workspaceHeader) {
+    config.headers['LIGHTRAG-WORKSPACE'] = workspaceHeader
   }
   return config
 })

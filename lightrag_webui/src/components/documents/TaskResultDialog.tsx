@@ -242,8 +242,16 @@ export default function TaskResultDialog({ task, onClose }: TaskResultDialogProp
   const successCount = result.success_count ?? results.filter(r => r.success !== false).length
   const errorCount = result.error_count ?? errors.length
 
-  const taskUrl = displayTask.metadata?.url || displayTask.metadata?.file_name || displayTask.metadata?.file_path_label || ''
-  const taskType = displayTask.task_type === 'url_ingest' ? 'URL' : displayTask.task_type === 'multimodal_process' ? 'Multimodal' : displayTask.task_type
+  const taskUrl = displayTask.metadata?.url || displayTask.metadata?.file_name || displayTask.metadata?.file_path_label || displayTask.metadata?.track_id || ''
+  const taskType = displayTask.task_type === 'url_ingest'
+    ? 'URL'
+    : displayTask.task_type === 'multimodal_process'
+      ? 'Multimodal'
+      : displayTask.task_type === 'document_ingest'
+        ? 'Document'
+        : displayTask.task_type === 'document_scan'
+          ? 'Scan'
+          : displayTask.task_type
   const duration = displayTask.updated_at && displayTask.created_at
     ? displayTask.updated_at - displayTask.created_at
     : null

@@ -8,16 +8,28 @@
   },
   "header": {
     "documents": "文档",
+    "chunks": "分块",
     "knowledgeGraph": "知识图谱",
     "retrieval": "检索",
     "api": "API",
     "projectRepository": "项目仓库",
+    "answers": "答案",
+    "answerSources": "数据源",
+    "answerMatching": "匹配",
+    "structuredData": "结构化数据",
+    "answerTest": "测试控制台",
+    "answerAnalytics": "分析",
+    "answerHelp": "帮助",
     "logout": "退出登录",
     "frontendNeedsRebuild": "前端代码需重新构建",
     "themeToggle": {
       "switchToLight": "切换到浅色主题",
       "switchToDark": "切换到深色主题"
     }
+  },
+  "chunkPanel": {
+    "title": "分块管理",
+    "description": "查看和管理文档分块结构、关联实体、关系和删除影响。"
   },
   "login": {
     "description": "请输入您的账号和密码登录系统",
@@ -37,7 +49,12 @@
     "cancel": "取消",
     "save": "保存",
     "saving": "保存中...",
-    "saveFailed": "保存失败"
+    "saveFailed": "保存失败",
+    "refresh": "刷新",
+    "add": "添加",
+    "close": "关闭",
+    "delete": "删除",
+    "edit": "编辑"
   },
   "documentPanel": {
     "clearDocuments": {
@@ -165,6 +182,8 @@
       "progress": "进度",
       "unit": "批",
       "pipelineMessages": "流水线消息",
+      "asyncTasks": "异步任务",
+      "noAsyncTasks": "没有可显示的异步任务",
       "cancelButton": "中断",
       "cancelTooltip": "中断流水线处理",
       "cancelConfirmTitle": "确认中断流水线",
@@ -468,5 +487,178 @@
     "prevPage": "上一页",
     "nextPage": "下一页",
     "lastPage": "末页"
+  },
+  "workspace": {
+    "requiredFields": "请填写所有必填字段",
+    "createDescription": "创建用于数据隔离的新工作区。",
+    "editDescription": "更新工作区信息。",
+    "mode": "工作区类型",
+    "modeKms": "KMS",
+    "modeKmsDesc": "使用现有文档、图谱、架构和 RAG 检索流程。",
+    "modeAnswerCatalog": "FAQ / 固定答案",
+    "modeAnswerCatalogDesc": "管理已批准答案、匹配数据、来源和查询分析。",
+    "modeHybrid": "混合",
+    "modeHybridDesc": "将固定答案查询与现有 KMS/RAG 流程结合使用。",
+    "answerItems": "答案",
+    "publishedAnswers": "已发布",
+    "resolveEvents": "查询"
+  },
+  "answerCatalog": {
+    "errors": {
+      "workspaceModeRequired": "此功能仅适用于 FAQ / 固定答案或混合工作区。"
+    },
+    "status": {
+      "draft": "草稿",
+      "published": "已发布",
+      "archived": "已归档",
+      "expired": "已过期"
+    },
+    "display": {
+      "summary": "摘要",
+      "full": "全文",
+      "both": "摘要+全文"
+    },
+    "guidance": {
+      "keyword": "关键词",
+      "question": "问题",
+      "synonym": "同义词",
+      "negative_keyword": "排除词",
+      "note": "备注"
+    },
+    "help": {
+      "openHelp": "帮助",
+      "title": "FAQ 固定答案帮助",
+      "description": "逐步说明如何创建固定答案、管理匹配规则并验证用户问题会选择哪个答案。"
+    },
+    "library": {
+      "title": "答案库",
+      "description": "管理已批准的固定答案、版本、有效期和匹配指引。",
+      "published": "答案已发布。",
+      "archived": "答案已归档。",
+      "created": "答案已创建。",
+      "saved": "答案已保存。",
+      "required": "标题和正文为必填项。",
+      "total": "全部",
+      "draft": "草稿",
+      "publishedCount": "已发布",
+      "archivedCount": "已归档",
+      "search": "搜索答案...",
+      "empty": "暂无答案",
+      "emptyDesc": "为此工作区创建第一个固定答案。",
+      "publish": "发布",
+      "archive": "归档",
+      "create": "创建答案",
+      "createTitle": "创建固定答案",
+      "createDesc": "先创建草稿答案，审核后再发布。",
+      "detailTitle": "答案详情",
+      "contentSection": "内容",
+      "guidanceSection": "指引",
+      "revisionsSection": "版本",
+      "answerTitle": "标题",
+      "status": "状态",
+      "displayPolicy": "显示方式",
+      "priority": "优先级",
+      "contentFormat": "格式",
+      "validFrom": "有效开始",
+      "validUntil": "有效结束",
+      "summary": "批准摘要",
+      "body": "正文",
+      "tags": "标签",
+      "tagsPlaceholder": "账单, 退款, 会员",
+      "guidance": "指引问题 / 关键词",
+      "guidancePlaceholder": "如何退款？\n取消付款\n退款政策",
+      "guidanceType": "类型",
+      "guidanceText": "指引文本",
+      "weight": "权重",
+      "guidanceAdded": "指引已添加。",
+      "guidanceDeleted": "指引已删除。",
+      "noGuidance": "尚未注册指引。",
+      "revisionDesc": "每次保存都会创建可恢复的答案快照。",
+      "noRevisions": "没有记录版本。",
+      "restoreRevision": "恢复",
+      "revisionRestored": "版本已恢复。"
+    },
+    "test": {
+      "title": "答案测试控制台",
+      "description": "运行用户查询并检查固定答案候选、分数和选定答案。",
+      "queryRequired": "请输入要测试的查询。",
+      "query": "用户查询",
+      "placeholder": "示例：如何退款？",
+      "topK": "Top K",
+      "strategy": "策略",
+      "strategyBalanced": "均衡",
+      "strategyFast": "快速",
+      "minScore": "最低分数",
+      "includeDrafts": "包含草稿答案",
+      "run": "解析",
+      "selected": "选定答案",
+      "candidates": "候选",
+      "noCandidates": "未找到候选答案。",
+      "trace": "追踪"
+    },
+    "placeholder": {
+      "pending": "此区域已预留，用于先分离工作区体验；具体实现将在下一阶段继续。"
+    },
+    "sources": {
+      "title": "答案来源",
+      "description": "连接文本、HTML、Markdown、URL、DB、NoSQL 和文档来源以生成答案候选。",
+      "urlHelp": "URL 会保存为来源元数据。请粘贴相关内容以创建可审核的答案草稿。",
+      "fileHelp": "可在本地读取文本、Markdown 和 HTML 文件并转换为答案草稿。",
+      "structuredHelp": "粘贴表格行、JSON 记录、DB 提取或 NoSQL 文档快照。结构化分析将在后续扩展。",
+      "textHelp": "粘贴来源材料并创建待审核的固定答案草稿。",
+      "sourceSetup": "来源设置",
+      "sourceType": "来源类型",
+      "sourceUri": "来源 URI",
+      "file": "文件",
+      "materialize": "生成草稿",
+      "sourceBody": "来源内容 / 答案正文",
+      "created": "已从来源创建答案草稿。",
+      "reviewHint": "草稿以未发布状态创建，便于上线前审核。",
+      "createDraft": "创建草稿",
+      "types": {
+        "plain": "纯文本",
+        "markdown": "Markdown",
+        "html": "HTML",
+        "url": "URL",
+        "file": "文本文件",
+        "structured": "结构化快照"
+      },
+      "items": {
+        "connectorRegistry": "连接器注册表",
+        "snapshotHistory": "来源快照历史",
+        "profilingPreview": "分析和映射预览",
+        "draftMaterialization": "答案草稿生成"
+      }
+    },
+    "matching": {
+      "title": "匹配设置",
+      "description": "管理关键词、标准问题、排除词、KG 指引和可选 LLM 建议。",
+      "items": {
+        "guidanceCrud": "指引 CRUD",
+        "weighting": "关键词/问题权重",
+        "scoreInspection": "候选分数检查",
+        "llmSuggestions": "LLM 建议流程"
+      }
+    },
+    "structured": {
+      "title": "结构化数据",
+      "description": "分析 DB/NoSQL/表格来源，并提供用于确定性查询的安全语义视图。",
+      "items": {
+        "datasetProfiling": "数据集分析",
+        "fieldMapping": "字段角色映射",
+        "semanticViews": "语义视图生成",
+        "safeSql": "安全 SQL 预览/执行"
+      }
+    },
+    "analytics": {
+      "title": "答案分析",
+      "description": "查看答案使用情况、未匹配查询、模糊匹配、反馈和过期答案候选。",
+      "items": {
+        "resolveEvents": "解析事件",
+        "topQueries": "热门查询",
+        "noMatchReview": "未匹配审查",
+        "feedbackLoop": "反馈闭环"
+      }
+    }
   }
 }

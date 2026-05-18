@@ -24,6 +24,8 @@ from lightrag.utils import logger
 
 
 class TaskType(str, Enum):
+    DOCUMENT_INGEST = "document_ingest"
+    DOCUMENT_SCAN = "document_scan"
     MULTIMODAL_PROCESS = "multimodal_process"
     URL_INGEST = "url_ingest"
     BOARD_INGEST = "board_ingest"
@@ -244,7 +246,9 @@ class TaskService:
         self._persist_task_logs(task)
         logger.info(f"Task completed: {task_id}")
 
-    async def fail_task(self, task_id: str, error: str) -> None:
+    async def fail_task(
+        self, task_id: str, error: str, result: Optional[Dict[str, Any]] = None
+    ) -> None:
         """Mark task as failed."""
         task = self._registry.get_task(task_id)
         if not task:
@@ -253,6 +257,8 @@ class TaskService:
         task.status = TaskStatus.FAILED
         task.error = error
         task.message = f"Failed: {error}"
+        if result is not None:
+            task.result = result
         self._registry.update_task(task)
         asyncio.create_task(self._save_task_to_db(task))
 
@@ -261,6 +267,7 @@ class TaskService:
             status=TaskStatus.FAILED,
             progress=task.progress,
             message=task.message,
+            detail=result,
         )
         await self._registry.notify(task_id, event)
         self._persist_task_logs(task)
@@ -343,6 +350,16 @@ class TaskService:
                 ).model_dump()
             ) + "\n"
             return
+
+        yield json.dumps(
+            TaskProgressEvent(
+                task_id=task_id,
+                status=task.status,
+                progress=task.progress,
+                message=task.message,
+                detail=task.result,
+            ).model_dump()
+        ) + "\n"
 
         queue = self._registry.subscribe(task_id)
         try:
@@ -455,7 +472,7 @@ class TaskService:
                             EXTRACT(EPOCH FROM updated_at) as updated_at
                      FROM LIGHTRAG_TASKS
                      WHERE updated_at > NOW() - INTERVAL '{int(max_age_hours)} hours'
-                        OR task_type IN ('board_ingest', 'url_ingest')
+                        OR task_type IN ('board_ingest', 'url_ingest', 'document_ingest', 'document_scan')
                      ORDER BY created_at DESC"""
             rows = await self._db.query(sql, multirows=True)
             if not rows:

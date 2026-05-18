@@ -8,6 +8,7 @@
   },
   "header": {
     "documents": "Documents",
+    "chunks": "Chunks",
     "knowledgeGraph": "Knowledge Graph",
     "entityManagement": "Entity-Relation Explorer",
     "schema": "Schema",
@@ -16,12 +17,23 @@
     "projectRepository": "Project Repository",
     "prompts": "Prompts",
     "workspaces": "Workspaces",
+    "answers": "Answers",
+    "answerSources": "Sources",
+    "answerMatching": "Matching",
+    "structuredData": "Structured Data",
+    "answerTest": "Test Console",
+    "answerAnalytics": "Analytics",
+    "answerHelp": "Help",
     "logout": "Logout",
     "frontendNeedsRebuild": "Frontend needs rebuild",
     "themeToggle": {
       "switchToLight": "Switch to light theme",
       "switchToDark": "Switch to dark theme"
     }
+  },
+  "chunkPanel": {
+    "title": "Chunk Management",
+    "description": "Inspect and manage document chunk structure, linked entities, relations, and deletion impact."
   },
   "login": {
     "description": "Please enter your account and password to log in to the system",
@@ -43,7 +55,54 @@
     "save": "Save",
     "saving": "Saving...",
     "saveFailed": "Save failed",
-    "refresh": "Refresh"
+    "refresh": "Refresh",
+    "loading": "Loading...",
+    "add": "Add",
+    "close": "Close",
+    "delete": "Delete",
+    "edit": "Edit",
+    "confirm": "Confirm",
+    "yes": "Yes",
+    "no": "No"
+  },
+  "deletionImpact": {
+    "affectedTargets": "Affected targets",
+    "missingTargets": "Missing targets",
+    "executable": "Executable",
+    "previewOnly": "Preview only",
+    "noAffectedTargets": "No affected targets found.",
+    "summary": {
+      "documents": "Documents",
+      "documents_affected": "Affected documents",
+      "chunks_to_delete": "Chunks to delete",
+      "entities_to_delete": "Entities to delete",
+      "entities_to_update": "Entities to update",
+      "relations_to_delete": "Relations to delete",
+      "relations_to_update": "Relations to update",
+      "orphan_chunks_to_delete": "Orphan chunks to delete",
+      "shared_chunks_to_scrub": "Shared chunks to scrub",
+      "graph_only": "Graph only"
+    },
+    "meta": {
+      "doc": "Doc",
+      "chunks": "Chunks",
+      "contentLength": "Content length",
+      "type": "Type",
+      "relations": "Relations",
+      "orphanChunks": "Orphan chunks",
+      "sharedChunks": "Shared chunks",
+      "relationChunks": "Relation chunks"
+    },
+    "warnings": {
+      "cascadeSafeSharedChunks": "Safe delete removes graph, vector, and chunk mappings, but shared source chunks remain unless they become orphaned.",
+      "cascadeFullDeletesChunks": "Full delete removes the source chunks that support the target and may update or delete other entities and relations derived from those chunks.",
+      "forceDeleteChunks": "Force deleting chunks removes chunk text/vector data and updates graph references. Original full document text is not rewritten.",
+      "forceDeleteChunksWithTracking": "Force deleting chunks removes chunk text/vector data, updates graph references, and removes document tracking when no chunks remain.",
+      "documentPolicy": "Document targets should normally use the delete_documents policy.",
+      "documentMayRemainZeroChunks": "Document '{{docId}}' may remain with zero chunks after chunk deletion.",
+      "documentWillBeRemovedZeroChunks": "Document '{{docId}}' will be removed from the document list because all selected chunks are deleted.",
+      "policyNotExecutable": "Policy '{{policy}}' is not executable for target type '{{targetType}}'."
+    }
   },
   "documentPanel": {
     "clearDocuments": {
@@ -89,6 +148,8 @@
       "deleteFileTooltip": "Check this option to also delete the corresponding uploaded files on the server",
       "deleteLLMCacheOption": "Also delete extracted LLM cache",
       "deleteS3FileOption": "Also delete files from S3 storage",
+      "previewImpact": "Preview deletion impact",
+      "deleting": "Deleting...",
       "success": "Document deletion pipeline started successfully",
       "failed": "Delete Documents Failed:\n{{message}}",
       "error": "Delete Documents Failed:\n{{error}}",
@@ -291,6 +352,40 @@
       "imageFailed": "Image upload failed: {{error}}",
       "duplicateSource": "A document with this source already exists"
     },
+    "preview": {
+      "loading": "Loading document...",
+      "tabs": {
+        "original": "Original",
+        "extracted": "Extracted",
+        "metadata": "Metadata"
+      },
+      "tokens": "Tokens",
+      "summary": "Summary",
+      "analysis": "Analysis",
+      "copyContent": "Copy",
+      "copied": "Copied",
+      "download": "Download",
+      "openOriginal": "Open original",
+      "unsupportedTitle": "This file type cannot be previewed in the browser",
+      "unsupportedHint": "Formats like DOCX/XLSX/PPTX should be downloaded and opened locally, or you can inspect the parsed text in the Extracted tab.",
+      "goToExtracted": "Go to Extracted tab",
+      "noChunks": "No extracted chunks for this document.",
+      "fields": {
+        "id": "Document ID",
+        "status": "Status",
+        "filePath": "File path",
+        "docName": "Display name",
+        "mime": "MIME type",
+        "size": "Size",
+        "chunksCount": "Chunk count",
+        "trackId": "Track ID",
+        "createdAt": "Created at",
+        "updatedAt": "Updated at",
+        "s3Url": "S3 URL",
+        "error": "Error",
+        "metadata": "Metadata"
+      }
+    },
     "taskProgress": {
       "status": {
         "pending": "Pending",
@@ -347,6 +442,13 @@
       "pipelineStatusTooltip": "View document processing pipeline status",
       "uploadedTitle": "Uploaded Documents",
       "uploadedDescription": "List of uploaded documents and their statuses.",
+      "views": {
+        "documents": "Documents",
+        "chunks": "Chunks"
+      },
+      "viewChunks": "View chunks for this document",
+      "zeroChunks": "No chunks",
+      "zeroChunksTooltip": "This document has zero chunks. Deletion consistency or restore review may be needed.",
       "emptyTitle": "No Documents",
       "emptyDescription": "There are no uploaded documents yet.",
       "columns": {
@@ -392,6 +494,110 @@
         "multimodal": "Multimodal"
       }
     },
+    "recovery": {
+      "button": "Restore",
+      "tooltip": "Restore documents and graph data from recent deletion jobs",
+      "title": "Deletion Restore",
+      "description": "Select a snapshot saved immediately before deletion, preview the impact, then restore it.",
+      "recentJobs": "Recent deletion jobs",
+      "empty": "No restorable deletion jobs.",
+      "restorable": "Restorable",
+      "restored": "Restored",
+      "restoreOptions": "Restore options",
+      "overwrite": "Overwrite existing data",
+      "overwriteDescription": "When off, existing rows and graph items are skipped.",
+      "selectedJob": "Selected job",
+      "noSelection": "No job selected",
+      "preview": "Preview restore",
+      "restore": "Restore",
+      "restoring": "Restoring...",
+      "alreadyRestored": "This deletion job has already been restored. You can preview and restore it again if needed.",
+      "conflicts": "Conflicts",
+      "warningAlreadyRestored": "This deletion job has already been restored. You can restore it again if needed.",
+      "warningConflicts": "Existing snapshot rows will be skipped unless overwrite is enabled.",
+      "warningFilesNotRestored": "Database and graph data can be restored, but deleted physical files or S3 objects are not recreated.",
+      "loadFailed": "Failed to load restore jobs\n{{error}}",
+      "previewFailed": "Failed to preview restore\n{{error}}",
+      "restoreFailed": "Failed to restore\n{{error}}",
+      "restoreSuccess": "Deletion snapshot restored"
+    },
+    "history": {
+      "view": "View document history",
+      "title": "Document History",
+      "description": "Shows current state, ingestion tasks, deletion, and restore work by document.",
+      "empty": "No history is available for this document.",
+      "restorePreview": "Restore preview",
+      "loadFailed": "Failed to load document history\n{{error}}",
+      "sources": {
+        "doc_status": "Document status",
+        "task": "Task",
+        "deletion": "Deletion snapshot"
+      },
+      "status": {
+        "processed": "Processed",
+        "completed": "Completed",
+        "running": "Running",
+        "pending": "Pending",
+        "failed": "Failed",
+        "restored": "Restored"
+      },
+      "operations": {
+        "document_current_state": "Current document state",
+        "document_ingest": "Document ingestion",
+        "document_scan": "Document scan",
+        "delete_document": "Document deletion",
+        "delete_chunk": "Chunk deletion",
+        "delete_entity": "Entity deletion",
+        "delete_relation": "Relation deletion",
+        "restore_deletion": "Restore deletion snapshot"
+      }
+    },
+    "chunkManager": {
+      "title": "Chunk Management",
+      "searchPlaceholder": "Search chunk ID, content, or file path...",
+      "docFilterPlaceholder": "Filter by document ID",
+      "clearDocFilter": "Clear document filter",
+      "empty": "No chunks match the current filters.",
+      "loadFailed": "Failed to load chunks\n{{error}}",
+      "detailFailed": "Failed to load chunk detail\n{{error}}",
+      "deletePreviewFailed": "Failed to preview chunk deletion\n{{error}}",
+      "deleteFailed": "Failed to delete chunk\n{{error}}",
+      "deleteSuccess": "Chunk deleted",
+      "deleteTitle": "Delete Chunk",
+      "confirmDelete": "Delete chunk",
+      "saveSuccess": "Chunk saved",
+      "saveFailed": "Failed to save chunk\n{{error}}",
+      "invalidJson": "structured_content is not valid JSON.",
+      "viewDetail": "View chunk detail",
+      "detailTitle": "Chunk Detail",
+      "content": "Content",
+      "structuredContent": "Structured content",
+      "document": "Document",
+      "entities": "Linked entities",
+      "relations": "Linked relations",
+      "noEntities": "No linked entities.",
+      "noRelations": "No linked relations.",
+      "columns": {
+        "chunk": "Chunk",
+        "document": "Document",
+        "order": "Order",
+        "type": "Type",
+        "preview": "Content preview",
+        "links": "Links"
+      },
+      "types": {
+        "all": "All",
+        "text": "Text",
+        "image": "Image",
+        "table": "Table",
+        "equation": "Equation"
+      },
+      "meta": {
+        "tokens": "Tokens",
+        "length": "Length",
+        "status": "Status"
+      }
+    },
     "pipelineStatus": {
       "title": "Pipeline Status",
       "busy": "Pipeline Busy",
@@ -402,6 +608,8 @@
       "progress": "Progress",
       "unit": "Batch",
       "pipelineMessages": "Pipeline Messages",
+      "asyncTasks": "Async Tasks",
+      "noAsyncTasks": "No async tasks to show",
       "cancelButton": "Cancel",
       "cancelTooltip": "Cancel pipeline processing",
       "cancelConfirmTitle": "Confirm Pipeline Cancellation",
@@ -801,14 +1009,22 @@
       "title": "Select Delete Scope",
       "entityDescription": "Delete entity '{{entityId}}'. Choose the deletion scope.",
       "relationDescription": "Delete relation '{{sourceId}}' → '{{targetId}}'. Choose the deletion scope.",
-      "cascadeButton": "Full Delete (Recommended)",
-      "cascadeDescription": "Delete graph nodes, vector embeddings, chunk mappings, and invalidate related cache.",
+      "cascadeButton": "Safe Delete (Recommended)",
+      "cascadeDescription": "Delete graph nodes, vector embeddings, and chunk mappings while preserving shared chunks.",
+      "safeButton": "Safe Delete (Recommended)",
+      "safeDescription": "Delete graph nodes, vector embeddings, and chunk mappings while preserving shared chunks.",
+      "fullButton": "Full Delete",
+      "fullDescription": "Also delete the source chunks that support the target. Other entities and relations derived from those chunks may be affected.",
       "graphOnlyButton": "Graph Only",
       "graphOnlyDescription": "Only remove from graph. Vector embeddings and chunk mappings are preserved.",
-      "loadingRelated": "Searching related entities...",
-      "relatedFound": "Found {{count}} entities with similar names. Select items to delete together.",
-      "noRelated": "No related entities found. Only the selected entity will be deleted.",
+      "loadingRelated": "Searching similar entity candidates...",
+      "relatedFound": "Found {{count}} additional delete candidates with similar names. Select items to delete together.",
+      "noRelated": "No similar entity candidates found. Graph relationship impact will be shown in the next preview.",
+      "similarCandidateHelp": "This list is not the entity's graph neighbors. It only suggests similarly named entities for optional batch deletion. The actual relation, chunk, and cache impact is calculated in the next preview step.",
       "selectAll": "Select All",
+      "previewImpact": "Preview impact",
+      "loadingPreview": "Calculating deletion impact...",
+      "noPreview": "No preview available.",
       "confirmDelete": "Delete {{count}} items"
     },
     "tabs": {
@@ -1204,10 +1420,23 @@
     "updateError": "Failed to update workspace",
     "deleteError": "Failed to delete workspace",
     "copyError": "Failed to copy",
+    "requiredFields": "Please fill in all required fields",
+    "createDescription": "Create a new workspace for data isolation.",
+    "editDescription": "Update workspace information.",
+    "mode": "Workspace Type",
+    "modeKms": "KMS",
+    "modeKmsDesc": "Use the existing document, graph, schema, and RAG search workflow.",
+    "modeAnswerCatalog": "FAQ / Fixed Answer",
+    "modeAnswerCatalogDesc": "Manage approved answers, matching data, sources, and lookup analytics.",
+    "modeHybrid": "Hybrid",
+    "modeHybridDesc": "Use fixed-answer lookup together with the existing KMS/RAG workflow.",
     "statistics": "Statistics",
     "documents": "Documents",
     "entities": "Entities",
     "relations": "Relations",
+    "answerItems": "Answers",
+    "publishedAnswers": "Published",
+    "resolveEvents": "Lookups",
     "refreshStats": "Refresh Statistics",
     "lastUpdated": "Last updated"
   },
@@ -1224,5 +1453,273 @@
     "statsRefreshed": "Statistics refreshed",
     "statsRefreshFailed": "Failed to refresh statistics",
     "setDefaultFailed": "Failed to set default workspace"
+  },
+  "answerCatalog": {
+    "errors": {
+      "workspaceModeRequired": "This feature is available only in FAQ / Fixed Answer or Hybrid workspaces."
+    },
+    "status": {
+      "draft": "Draft",
+      "published": "Published",
+      "archived": "Archived",
+      "expired": "Expired"
+    },
+    "display": {
+      "summary": "Summary",
+      "full": "Full",
+      "both": "Both"
+    },
+    "guidance": {
+      "keyword": "Keyword",
+      "question": "Question",
+      "synonym": "Synonym",
+      "negative_keyword": "Negative",
+      "note": "Note"
+    },
+    "guidanceTypes": {
+      "keyword": "Keyword",
+      "question": "Question",
+      "synonym": "Synonym",
+      "negative_keyword": "Negative",
+      "note": "Note"
+    },
+    "help": {
+      "openHelp": "Help",
+      "title": "FAQ Fixed Answer Help",
+      "description": "Step-by-step guidance for creating fixed answers, managing matching rules, and verifying which answer is selected for real user queries.",
+      "tutorial": "Guided Tutorial",
+      "nextStep": "Next Step",
+      "screenGuide": "Screen-style Guide",
+      "replaceable": "Replaceable with real screenshots later",
+      "openScreen": "Open Screen",
+      "glossary": "Glossary",
+      "scoreReading": "How to Read Matching Scores",
+      "steps": {
+        "create": {
+          "title": "1. Create an answer draft",
+          "description": "Create an answer directly or preview source material in the source wizard before converting it into a draft. Drafts are not served immediately.",
+          "action": "Open Sources"
+        },
+        "review": {
+          "title": "2. Review answer policy",
+          "description": "Check the body, approved summary, display policy, priority, validity, and tags. You can restore previous revisions if needed.",
+          "action": "Open Answers"
+        },
+        "guidance": {
+          "title": "3. Organize matching rules and exclusions",
+          "description": "Use the Matching screen to add representative questions and keywords, block misleading queries with negative keywords, and run a quick candidate score check.",
+          "action": "Open Matching"
+        },
+        "structured": {
+          "title": "4. Review structured data",
+          "description": "Inspect fields and sample rows detected from JSON, CSV, DB, or NoSQL snapshots, then preview or execute a Safe Query.",
+          "action": "Open Structured Data"
+        },
+        "test": {
+          "title": "5. Verify in the test console",
+          "description": "Run real user questions and inspect selected answers, candidate scores, and score details. Tune the minimum score together.",
+          "action": "Open Test Console"
+        },
+        "publish": {
+          "title": "6. Publish and operate with analytics",
+          "description": "Publish only well-tested answers. During operation, review events, no-match queries, average latency, and top selected answers to improve guidance.",
+          "action": "Open Analytics"
+        }
+      }
+    },
+    "library": {
+      "title": "Answer Library",
+      "description": "Manage approved fixed answers, versions, validity, and matching guidance.",
+      "published": "Answer published.",
+      "archived": "Answer archived.",
+      "created": "Answer created.",
+      "saved": "Answer saved.",
+      "required": "Title and body are required.",
+      "total": "Total",
+      "draft": "Draft",
+      "publishedCount": "Published",
+      "archivedCount": "Archived",
+      "search": "Search answers...",
+      "empty": "No answers yet",
+      "emptyDesc": "Create the first fixed answer for this workspace.",
+      "publish": "Publish",
+      "archive": "Archive",
+      "create": "Create Answer",
+      "createTitle": "Create Fixed Answer",
+      "createDesc": "Create a draft answer first. Publish it after review.",
+      "detailTitle": "Answer Details",
+      "contentSection": "Content",
+      "guidanceSection": "Guidance",
+      "revisionsSection": "Revisions",
+      "answerTitle": "Title",
+      "status": "Status",
+      "displayPolicy": "Display Policy",
+      "priority": "Priority",
+      "contentFormat": "Format",
+      "validFrom": "Valid From",
+      "validUntil": "Valid Until",
+      "summary": "Approved Summary",
+      "body": "Body",
+      "tags": "Tags",
+      "tagsPlaceholder": "billing, refund, membership",
+      "guidance": "Guidance Questions / Keywords",
+      "guidancePlaceholder": "How do I get a refund?\nCancel payment\nrefund policy",
+      "guidanceType": "Type",
+      "guidanceText": "Guidance Text",
+      "weight": "Weight",
+      "guidanceAdded": "Guidance added.",
+      "guidanceDeleted": "Guidance deleted.",
+      "noGuidance": "No guidance is registered.",
+      "revisionDesc": "Every save creates a restorable answer snapshot.",
+      "noRevisions": "No revisions were recorded.",
+      "restoreRevision": "Restore",
+      "revisionRestored": "Revision restored."
+    },
+    "test": {
+      "title": "Answer Test Console",
+      "description": "Run a user query and inspect fixed-answer candidates, scores, and the selected answer.",
+      "queryRequired": "Enter a query to test.",
+      "query": "User Query",
+      "placeholder": "Example: How do I get a refund?",
+      "topK": "Top K",
+      "strategy": "Strategy",
+      "strategyBalanced": "Balanced",
+      "strategyFast": "Fast",
+      "minScore": "Min Score",
+      "includeDrafts": "Include draft answers",
+      "run": "Resolve",
+      "selected": "Selected Answer",
+      "candidates": "Candidates",
+      "noCandidates": "No candidates were found.",
+      "trace": "Trace"
+    },
+    "placeholder": {
+      "pending": "This area is reserved so the workspace UX is separated now while implementation continues in the next phase."
+    },
+    "sources": {
+      "title": "Answer Sources",
+      "description": "Connect text, HTML, markdown, URL, DB, NoSQL, and document sources for answer candidate generation.",
+      "urlHelp": "URL is stored as source metadata. Paste the relevant content to create a reviewable answer draft.",
+      "fileHelp": "Text, Markdown, and HTML files can be read locally and converted into an answer draft.",
+      "structuredHelp": "Paste a table row, JSON record, DB extract, or NoSQL document snapshot. Structured profiling will be expanded later.",
+      "textHelp": "Paste source material and create a draft fixed answer for review.",
+      "sourceSetup": "Source Setup",
+      "sourceType": "Source Type",
+      "sourceUri": "Source URI",
+      "file": "File",
+      "materialize": "Materialize Draft",
+      "sourceBody": "Source Content / Answer Body",
+      "created": "Answer draft created from source.",
+      "reviewHint": "Drafts are created unpublished so they can be reviewed before serving.",
+      "createDraft": "Create Draft",
+      "preview": "Preview Source",
+      "bodyRequired": "Paste source content before preview.",
+      "previewReady": "Source preview is ready for review.",
+      "previewTitle": "Review Candidate",
+      "previewHint": "Preview the source first to inspect profiling, candidate keywords, and structured fields before creating a draft.",
+      "characters": "Characters",
+      "lines": "Lines",
+      "tokens": "Tokens",
+      "rows": "Rows",
+      "detectedHeadings": "Detected Headings",
+      "detectedKeywords": "Detected Keywords",
+      "structuredProfile": "Structured Profile",
+      "guidanceCandidates": "Guidance Candidates",
+      "types": {
+        "plain": "Plain Text",
+        "markdown": "Markdown",
+        "html": "HTML",
+        "url": "URL",
+        "file": "Text File",
+        "structured": "Structured Snapshot"
+      },
+      "items": {
+        "connectorRegistry": "Connector registry",
+        "snapshotHistory": "Source snapshot history",
+        "profilingPreview": "Profiling and mapping preview",
+        "draftMaterialization": "Answer draft materialization"
+      }
+    },
+    "matching": {
+      "title": "Matching Setup",
+      "description": "Manage keywords, canonical questions, negative terms, KG guidance, and optional LLM suggestions.",
+      "answerCount": "Answers",
+      "guidanceCount": "Guidance",
+      "questionCount": "Questions",
+      "negativeCount": "Negative Terms",
+      "addGuidance": "Add Matching Guidance",
+      "answer": "Answer",
+      "selectAnswer": "Select answer",
+      "guidancePlaceholder": "Example: refund deadline, how to cancel order",
+      "add": "Add Guidance",
+      "addRequired": "Select an answer and enter guidance text.",
+      "quickTest": "Quick Match Test",
+      "search": "Search answer or guidance...",
+      "allTypes": "All Types",
+      "onlyUnguided": "No guidance",
+      "unguidedAnswers": "Answers without guidance",
+      "noUnguided": "No unguided answers.",
+      "rule": "Rule",
+      "type": "Type",
+      "items": {
+        "guidanceCrud": "Guidance CRUD",
+        "weighting": "Keyword/question weighting",
+        "scoreInspection": "Candidate score inspection",
+        "llmSuggestions": "LLM suggestion workflow"
+      }
+    },
+    "structured": {
+      "title": "Structured Data",
+      "description": "Profile DB/NoSQL/table sources and expose safe semantic views for deterministic lookup.",
+      "profiledAnswers": "Profiled Answers",
+      "totalColumns": "Detected Fields",
+      "tableRows": "Known Rows",
+      "search": "Search answer or field...",
+      "structuredOnly": "Structured only",
+      "fieldCloud": "Detected Field Cloud",
+      "empty": "No structured profiles were found. Create drafts from structured sources first.",
+      "safeQuery": "Safe Query Preview / Execute",
+      "dataset": "Dataset",
+      "selectDataset": "Select dataset",
+      "selectDatasetRequired": "Select a structured dataset first.",
+      "field": "Field",
+      "operator": "Operator",
+      "value": "Value",
+      "limit": "Limit",
+      "previewSql": "Preview SQL",
+      "execute": "Execute",
+      "queryResult": "Query Result",
+      "queryHint": "Choose a dataset, add an optional condition, then preview or execute a safe query.",
+      "previewOnlyHint": "Preview mode only generated the safe SQL shape.",
+      "noRows": "No rows matched the condition.",
+      "operators": {
+        "contains": "Contains",
+        "equals": "Equals",
+        "starts_with": "Starts with",
+        "ends_with": "Ends with"
+      },
+      "items": {
+        "datasetProfiling": "Dataset profiling",
+        "fieldMapping": "Field role mapping",
+        "semanticViews": "Semantic view materialization",
+        "safeSql": "Safe SQL preview/execute"
+      }
+    },
+    "analytics": {
+      "title": "Answer Analytics",
+      "description": "Review answer usage, no-match queries, ambiguous matches, feedback, and stale answer candidates.",
+      "resolveEvents": "Resolve Events",
+      "noMatch": "No Match",
+      "avgLatency": "Avg Latency",
+      "search": "Search query or answer...",
+      "topAnswers": "Top Selected Answers",
+      "noEvents": "No events were recorded yet.",
+      "items": {
+        "resolveEvents": "Resolve events",
+        "topQueries": "Top queries",
+        "noMatchReview": "No-match review",
+        "feedbackLoop": "Feedback loop"
+      }
+    }
   }
 }

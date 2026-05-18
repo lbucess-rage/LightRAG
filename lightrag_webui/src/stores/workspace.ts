@@ -40,7 +40,7 @@ interface WorkspaceState {
 
   // Actions
   setCurrentWorkspaceId: (workspaceId: string) => void
-  fetchWorkspaces: () => Promise<void>
+  fetchWorkspaces: (force?: boolean) => Promise<void>
   fetchCurrentWorkspace: () => Promise<void>
   createNewWorkspace: (request: WorkspaceCreateRequest) => Promise<WorkspaceInfo>
   updateExistingWorkspace: (workspaceId: string, request: WorkspaceUpdateRequest) => Promise<WorkspaceInfo>
@@ -65,6 +65,10 @@ interface WorkspaceState {
   clearError: () => void
 }
 
+const WORKSPACE_FETCH_DEDUPE_MS = 1500
+let workspaceFetchInFlight: Promise<void> | null = null
+let lastWorkspaceFetchAt = 0
+
 const useWorkspaceStoreBase = create<WorkspaceState>()(
   persist(
     (set, get) => ({
@@ -85,26 +89,45 @@ const useWorkspaceStoreBase = create<WorkspaceState>()(
 
       // Actions
       setCurrentWorkspaceId: (workspaceId: string) => {
-        set({ currentWorkspaceId: workspaceId, currentWorkspace: null })
+        const currentWorkspace = get().workspaces.find(ws => ws.workspace_id === workspaceId) || null
+        set({ currentWorkspaceId: workspaceId, currentWorkspace })
         // Fetch workspace details after setting
         get().fetchCurrentWorkspace()
       },
 
-      fetchWorkspaces: async () => {
-        set({ isLoading: true, error: null })
-        try {
-          const response = await getWorkspaces(1, 100)
-          set({
-            workspaces: response.workspaces,
-            totalWorkspaces: response.total,
-            isLoading: false,
-          })
-        } catch (error: any) {
-          set({
-            error: error.message || 'Failed to fetch workspaces',
-            isLoading: false,
-          })
+      fetchWorkspaces: async (force = false) => {
+        if (workspaceFetchInFlight) {
+          return workspaceFetchInFlight
         }
+
+        const now = Date.now()
+        if (!force && now - lastWorkspaceFetchAt < WORKSPACE_FETCH_DEDUPE_MS) {
+          return
+        }
+
+        workspaceFetchInFlight = (async () => {
+          set({ isLoading: true, error: null })
+          try {
+            const response = await getWorkspaces(1, 100, force)
+            lastWorkspaceFetchAt = Date.now()
+            const currentWorkspace = response.workspaces.find(ws => ws.workspace_id === get().currentWorkspaceId)
+            set({
+              workspaces: response.workspaces,
+              currentWorkspace: currentWorkspace || get().currentWorkspace,
+              totalWorkspaces: response.total,
+              isLoading: false,
+            })
+          } catch (error: any) {
+            set({
+              error: error.message || 'Failed to fetch workspaces',
+              isLoading: false,
+            })
+          } finally {
+            workspaceFetchInFlight = null
+          }
+        })()
+
+        return workspaceFetchInFlight
       },
 
       fetchCurrentWorkspace: async () => {
@@ -136,7 +159,7 @@ const useWorkspaceStoreBase = create<WorkspaceState>()(
         try {
           const workspace = await createWorkspace(request)
           // Refresh workspace list
-          await get().fetchWorkspaces()
+          await get().fetchWorkspaces(true)
           set({ isLoading: false })
           return workspace
         } catch (error: any) {
@@ -153,7 +176,7 @@ const useWorkspaceStoreBase = create<WorkspaceState>()(
         try {
           const workspace = await updateWorkspace(workspaceId, request)
           // Refresh workspace list
-          await get().fetchWorkspaces()
+          await get().fetchWorkspaces(true)
           // Update current workspace if it's the one being edited
           if (get().currentWorkspaceId === workspaceId) {
             set({ currentWorkspace: workspace })
@@ -175,7 +198,7 @@ const useWorkspaceStoreBase = create<WorkspaceState>()(
           await deleteWorkspace(workspaceId, deleteData)
           // If deleted workspace was current, switch to default
           if (get().currentWorkspaceId === workspaceId) {
-            const workspaces = await getWorkspaces(1, 100)
+            const workspaces = await getWorkspaces(1, 100, true)
             const defaultWs = workspaces.workspaces.find(ws => ws.is_default)
             if (defaultWs) {
               set({
@@ -185,7 +208,7 @@ const useWorkspaceStoreBase = create<WorkspaceState>()(
             }
           }
           // Refresh workspace list
-          await get().fetchWorkspaces()
+          await get().fetchWorkspaces(true)
           set({ isLoading: false })
         } catch (error: any) {
           set({
@@ -201,7 +224,7 @@ const useWorkspaceStoreBase = create<WorkspaceState>()(
         try {
           await setDefaultWorkspace(workspaceId)
           // Refresh workspace list
-          await get().fetchWorkspaces()
+          await get().fetchWorkspaces(true)
           set({ isLoading: false })
         } catch (error: any) {
           set({
@@ -290,7 +313,7 @@ const useWorkspaceStoreBase = create<WorkspaceState>()(
           await get().refreshWorkspaceStats(sourceId)
           await get().refreshWorkspaceStats(request.target_workspace_id)
           // Refresh workspace list
-          await get().fetchWorkspaces()
+          await get().fetchWorkspaces(true)
           set({ isLoading: false })
           return { moved: result.moved_tables, deleted: result.deleted_from_source }
         } catch (error: any) {

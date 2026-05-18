@@ -6,6 +6,7 @@ import os
 import argparse
 from typing import Optional, List, Tuple
 import sys
+from urllib.parse import unquote
 from ascii_colors import ASCIIColors
 from lightrag.api import __api_version__ as api_version
 from lightrag import __version__ as core_version
@@ -17,6 +18,17 @@ from fastapi.security import APIKeyHeader, OAuth2PasswordBearer
 from starlette.status import HTTP_403_FORBIDDEN
 from .auth import auth_handler
 from .config import ollama_server_infos, global_args, get_env_value
+
+
+def decode_workspace_header(value: Optional[str]) -> str:
+    """Decode workspace header values that were URL-encoded for browser safety."""
+    workspace = (value or "").strip()
+    if not workspace:
+        return ""
+    try:
+        return unquote(workspace)
+    except Exception:
+        return workspace
 
 
 def check_env_file():

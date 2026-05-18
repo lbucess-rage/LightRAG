@@ -88,8 +88,16 @@ export default function ActiveTasksPanel({ onTaskComplete }: ActiveTasksPanelPro
         <div className="px-3 pb-3 space-y-2 max-h-80 overflow-y-auto">
           {tasks.map((task) => {
             const isTerminal = task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled'
-            const taskUrl = task.metadata?.url || task.metadata?.file_name || task.task_id.slice(0, 8)
-            const taskType = task.task_type === 'url_ingest' ? 'URL' : task.task_type === 'multimodal_process' ? 'MM' : task.task_type
+            const taskUrl = task.metadata?.url || task.metadata?.file_name || task.metadata?.file_path_label || task.metadata?.track_id || task.task_id.slice(0, 8)
+            const taskType = task.task_type === 'url_ingest'
+              ? 'URL'
+              : task.task_type === 'multimodal_process'
+                ? 'MM'
+                : task.task_type === 'document_ingest'
+                  ? 'DOC'
+                  : task.task_type === 'document_scan'
+                    ? 'SCAN'
+                    : task.task_type
             const depth = task.metadata?.crawl_depth
             const hasPrompts = !!(task.metadata?.document_prompt || task.metadata?.image_prompt || task.metadata?.table_prompt)
 

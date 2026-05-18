@@ -8,6 +8,7 @@ from lightrag.utils import logger, get_pinyin_sort_key
 import aiofiles
 import shutil
 import traceback
+import mimetypes
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Literal
@@ -22,6 +23,7 @@ from fastapi import (
     Request,
     UploadFile,
 )
+from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel, Field, field_validator
 
 from lightrag import LightRAG
@@ -31,7 +33,8 @@ from lightrag.utils import (
     compute_mdhash_id,
     sanitize_text_for_encoding,
 )
-from lightrag.api.utils_api import get_combined_auth_dependency
+from lightrag.api.utils_api import decode_workspace_header, get_combined_auth_dependency
+from lightrag.api.task_manager import TaskType, get_task_service
 from lightrag.api.utils_s3 import get_s3_client
 from lightrag.kg.shared_storage import get_default_workspace
 from ..config import global_args
@@ -72,11 +75,129 @@ def _get_workspace_from_request(request: Request) -> str:
     Returns:
         Workspace ID from header or default workspace
     """
-    workspace = request.headers.get("LIGHTRAG-WORKSPACE", "").strip()
+    workspace = decode_workspace_header(request.headers.get("LIGHTRAG-WORKSPACE", ""))
+    if workspace:
+        return workspace
+    workspace = (request.query_params.get("workspace") or "").strip()
     if workspace:
         return workspace
     # Fall back to server default workspace
     return get_default_workspace() or "base"
+
+
+def _task_stream_url(task_id: str) -> str:
+    return f"/api/tasks/{task_id}/stream"
+
+
+def _status_value(status: Any) -> str:
+    return getattr(status, "value", str(status))
+
+
+async def _build_document_task_result(rag: LightRAG, track_id: str) -> dict[str, Any]:
+    docs_by_track_id = await rag.aget_docs_by_track_id(track_id)
+    results: list[dict[str, Any]] = []
+    errors: list[str] = []
+    status_summary: dict[str, int] = {}
+    success_count = 0
+
+    for doc_id, doc_status in docs_by_track_id.items():
+        status = _status_value(getattr(doc_status, "status", "unknown"))
+        file_path = getattr(doc_status, "file_path", "") or "unknown_source"
+        status_summary[status] = status_summary.get(status, 0) + 1
+        is_success = status == DocStatus.PROCESSED.value
+        if is_success:
+            success_count += 1
+        error_msg = getattr(doc_status, "error_msg", None)
+        if error_msg:
+            errors.append(f"{file_path}: {error_msg}")
+
+        results.append(
+            {
+                "type": "document",
+                "entity_name": file_path,
+                "entity_type": status,
+                "description": getattr(doc_status, "content_summary", "") or "",
+                "doc_id": doc_id,
+                "chunk_id": doc_id,
+                "chunks_count": getattr(doc_status, "chunks_count", None),
+                "success": is_success,
+                "error": error_msg or None,
+            }
+        )
+
+    return {
+        "track_id": track_id,
+        "total_items": len(results),
+        "success_count": success_count,
+        "error_count": len(errors),
+        "status_summary": status_summary,
+        "results": results,
+        "errors": errors,
+    }
+
+
+async def _run_document_task(
+    *,
+    task_id: str,
+    rag: LightRAG,
+    track_id: str,
+    label: str,
+    operation: str,
+    runner,
+) -> None:
+    service = get_task_service()
+    try:
+        await service.update_progress(
+            task_id,
+            5,
+            f"{operation} queued",
+            {"track_id": track_id, "label": label},
+        )
+        await service.update_progress(
+            task_id,
+            25,
+            f"{operation} processing started",
+            {"track_id": track_id, "label": label},
+        )
+        await runner()
+        result = await _build_document_task_result(rag, track_id)
+        await service.update_progress(
+            task_id,
+            90,
+            f"{operation} finalizing",
+            {
+                "track_id": track_id,
+                "label": label,
+                "status_summary": result.get("status_summary", {}),
+            },
+        )
+        if result["total_items"] > 0 and result["success_count"] == 0 and result["error_count"] > 0:
+            await service.fail_task(
+                task_id,
+                f"{operation} failed for all documents",
+                result=result,
+            )
+        else:
+            await service.complete_task(task_id, result=result)
+    except Exception as e:
+        logger.error(f"Error running document task {task_id}: {e}")
+        logger.error(traceback.format_exc())
+        await service.fail_task(task_id, str(e))
+
+
+def _create_document_task(
+    *,
+    task_type: TaskType,
+    workspace: str,
+    track_id: str,
+    metadata: dict[str, Any],
+):
+    service = get_task_service()
+    return service.create_task(
+        task_type=task_type,
+        workspace=workspace,
+        metadata={"track_id": track_id, **metadata},
+    )
 
 
 # VLM/LLM model functions (set by lightrag_server.py at startup)
@@ -209,6 +330,12 @@ class ScanResponse(BaseModel):
         default=None, description="Additional details about the scanning operation"
     )
     track_id: str = Field(description="Tracking ID for monitoring scanning progress")
+    task_id: Optional[str] = Field(
+        default=None, description="Async task ID for /api/tasks progress tracking"
+    )
+    stream_url: Optional[str] = Field(
+        default=None, description="NDJSON progress stream URL for the async task"
+    )
 
     class Config:
         json_schema_extra = {
@@ -216,6 +343,8 @@ class ScanResponse(BaseModel):
                 "status": "scanning_started",
                 "message": "Scanning process has been initiated in the background",
                 "track_id": "scan_20250729_170612_abc123",
+                "task_id": "b7c2...",
+                "stream_url": "/api/tasks/b7c2.../stream",
             }
         }
 
@@ -357,6 +486,12 @@ class InsertResponse(BaseModel):
     )
     message: str = Field(description="Message describing the operation result")
     track_id: str = Field(description="Tracking ID for monitoring processing status")
+    task_id: Optional[str] = Field(
+        default=None, description="Async task ID for /api/tasks progress tracking"
+    )
+    stream_url: Optional[str] = Field(
+        default=None, description="NDJSON progress stream URL for the async task"
+    )
 
     class Config:
         json_schema_extra = {
@@ -364,6 +499,8 @@ class InsertResponse(BaseModel):
                 "status": "success",
                 "message": "File 'document.pdf' uploaded successfully. Processing will continue in background.",
                 "track_id": "upload_20250729_170612_abc123",
+                "task_id": "b7c2...",
+                "stream_url": "/api/tasks/b7c2.../stream",
             }
         }
 
@@ -2339,13 +2476,29 @@ def create_document_routes(
 
         # Generate track_id with "scan" prefix for scanning operation
         track_id = generate_track_id("scan")
+        task = _create_document_task(
+            task_type=TaskType.DOCUMENT_SCAN,
+            workspace=workspace,
+            track_id=track_id,
+            metadata={"source_type": "input_dir_scan"},
+        )
 
-        # Start the scanning process in the background with track_id
-        background_tasks.add_task(run_scanning_process, workspace_rag, doc_manager, track_id)
+        get_task_service().run_in_background(
+            task.task_id,
+            _run_document_task,
+            task_id=task.task_id,
+            rag=workspace_rag,
+            track_id=track_id,
+            label="input directory scan",
+            operation="Document scan",
+            runner=lambda: run_scanning_process(workspace_rag, doc_manager, track_id),
+        )
         return ScanResponse(
             status="scanning_started",
             message="Scanning process has been initiated in the background",
             track_id=track_id,
+            task_id=task.task_id,
+            stream_url=_task_stream_url(task.task_id),
         )
 
     @router.post(
@@ -2424,22 +2577,42 @@ def create_document_routes(
             # Check if S3 upload is enabled
             s3_client = get_s3_client()
             upload_to_s3 = s3_client.is_enabled()
+            task = _create_document_task(
+                task_type=TaskType.DOCUMENT_INGEST,
+                workspace=workspace,
+                track_id=track_id,
+                metadata={
+                    "source_type": "upload",
+                    "file_name": safe_filename,
+                    "file_path_label": safe_filename,
+                    "upload_to_s3": upload_to_s3,
+                },
+            )
 
-            # Add to background tasks (use workspace-specific RAG)
             # S3 upload will be performed after doc_id is confirmed (in pipeline_index_file)
-            background_tasks.add_task(
-                pipeline_index_file,
-                workspace_rag,
-                file_path,
-                track_id,
-                upload_to_s3,
-                file_path,  # original_file_path for S3 upload
+            get_task_service().run_in_background(
+                task.task_id,
+                _run_document_task,
+                task_id=task.task_id,
+                rag=workspace_rag,
+                track_id=track_id,
+                label=safe_filename,
+                operation="Document upload",
+                runner=lambda: pipeline_index_file(
+                    workspace_rag,
+                    file_path,
+                    track_id,
+                    upload_to_s3,
+                    file_path,  # original_file_path for S3 upload
+                ),
             )
 
             return InsertResponse(
                 status="success",
                 message=f"File '{safe_filename}' uploaded successfully. Processing will continue in background.",
                 track_id=track_id,
+                task_id=task.task_id,
+                stream_url=_task_stream_url(task.task_id),
             )
 
         except Exception as e:
@@ -2515,19 +2688,40 @@ def create_document_routes(
 
             # Generate track_id for text insertion
             track_id = generate_track_id("insert")
-
-            background_tasks.add_task(
-                pipeline_index_texts,
-                workspace_rag,
-                [request.text],
-                file_sources=[request.file_source],
+            file_source = request.file_source or "unknown_source"
+            task = _create_document_task(
+                task_type=TaskType.DOCUMENT_INGEST,
+                workspace=workspace,
                 track_id=track_id,
+                metadata={
+                    "source_type": "text",
+                    "file_path_label": file_source,
+                    "text_count": 1,
+                },
+            )
+
+            get_task_service().run_in_background(
+                task.task_id,
+                _run_document_task,
+                task_id=task.task_id,
+                rag=workspace_rag,
+                track_id=track_id,
+                label=file_source,
+                operation="Document text ingest",
+                runner=lambda: pipeline_index_texts(
+                    workspace_rag,
+                    [request.text],
+                    file_sources=[request.file_source],
+                    track_id=track_id,
+                ),
             )
 
             return InsertResponse(
                 status="success",
                 message="Text successfully received. Processing will continue in background.",
                 track_id=track_id,
+                task_id=task.task_id,
+                stream_url=_task_stream_url(task.task_id),
             )
         except Exception as e:
             logger.error(f"Error /documents/text: {str(e)}")
@@ -2607,19 +2801,44 @@ def create_document_routes(
 
             # Generate track_id for texts insertion
             track_id = generate_track_id("insert")
-
-            background_tasks.add_task(
-                pipeline_index_texts,
-                workspace_rag,
-                request.texts,
-                file_sources=request.file_sources,
+            label = (
+                request.file_sources[0]
+                if request.file_sources and len(request.file_sources) > 0
+                else f"{len(request.texts)} text documents"
+            )
+            task = _create_document_task(
+                task_type=TaskType.DOCUMENT_INGEST,
+                workspace=workspace,
                 track_id=track_id,
+                metadata={
+                    "source_type": "texts",
+                    "file_path_label": label,
+                    "text_count": len(request.texts),
+                },
+            )
+
+            get_task_service().run_in_background(
+                task.task_id,
+                _run_document_task,
+                task_id=task.task_id,
+                rag=workspace_rag,
+                track_id=track_id,
+                label=label,
+                operation="Document texts ingest",
+                runner=lambda: pipeline_index_texts(
+                    workspace_rag,
+                    request.texts,
+                    file_sources=request.file_sources,
+                    track_id=track_id,
+                ),
             )
 
             return InsertResponse(
                 status="success",
                 message="Texts successfully received. Processing will continue in background.",
                 track_id=track_id,
+                task_id=task.task_id,
+                stream_url=_task_stream_url(task.task_id),
             )
         except Exception as e:
             logger.error(f"Error /documents/texts: {str(e)}")
@@ -3717,6 +3936,298 @@ def create_document_routes(
 
         except Exception as e:
             logger.error(f"Error requesting pipeline cancellation: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+
+    # =========================================================================
+    # Document preview (single-doc deep view for UI preview dialog)
+    # =========================================================================
+
+    class DocumentChunkInfo(BaseModel):
+        id: str
+        chunk_order_index: Optional[int] = None
+        tokens: Optional[int] = None
+        content: Optional[str] = None
+        structured_content: Any = None
+
+    class DocumentPreviewResponse(BaseModel):
+        id: str
+        status: str
+        file_path: Optional[str] = None
+        doc_nm: Optional[str] = None
+        content_summary: Optional[str] = None
+        content_length: Optional[int] = None
+        chunks_count: Optional[int] = None
+        track_id: Optional[str] = None
+        error_msg: Optional[str] = None
+        metadata: Optional[Dict[str, Any]] = None
+        created_at: Optional[str] = None
+        updated_at: Optional[str] = None
+        s3_url: Optional[str] = Field(
+            None,
+            description=(
+                "Resolved S3 URL for the original asset from doc_status, or "
+                "first chunk structured_content.image.s3_url as fallback."
+            ),
+        )
+        mime_type: Optional[str] = None
+        raw_kind: Literal["text", "image", "pdf", "binary"] = Field(
+            "binary",
+            description="How the original asset should be rendered in a browser.",
+        )
+        can_preview_inline: bool = Field(
+            False,
+            description="True when the original asset can be embedded in the browser.",
+        )
+        content: Optional[str] = Field(
+            None,
+            description="Full text content from full_docs storage for text documents.",
+        )
+        chunks: List[DocumentChunkInfo] = Field(default_factory=list)
+
+    _TEXT_LIKE_EXTS = {
+        ".txt", ".md", ".markdown", ".rst", ".log", ".csv", ".tsv",
+        ".json", ".jsonl", ".yaml", ".yml", ".xml", ".html", ".htm",
+        ".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".c", ".cc", ".cpp",
+        ".h", ".hpp", ".go", ".rs", ".rb", ".php", ".sh", ".sql",
+    }
+    _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"}
+    _PDF_EXTS = {".pdf"}
+
+    def _infer_raw_kind(
+        file_path: Optional[str],
+        first_chunk_structured: Any,
+        has_full_content: bool,
+    ) -> tuple[Literal["text", "image", "pdf", "binary"], Optional[str]]:
+        """Decide how the asset can be rendered plus best-effort MIME type."""
+        if isinstance(first_chunk_structured, dict):
+            structured_type = (first_chunk_structured.get("type") or "").lower()
+            if structured_type == "image":
+                return "image", "image/png"
+            if structured_type in {"table", "equation"}:
+                return "text", "text/markdown"
+
+        if file_path:
+            ext = Path(file_path).suffix.lower()
+            if ext in _IMAGE_EXTS:
+                return "image", mimetypes.guess_type(file_path)[0] or "image/png"
+            if ext in _PDF_EXTS:
+                return "pdf", "application/pdf"
+            if ext in _TEXT_LIKE_EXTS:
+                return "text", mimetypes.guess_type(file_path)[0] or "text/plain"
+
+        if has_full_content:
+            return "text", "text/plain"
+
+        mime = mimetypes.guess_type(file_path or "")[0] if file_path else None
+        return "binary", mime
+
+    def _resolve_s3_url(
+        doc_status_data: Optional[Dict[str, Any]],
+        first_chunk_structured: Any,
+    ) -> Optional[str]:
+        if doc_status_data and doc_status_data.get("s3_url"):
+            return doc_status_data["s3_url"]
+        if isinstance(first_chunk_structured, dict):
+            image = first_chunk_structured.get("image") or {}
+            if isinstance(image, dict) and image.get("s3_url"):
+                return image["s3_url"]
+        return None
+
+    async def _load_preview_payload(
+        workspace_rag,
+        doc_id: str,
+    ) -> tuple[
+        Optional[Dict[str, Any]],
+        Optional[Dict[str, Any]],
+        List[Dict[str, Any]],
+    ]:
+        """Fetch doc_status, full_docs and ordered chunks for a single document."""
+        status_data = await workspace_rag.doc_status.get_by_id(doc_id)
+        if not status_data:
+            return None, None, []
+
+        full_data = None
+        try:
+            if workspace_rag.full_docs is not None:
+                full_data = await workspace_rag.full_docs.get_by_id(doc_id)
+        except Exception as e:
+            logger.warning(f"full_docs.get_by_id failed for {doc_id}: {e}")
+
+        chunk_ids = status_data.get("chunks_list") or []
+        if not isinstance(chunk_ids, list):
+            chunk_ids = []
+
+        chunks: List[Dict[str, Any]] = []
+        if chunk_ids and workspace_rag.text_chunks is not None:
+            try:
+                raw_chunks = await workspace_rag.text_chunks.get_by_ids(list(chunk_ids))
+                for chunk_id, chunk in zip(chunk_ids, raw_chunks):
+                    if not chunk:
+                        continue
+                    if "id" not in chunk:
+                        chunk = {**chunk, "id": chunk_id}
+                    chunks.append(chunk)
+                chunks.sort(key=lambda item: item.get("chunk_order_index") or 0)
+            except Exception as e:
+                logger.warning(f"text_chunks.get_by_ids failed for {doc_id}: {e}")
+
+        return status_data, full_data, chunks
+
+    @router.get(
+        "/{doc_id}/preview",
+        response_model=DocumentPreviewResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def get_document_preview(
+        doc_id: str,
+        http_request: Request,
+    ) -> DocumentPreviewResponse:
+        """
+        Return one document's preview payload for the UI dialog.
+
+        Combines doc_status metadata, full_docs original content for text docs, and
+        ordered chunks with structured content for multimodal previews.
+        """
+        try:
+            workspace = _get_workspace_from_request(http_request)
+            workspace_rag = await get_workspace_rag(workspace)
+            if workspace_rag is None:
+                workspace_rag = rag
+
+            status_data, full_data, chunks = await _load_preview_payload(
+                workspace_rag, doc_id
+            )
+            if status_data is None:
+                raise HTTPException(status_code=404, detail=f"Document not found: {doc_id}")
+
+            first_structured = chunks[0].get("structured_content") if chunks else None
+            full_content = (full_data or {}).get("content")
+            has_full_content = bool(full_content and str(full_content).strip())
+
+            raw_kind, mime = _infer_raw_kind(
+                status_data.get("file_path"), first_structured, has_full_content
+            )
+            s3_url = _resolve_s3_url(status_data, first_structured)
+            can_inline = (
+                raw_kind == "text"
+                or (raw_kind == "image" and bool(s3_url))
+                or (raw_kind == "pdf" and bool(s3_url))
+            )
+
+            chunk_models = [
+                DocumentChunkInfo(
+                    id=chunk.get("id") or "",
+                    chunk_order_index=chunk.get("chunk_order_index"),
+                    tokens=chunk.get("tokens"),
+                    content=chunk.get("content"),
+                    structured_content=chunk.get("structured_content"),
+                )
+                for chunk in chunks
+            ]
+
+            return DocumentPreviewResponse(
+                id=doc_id,
+                status=str(status_data.get("status") or ""),
+                file_path=status_data.get("file_path"),
+                doc_nm=status_data.get("doc_nm"),
+                content_summary=status_data.get("content_summary"),
+                content_length=status_data.get("content_length"),
+                chunks_count=status_data.get("chunks_count"),
+                track_id=status_data.get("track_id"),
+                error_msg=status_data.get("error_msg"),
+                metadata=status_data.get("metadata") or {},
+                created_at=status_data.get("created_at"),
+                updated_at=status_data.get("updated_at"),
+                s3_url=s3_url,
+                mime_type=mime,
+                raw_kind=raw_kind,
+                can_preview_inline=can_inline,
+                content=full_content if raw_kind == "text" else None,
+                chunks=chunk_models,
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error GET /documents/{doc_id}/preview: {e}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @router.get(
+        "/{doc_id}/raw",
+        dependencies=[Depends(combined_auth)],
+    )
+    async def get_document_raw(
+        doc_id: str,
+        http_request: Request,
+        download: bool = False,
+    ):
+        """
+        Stream or redirect to a document's original asset for inline preview.
+
+        If an S3 URL is available, this endpoint redirects to it. Otherwise text
+        documents are served from full_docs, while unsupported binary documents
+        return 415 so the UI can show a clear fallback.
+        """
+        try:
+            workspace = _get_workspace_from_request(http_request)
+            workspace_rag = await get_workspace_rag(workspace)
+            if workspace_rag is None:
+                workspace_rag = rag
+
+            status_data, full_data, chunks = await _load_preview_payload(
+                workspace_rag, doc_id
+            )
+            if status_data is None:
+                raise HTTPException(status_code=404, detail=f"Document not found: {doc_id}")
+
+            first_structured = chunks[0].get("structured_content") if chunks else None
+            full_content = (full_data or {}).get("content")
+            has_full_content = bool(full_content and str(full_content).strip())
+            raw_kind, mime = _infer_raw_kind(
+                status_data.get("file_path"), first_structured, has_full_content
+            )
+            s3_url = _resolve_s3_url(status_data, first_structured)
+
+            if s3_url:
+                return RedirectResponse(url=s3_url, status_code=302)
+
+            if raw_kind == "text" and has_full_content:
+                from urllib.parse import quote as urlquote
+
+                payload = str(full_content).encode("utf-8")
+                headers: Dict[str, str] = {}
+                if download:
+                    filename = (
+                        status_data.get("doc_nm")
+                        or status_data.get("file_path")
+                        or f"{doc_id}.txt"
+                    )
+                    safe_name = Path(str(filename)).name or f"{doc_id}.txt"
+                    ascii_fallback = safe_name.encode("ascii", "ignore").decode() or doc_id
+                    encoded = urlquote(safe_name, safe="")
+                    headers["Content-Disposition"] = (
+                        f'attachment; filename="{ascii_fallback}"; '
+                        f"filename*=UTF-8''{encoded}"
+                    )
+
+                return Response(
+                    content=payload,
+                    media_type=(mime or "text/plain") + "; charset=utf-8",
+                    headers=headers,
+                )
+
+            raise HTTPException(
+                status_code=415,
+                detail=(
+                    "Original asset is not available for inline serving. "
+                    "Use the extracted-content view or re-upload the source file."
+                ),
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error GET /documents/{doc_id}/raw: {e}")
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=str(e))
 

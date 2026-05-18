@@ -13,8 +13,10 @@ import { Label } from '@/components/ui/Label'
 import Textarea from '@/components/ui/Textarea'
 import Button from '@/components/ui/Button'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { getWorkspaceMode, WorkspaceMode } from '@/api/lightrag'
 import { toast } from 'sonner'
-import { Loader2Icon } from 'lucide-react'
+import { BookOpenIcon, DatabaseIcon, LayersIcon, Loader2Icon } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 interface WorkspaceDialogProps {
   mode: 'create' | 'edit'
@@ -33,6 +35,7 @@ export default function WorkspaceDialog({ mode, open, onOpenChange }: WorkspaceD
   const [workspaceId, setWorkspaceId] = useState('')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('kms')
   const [idError, setIdError] = useState('')
 
   // Reset form when dialog opens
@@ -42,10 +45,12 @@ export default function WorkspaceDialog({ mode, open, onOpenChange }: WorkspaceD
         setWorkspaceId(selectedWorkspace.workspace_id)
         setName(selectedWorkspace.name)
         setDescription(selectedWorkspace.description || '')
+        setWorkspaceMode(getWorkspaceMode(selectedWorkspace))
       } else {
         setWorkspaceId('')
         setName('')
         setDescription('')
+        setWorkspaceMode('kms')
       }
       setIdError('')
     }
@@ -74,7 +79,7 @@ export default function WorkspaceDialog({ mode, open, onOpenChange }: WorkspaceD
   const handleSubmit = async () => {
     if (mode === 'create') {
       if (!workspaceId || !name) {
-        toast.error('Please fill in all required fields')
+        toast.error(t('workspace.requiredFields', 'Please fill in all required fields'))
         return
       }
       if (!validateWorkspaceId(workspaceId)) {
@@ -86,6 +91,18 @@ export default function WorkspaceDialog({ mode, open, onOpenChange }: WorkspaceD
           workspace_id: workspaceId,
           name,
           description: description || undefined,
+          metadata: {
+            workspace_mode: workspaceMode,
+            ...(workspaceMode !== 'kms'
+              ? {
+                answer_catalog: {
+                  default_lookup_mode: 'hybrid_fast',
+                  structured_lookup_enabled: workspaceMode !== 'kms',
+                  default_display_policy: 'both',
+                },
+              }
+              : {}),
+          },
         })
         toast.success(t('workspace.created'))
         onOpenChange(false)
@@ -94,14 +111,29 @@ export default function WorkspaceDialog({ mode, open, onOpenChange }: WorkspaceD
       }
     } else {
       if (!name) {
-        toast.error('Please fill in all required fields')
+        toast.error(t('workspace.requiredFields', 'Please fill in all required fields'))
         return
       }
 
       try {
+        const nextMetadata = {
+          ...(selectedWorkspace?.metadata || {}),
+          workspace_mode: workspaceMode,
+          ...(workspaceMode !== 'kms'
+            ? {
+              answer_catalog: {
+                ...(selectedWorkspace?.metadata?.answer_catalog || {}),
+                default_lookup_mode: selectedWorkspace?.metadata?.answer_catalog?.default_lookup_mode || 'hybrid_fast',
+                structured_lookup_enabled: selectedWorkspace?.metadata?.answer_catalog?.structured_lookup_enabled ?? true,
+                default_display_policy: selectedWorkspace?.metadata?.answer_catalog?.default_display_policy || 'both',
+              },
+            }
+            : {}),
+        }
         await updateExistingWorkspace(selectedWorkspace!.workspace_id, {
           name,
           description: description || undefined,
+          metadata: nextMetadata,
         })
         toast.success(t('workspace.updated'))
         onOpenChange(false)
@@ -120,8 +152,8 @@ export default function WorkspaceDialog({ mode, open, onOpenChange }: WorkspaceD
           </DialogTitle>
           <DialogDescription>
             {mode === 'create'
-              ? 'Create a new workspace for data isolation.'
-              : 'Update workspace information.'}
+              ? t('workspace.createDescription', 'Create a new workspace for data isolation.')
+              : t('workspace.editDescription', 'Update workspace information.')}
           </DialogDescription>
         </DialogHeader>
 
@@ -172,6 +204,36 @@ export default function WorkspaceDialog({ mode, open, onOpenChange }: WorkspaceD
               rows={3}
             />
           </div>
+
+          <div className="grid gap-2">
+            <Label>{t('workspace.mode', 'Workspace Type')}</Label>
+            <div className="grid gap-2">
+              <WorkspaceModeCard
+                value="kms"
+                selected={workspaceMode === 'kms'}
+                onSelect={setWorkspaceMode}
+                icon={DatabaseIcon}
+                title={t('workspace.modeKms', 'KMS')}
+                description={t('workspace.modeKmsDesc', 'Use the existing document, graph, schema, and RAG search workflow.')}
+              />
+              <WorkspaceModeCard
+                value="answer_catalog"
+                selected={workspaceMode === 'answer_catalog'}
+                onSelect={setWorkspaceMode}
+                icon={BookOpenIcon}
+                title={t('workspace.modeAnswerCatalog', 'FAQ / Fixed Answer')}
+                description={t('workspace.modeAnswerCatalogDesc', 'Manage approved answers, matching data, sources, and lookup analytics.')}
+              />
+              <WorkspaceModeCard
+                value="hybrid"
+                selected={workspaceMode === 'hybrid'}
+                onSelect={setWorkspaceMode}
+                icon={LayersIcon}
+                title={t('workspace.modeHybrid', 'Hybrid')}
+                description={t('workspace.modeHybridDesc', 'Use fixed-answer lookup together with the existing KMS/RAG workflow.')}
+              />
+            </div>
+          </div>
         </div>
 
         <DialogFooter>
@@ -185,5 +247,40 @@ export default function WorkspaceDialog({ mode, open, onOpenChange }: WorkspaceD
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function WorkspaceModeCard({
+  value,
+  selected,
+  onSelect,
+  icon: Icon,
+  title,
+  description,
+}: {
+  value: WorkspaceMode
+  selected: boolean
+  onSelect: (mode: WorkspaceMode) => void
+  icon: typeof DatabaseIcon
+  title: string
+  description: string
+}) {
+  return (
+    <button
+      type="button"
+      className={cn(
+        'rounded-md border p-3 text-left transition-colors hover:bg-accent',
+        selected ? 'border-primary bg-primary/5 shadow-sm' : 'border-border bg-background'
+      )}
+      onClick={() => onSelect(value)}
+    >
+      <div className="flex gap-3">
+        <Icon className={cn('mt-0.5 h-4 w-4', selected ? 'text-primary' : 'text-muted-foreground')} />
+        <div>
+          <div className="text-sm font-medium">{title}</div>
+          <div className="mt-1 text-xs leading-5 text-muted-foreground">{description}</div>
+        </div>
+      </div>
+    </button>
   )
 }

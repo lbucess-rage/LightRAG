@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from lightrag.api.utils_api import decode_workspace_header
 from lightrag.api.task_manager import TaskStatus, get_task_service
 from lightrag.utils import logger
 
@@ -30,7 +31,7 @@ def set_rag_workspace_getter(getter):
 
 
 def _get_workspace_from_request(request: Request) -> str:
-    return request.headers.get("LIGHTRAG-WORKSPACE", "")
+    return decode_workspace_header(request.headers.get("LIGHTRAG-WORKSPACE", ""))
 
 
 # ============================================================================

@@ -2670,19 +2670,38 @@ class LightRAG:
         else:
             raise ValueError(f"Unknown mode {data_param.mode}")
 
+        def _empty_query_data(message: str) -> dict[str, Any]:
+            return {
+                "status": "success",
+                "message": message,
+                "data": {
+                    "entities": [],
+                    "relationships": [],
+                    "chunks": [],
+                    "references": [],
+                },
+                "metadata": {
+                    "query_mode": data_param.mode,
+                    "keywords": {
+                        "high_level": data_param.hl_keywords or [],
+                        "low_level": data_param.ll_keywords or [],
+                    },
+                    "processing_info": {
+                        "total_entities_found": 0,
+                        "total_relations_found": 0,
+                        "entities_after_truncation": 0,
+                        "relations_after_truncation": 0,
+                        "merged_chunks_count": 0,
+                        "final_chunks_count": 0,
+                    },
+                },
+            }
+
         if query_result is None:
             no_result_message = "Query returned no results"
             if data_param.mode == "naive":
                 no_result_message = "No relevant document chunks found."
-            final_data: dict[str, Any] = {
-                "status": "failure",
-                "message": no_result_message,
-                "data": {},
-                "metadata": {
-                    "failure_reason": "no_results",
-                    "mode": data_param.mode,
-                },
-            }
+            final_data: dict[str, Any] = _empty_query_data(no_result_message)
             logger.info("[aquery_data] Query returned no results.")
         else:
             # Extract raw_data from QueryResult
@@ -2699,6 +2718,7 @@ class LightRAG:
                 )
             else:
                 logger.warning("[aquery_data] No data section found in query result")
+                final_data = _empty_query_data("No relevant data found.")
 
         await self._query_done()
         return final_data

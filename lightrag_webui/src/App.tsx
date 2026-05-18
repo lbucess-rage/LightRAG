@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import ThemeProvider from '@/components/ThemeProvider'
 import TabVisibilityProvider from '@/contexts/TabVisibilityProvider'
 import ApiKeyAlert from '@/components/ApiKeyAlert'
@@ -6,19 +6,29 @@ import StatusIndicator from '@/components/status/StatusIndicator'
 import { SiteInfo, webuiPrefix } from '@/lib/constants'
 import { useBackendState, useAuthStore } from '@/stores/state'
 import { useSettingsStore } from '@/stores/settings'
-import { getAuthStatus } from '@/api/lightrag'
+import { getAuthStatus, getWorkspaceMode } from '@/api/lightrag'
+import { useWorkspaceStore } from '@/stores/workspace'
+import { AppTab, getDefaultTabForMode, getVisibleTabsForMode } from '@/lib/workspaceMode'
 import SiteHeader from '@/features/SiteHeader'
 import { InvalidApiKeyError, RequireApiKeError } from '@/api/lightrag'
 import { ZapIcon } from 'lucide-react'
 
 import GraphViewer from '@/features/GraphViewer'
 import DocumentManager from '@/features/DocumentManager'
+import ChunkManagement from '@/features/ChunkManagement'
 import EntityManagement from '@/features/EntityManagement'
 import SchemaManager from '@/features/SchemaManager'
 import RetrievalTesting from '@/features/RetrievalTesting'
 import ApiSite from '@/features/ApiSite'
 import PromptSettings from '@/features/PromptSettings'
 import WorkspaceManagement from '@/features/WorkspaceManagement'
+import AnswerLibrary from '@/features/AnswerLibrary'
+import AnswerSources from '@/features/AnswerSources'
+import AnswerMatching from '@/features/AnswerMatching'
+import AnswerStructuredData from '@/features/AnswerStructuredData'
+import AnswerTestConsole from '@/features/AnswerTestConsole'
+import AnswerAnalytics from '@/features/AnswerAnalytics'
+import AnswerHelp from '@/features/AnswerHelp'
 
 import { Tabs, TabsContent } from '@/components/ui/Tabs'
 
@@ -26,10 +36,31 @@ function App() {
   const message = useBackendState.use.message()
   const enableHealthCheck = useSettingsStore.use.enableHealthCheck()
   const currentTab = useSettingsStore.use.currentTab()
+  const currentWorkspaceId = useWorkspaceStore.use.currentWorkspaceId()
+  const currentWorkspace = useWorkspaceStore.use.currentWorkspace()
+  const workspaces = useWorkspaceStore.use.workspaces()
   const [apiKeyAlertOpen, setApiKeyAlertOpen] = useState(false)
   const [initializing, setInitializing] = useState(true) // Add initializing state
   const versionCheckRef = useRef(false); // Prevent duplicate calls in Vite dev mode
   const healthCheckInitializedRef = useRef(false); // Prevent duplicate health checks in Vite dev mode
+  const effectiveWorkspace = useMemo(
+    () => currentWorkspace || workspaces.find((workspace) => workspace.workspace_id === currentWorkspaceId) || null,
+    [currentWorkspace, currentWorkspaceId, workspaces]
+  )
+  const workspaceModeReady = Boolean(effectiveWorkspace) || workspaces.length > 0
+  const workspaceMode = useMemo(() => getWorkspaceMode(effectiveWorkspace), [effectiveWorkspace])
+  const visibleTabs = useMemo(
+    () => (workspaceModeReady ? getVisibleTabsForMode(workspaceMode) : []),
+    [workspaceMode, workspaceModeReady]
+  )
+  const activeTab = useMemo(
+    () =>
+      workspaceModeReady && !visibleTabs.includes(currentTab)
+        ? getDefaultTabForMode(workspaceMode)
+        : currentTab,
+    [currentTab, visibleTabs, workspaceMode, workspaceModeReady]
+  )
+  const canShowTab = useCallback((tab: AppTab) => visibleTabs.includes(tab), [visibleTabs])
 
   const handleApiKeyAlertOpenChange = useCallback((open: boolean) => {
     setApiKeyAlertOpen(open)
@@ -154,9 +185,16 @@ function App() {
   }, []); // Empty dependency array ensures it only runs once on mount
 
   const handleTabChange = useCallback(
-    (tab: string) => useSettingsStore.getState().setCurrentTab(tab as any),
+    (tab: string) => useSettingsStore.getState().setCurrentTab(tab as AppTab),
     []
   )
+
+  useEffect(() => {
+    if (!workspaceModeReady) return
+    if (!visibleTabs.includes(currentTab)) {
+      useSettingsStore.getState().setCurrentTab(getDefaultTabForMode(workspaceMode))
+    }
+  }, [currentTab, visibleTabs, workspaceMode, workspaceModeReady])
 
   useEffect(() => {
     if (message) {
@@ -202,36 +240,97 @@ function App() {
           // Main content after initialization
           <main className="flex h-screen w-screen overflow-hidden">
             <Tabs
-              value={currentTab}
+              value={activeTab}
               className="!m-0 flex grow flex-col !p-0 overflow-hidden"
               onValueChange={handleTabChange}
             >
               <SiteHeader />
               <div className="relative grow">
-                <TabsContent value="documents" className="absolute top-0 right-0 bottom-0 left-0 overflow-auto">
-                  <DocumentManager />
-                </TabsContent>
-                <TabsContent value="knowledge-graph" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
-                  <GraphViewer />
-                </TabsContent>
-                <TabsContent value="entity-management" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
-                  <EntityManagement />
-                </TabsContent>
-                <TabsContent value="schema" className="absolute top-0 right-0 bottom-0 left-0 overflow-auto">
-                  <SchemaManager />
-                </TabsContent>
-                <TabsContent value="retrieval" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
-                  <RetrievalTesting />
-                </TabsContent>
-                <TabsContent value="api" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
-                  <ApiSite />
-                </TabsContent>
-                <TabsContent value="prompts" className="absolute top-0 right-0 bottom-0 left-0 overflow-auto">
-                  <PromptSettings />
-                </TabsContent>
-                <TabsContent value="workspaces" className="absolute top-0 right-0 bottom-0 left-0 overflow-auto">
-                  <WorkspaceManagement />
-                </TabsContent>
+                {!workspaceModeReady && (
+                  <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
+                    Loading workspace...
+                  </div>
+                )}
+                {canShowTab('documents') && (
+                  <TabsContent value="documents" className="absolute top-0 right-0 bottom-0 left-0 overflow-auto">
+                    <DocumentManager />
+                  </TabsContent>
+                )}
+                {canShowTab('chunks') && (
+                  <TabsContent value="chunks" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
+                    <ChunkManagement />
+                  </TabsContent>
+                )}
+                {canShowTab('knowledge-graph') && (
+                  <TabsContent value="knowledge-graph" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
+                    <GraphViewer />
+                  </TabsContent>
+                )}
+                {canShowTab('entity-management') && (
+                  <TabsContent value="entity-management" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
+                    <EntityManagement />
+                  </TabsContent>
+                )}
+                {canShowTab('schema') && (
+                  <TabsContent value="schema" className="absolute top-0 right-0 bottom-0 left-0 overflow-auto">
+                    <SchemaManager />
+                  </TabsContent>
+                )}
+                {canShowTab('retrieval') && (
+                  <TabsContent value="retrieval" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
+                    <RetrievalTesting />
+                  </TabsContent>
+                )}
+                {canShowTab('answers') && (
+                  <TabsContent value="answers" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
+                    <AnswerLibrary />
+                  </TabsContent>
+                )}
+                {canShowTab('answer-sources') && (
+                  <TabsContent value="answer-sources" className="absolute top-0 right-0 bottom-0 left-0 overflow-auto">
+                    <AnswerSources />
+                  </TabsContent>
+                )}
+                {canShowTab('answer-matching') && (
+                  <TabsContent value="answer-matching" className="absolute top-0 right-0 bottom-0 left-0 overflow-auto">
+                    <AnswerMatching />
+                  </TabsContent>
+                )}
+                {canShowTab('structured-data') && (
+                  <TabsContent value="structured-data" className="absolute top-0 right-0 bottom-0 left-0 overflow-auto">
+                    <AnswerStructuredData />
+                  </TabsContent>
+                )}
+                {canShowTab('answer-test') && (
+                  <TabsContent value="answer-test" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
+                    <AnswerTestConsole />
+                  </TabsContent>
+                )}
+                {canShowTab('answer-analytics') && (
+                  <TabsContent value="answer-analytics" className="absolute top-0 right-0 bottom-0 left-0 overflow-auto">
+                    <AnswerAnalytics />
+                  </TabsContent>
+                )}
+                {canShowTab('answer-help') && (
+                  <TabsContent value="answer-help" className="absolute top-0 right-0 bottom-0 left-0 overflow-auto">
+                    <AnswerHelp />
+                  </TabsContent>
+                )}
+                {canShowTab('api') && (
+                  <TabsContent value="api" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
+                    <ApiSite />
+                  </TabsContent>
+                )}
+                {canShowTab('prompts') && (
+                  <TabsContent value="prompts" className="absolute top-0 right-0 bottom-0 left-0 overflow-auto">
+                    <PromptSettings />
+                  </TabsContent>
+                )}
+                {canShowTab('workspaces') && (
+                  <TabsContent value="workspaces" className="absolute top-0 right-0 bottom-0 left-0 overflow-auto">
+                    <WorkspaceManagement />
+                  </TabsContent>
+                )}
               </div>
             </Tabs>
             {enableHealthCheck && <StatusIndicator />}

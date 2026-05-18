@@ -18,6 +18,7 @@ from typing import Optional, Dict, Any, List
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Request
 from pydantic import BaseModel
 
+from lightrag.api.utils_api import decode_workspace_header
 from lightrag.utils import logger, compute_mdhash_id, sanitize_text_for_encoding
 from lightrag.api.utils_s3 import get_s3_client
 from lightrag.multimodal.config import MultimodalConfig
@@ -48,7 +49,7 @@ async def get_workspace_rag(workspace: str):
 
 
 def _get_workspace_from_request(request: Request) -> str:
-    return request.headers.get("LIGHTRAG-WORKSPACE", "")
+    return decode_workspace_header(request.headers.get("LIGHTRAG-WORKSPACE", ""))
 
 
 # ============================================================================
@@ -118,6 +119,41 @@ class ProcessAsyncResponse(BaseModel):
     task_id: str
     stream_url: str
     message: str
+
+
+def _parse_document_sync(
+    tmp_path: Path,
+    *,
+    file_name: str,
+    parser: str,
+    extract_images: bool,
+    password: Optional[str],
+    config: MultimodalConfig,
+) -> list[dict[str, Any]]:
+    if parser == "docling":
+        try:
+            from lightrag.multimodal.parsers.docling_parser import DoclingMultimodalParser
+
+            doc_parser = DoclingMultimodalParser()
+            return doc_parser.parse_document(tmp_path)
+        except (RuntimeError, Exception) as docling_err:
+            logger.warning(
+                f"Docling failed for {file_name}, falling back to PyMuPDF: {docling_err}"
+            )
+
+    from lightrag.multimodal.parsers.pymupdf_parser import PyMuPDFMultimodalParser
+
+    doc_parser = PyMuPDFMultimodalParser(
+        min_image_width=config.min_image_width,
+        min_image_height=config.min_image_height,
+        max_image_aspect_ratio=config.max_image_aspect_ratio,
+        enable_duplicate_filtering=config.enable_duplicate_filtering,
+    )
+    return doc_parser.parse_document(
+        tmp_path,
+        password=password,
+        extract_images=extract_images,
+    )
 
 
 # ============================================================================
@@ -207,40 +243,15 @@ async def parse_document(
             tmp_path = Path(tmp.name)
 
         try:
-            if parser == "docling":
-                try:
-                    from lightrag.multimodal.parsers.docling_parser import DoclingMultimodalParser
-                    doc_parser = DoclingMultimodalParser()
-                    content_list = doc_parser.parse_document(tmp_path)
-                except (RuntimeError, Exception) as docling_err:
-                    logger.warning(
-                        f"Docling failed for {file_name}, falling back to PyMuPDF: {docling_err}"
-                    )
-                    from lightrag.multimodal.parsers.pymupdf_parser import PyMuPDFMultimodalParser
-                    config = _get_config()
-                    doc_parser = PyMuPDFMultimodalParser(
-                        min_image_width=config.min_image_width,
-                        min_image_height=config.min_image_height,
-                        max_image_aspect_ratio=config.max_image_aspect_ratio,
-                        enable_duplicate_filtering=config.enable_duplicate_filtering,
-                    )
-                    content_list = doc_parser.parse_document(
-                        tmp_path, password=password, extract_images=extract_images,
-                    )
-            else:
-                from lightrag.multimodal.parsers.pymupdf_parser import PyMuPDFMultimodalParser
-                config = _get_config()
-                doc_parser = PyMuPDFMultimodalParser(
-                    min_image_width=config.min_image_width,
-                    min_image_height=config.min_image_height,
-                    max_image_aspect_ratio=config.max_image_aspect_ratio,
-                    enable_duplicate_filtering=config.enable_duplicate_filtering,
-                )
-                content_list = doc_parser.parse_document(
-                    tmp_path,
-                    password=password,
-                    extract_images=extract_images,
-                )
+            content_list = await asyncio.to_thread(
+                _parse_document_sync,
+                tmp_path,
+                file_name=file_name,
+                parser=parser,
+                extract_images=extract_images,
+                password=password,
+                config=_get_config(),
+            )
 
             # Count content types
             type_counts: Dict[str, int] = {}
@@ -404,40 +415,15 @@ async def _process_multimodal_background(
             tmp.write(file_bytes)
             tmp_path = Path(tmp.name)
 
-        if parser == "docling":
-            try:
-                from lightrag.multimodal.parsers.docling_parser import DoclingMultimodalParser
-                doc_parser = DoclingMultimodalParser()
-                content_list = doc_parser.parse_document(tmp_path)
-            except (RuntimeError, Exception) as docling_err:
-                logger.warning(
-                    f"Docling failed for {file_name}, falling back to PyMuPDF: {docling_err}"
-                )
-                await service.update_progress(
-                    task_id, 10.0,
-                    f"Docling failed, retrying with PyMuPDF...",
-                )
-                from lightrag.multimodal.parsers.pymupdf_parser import PyMuPDFMultimodalParser
-                doc_parser = PyMuPDFMultimodalParser(
-                    min_image_width=config.min_image_width,
-                    min_image_height=config.min_image_height,
-                    max_image_aspect_ratio=config.max_image_aspect_ratio,
-                    enable_duplicate_filtering=config.enable_duplicate_filtering,
-                )
-                content_list = doc_parser.parse_document(
-                    tmp_path, password=password, extract_images=process_images
-                )
-        else:
-            from lightrag.multimodal.parsers.pymupdf_parser import PyMuPDFMultimodalParser
-            doc_parser = PyMuPDFMultimodalParser(
-                min_image_width=config.min_image_width,
-                min_image_height=config.min_image_height,
-                max_image_aspect_ratio=config.max_image_aspect_ratio,
-                enable_duplicate_filtering=config.enable_duplicate_filtering,
-            )
-            content_list = doc_parser.parse_document(
-                tmp_path, password=password, extract_images=process_images
-            )
+        content_list = await asyncio.to_thread(
+            _parse_document_sync,
+            tmp_path,
+            file_name=file_name,
+            parser=parser,
+            extract_images=process_images,
+            password=password,
+            config=config,
+        )
 
         # Separate text and multimodal content
         text_blocks = []
@@ -474,7 +460,11 @@ async def _process_multimodal_background(
                     cjk_ratio_threshold=config.garbled_cjk_threshold,
                 ):
                     page_idx = block.get("page_idx", 0)
-                    image_b64 = render_page_to_base64(str(tmp_path), page_idx)
+                    image_b64 = await asyncio.to_thread(
+                        render_page_to_base64,
+                        str(tmp_path),
+                        page_idx,
+                    )
                     if image_b64:
                         try:
                             extracted = await _vlm_model_func(

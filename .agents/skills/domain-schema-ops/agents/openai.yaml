@@ -1,0 +1,4 @@
+interface:
+  display_name: "Domain Schema Ops"
+  short_description: "도메인 스키마 발견, 적용, 병합, 시드 엔티티를 점검합니다."
+  default_prompt: "LightRAG 도메인 스키마 기능과 적용 상태를 분석해줘."

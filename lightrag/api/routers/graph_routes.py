@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from lightrag.utils import logger
 from lightrag.kg.shared_storage import get_default_workspace
-from ..utils_api import get_combined_auth_dependency
+from ..utils_api import decode_workspace_header, get_combined_auth_dependency
 
 router = APIRouter(tags=["graph"])
 
@@ -49,7 +49,7 @@ def _get_workspace_from_request(request: Request) -> str:
     Returns:
         Workspace ID from header or default workspace
     """
-    workspace = request.headers.get("LIGHTRAG-WORKSPACE", "").strip()
+    workspace = decode_workspace_header(request.headers.get("LIGHTRAG-WORKSPACE", ""))
     if workspace:
         return workspace
     # Fall back to server default workspace

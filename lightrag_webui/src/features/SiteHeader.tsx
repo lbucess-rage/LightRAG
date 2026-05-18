@@ -4,12 +4,15 @@ import AppSettings from '@/components/AppSettings'
 import WorkspaceSelector from '@/components/workspace/WorkspaceSelector'
 import { TabsList, TabsTrigger } from '@/components/ui/Tabs'
 import { useSettingsStore } from '@/stores/settings'
+import { useWorkspaceStore } from '@/stores/workspace'
 import { useAuthStore } from '@/stores/state'
 import { cn } from '@/lib/utils'
 import { useTranslation } from 'react-i18next'
 import { navigationService } from '@/services/navigation'
 import { ZapIcon, GithubIcon, LogOutIcon } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip'
+import { getWorkspaceMode } from '@/api/lightrag'
+import { getDefaultTabForMode, getVisibleTabsForMode, navigationItems } from '@/lib/workspaceMode'
 
 interface NavigationTabProps {
   value: string
@@ -33,35 +36,29 @@ function NavigationTab({ value, currentTab, children }: NavigationTabProps) {
 
 function TabsNavigation() {
   const currentTab = useSettingsStore.use.currentTab()
+  const currentWorkspaceId = useWorkspaceStore.use.currentWorkspaceId()
+  const currentWorkspace = useWorkspaceStore.use.currentWorkspace()
+  const workspaces = useWorkspaceStore.use.workspaces()
   const { t } = useTranslation()
+  const effectiveWorkspace =
+    currentWorkspace || workspaces.find((workspace) => workspace.workspace_id === currentWorkspaceId) || null
+  const workspaceModeReady = Boolean(effectiveWorkspace) || workspaces.length > 0
+  const workspaceMode = getWorkspaceMode(effectiveWorkspace)
+  const visibleTabs = workspaceModeReady ? getVisibleTabsForMode(workspaceMode) : []
+  const activeTab =
+    workspaceModeReady && !visibleTabs.includes(currentTab)
+      ? getDefaultTabForMode(workspaceMode)
+      : currentTab
+  const items = navigationItems.filter((item) => visibleTabs.includes(item.value))
 
   return (
-    <div className="flex h-8 self-center">
+    <div className="flex h-8 max-w-full self-center overflow-x-auto">
       <TabsList className="h-full gap-2">
-        <NavigationTab value="documents" currentTab={currentTab}>
-          {t('header.documents')}
-        </NavigationTab>
-        <NavigationTab value="knowledge-graph" currentTab={currentTab}>
-          {t('header.knowledgeGraph')}
-        </NavigationTab>
-        <NavigationTab value="entity-management" currentTab={currentTab}>
-          {t('header.entityManagement')}
-        </NavigationTab>
-        <NavigationTab value="schema" currentTab={currentTab}>
-          {t('header.schema')}
-        </NavigationTab>
-        <NavigationTab value="retrieval" currentTab={currentTab}>
-          {t('header.retrieval')}
-        </NavigationTab>
-        <NavigationTab value="api" currentTab={currentTab}>
-          {t('header.api')}
-        </NavigationTab>
-        <NavigationTab value="prompts" currentTab={currentTab}>
-          {t('header.prompts')}
-        </NavigationTab>
-        <NavigationTab value="workspaces" currentTab={currentTab}>
-          {t('header.workspaces')}
-        </NavigationTab>
+        {items.map((item) => (
+          <NavigationTab key={item.value} value={item.value} currentTab={activeTab}>
+            {t(item.labelKey, item.fallback)}
+          </NavigationTab>
+        ))}
       </TabsList>
     </div>
   )

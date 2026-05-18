@@ -23,6 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from lightrag.api.utils_api import (
+    decode_workspace_header,
     get_combined_auth_dependency,
     display_splash_screen,
     check_env_file,
@@ -65,6 +66,22 @@ from lightrag.api.routers.user_prompt_template_routes import create_user_prompt_
 from lightrag.api.routers.entity_management_routes import (
     create_entity_management_routes,
     set_rag_workspace_getter as set_entity_mgmt_rag_workspace_getter,
+)
+from lightrag.api.routers.deletion_routes import (
+    create_deletion_routes,
+    set_rag_workspace_getter as set_deletion_rag_workspace_getter,
+)
+from lightrag.api.routers.chunk_routes import (
+    create_chunk_routes,
+    set_rag_workspace_getter as set_chunk_rag_workspace_getter,
+)
+from lightrag.api.routers.history_routes import (
+    create_history_routes,
+    set_rag_workspace_getter as set_history_rag_workspace_getter,
+)
+from lightrag.api.routers.answer_routes import (
+    create_answer_routes,
+    set_rag_workspace_getter as set_answer_rag_workspace_getter,
 )
 from lightrag.api.routers.workspace_routes import create_workspace_routes
 from lightrag.api.routers.ollama_api import OllamaAPI
@@ -633,7 +650,7 @@ def create_app(args):
             return query_workspace.strip()
 
         # Priority 3: HTTP header
-        header_workspace = request.headers.get("LIGHTRAG-WORKSPACE", "").strip()
+        header_workspace = decode_workspace_header(request.headers.get("LIGHTRAG-WORKSPACE", ""))
         if header_workspace:
             return header_workspace
 
@@ -1275,6 +1292,10 @@ def create_app(args):
         set_graph_rag_workspace_getter(get_rag_for_workspace)
         set_query_rag_workspace_getter(get_rag_for_workspace, get_default_workspace)
         set_entity_mgmt_rag_workspace_getter(get_rag_for_workspace)
+        set_deletion_rag_workspace_getter(get_rag_for_workspace)
+        set_chunk_rag_workspace_getter(get_rag_for_workspace)
+        set_history_rag_workspace_getter(get_rag_for_workspace)
+        set_answer_rag_workspace_getter(get_rag_for_workspace)
         set_schema_rag_workspace_getter(get_rag_for_workspace)
         set_ollama_rag_workspace_getter(get_rag_for_workspace)
         set_multimodal_rag_workspace_getter(get_rag_for_workspace)
@@ -1300,6 +1321,11 @@ def create_app(args):
     app.include_router(create_prompt_routes(rag, api_key))
     app.include_router(create_user_prompt_template_routes(rag, api_key))
     app.include_router(create_entity_management_routes(rag, api_key))
+    app.include_router(create_deletion_routes(rag, api_key, doc_manager))
+    app.include_router(create_chunk_routes(rag, api_key))
+    app.include_router(create_history_routes(rag, api_key))
+    app.include_router(create_answer_routes(rag, api_key))
+    logger.info("Operational deletion, chunk, history, and answer routes initialized")
     app.include_router(create_workspace_routes(rag, api_key))
 
     # Add Schema API routes
@@ -1489,7 +1515,7 @@ def create_app(args):
       oauth2RedirectUrl: window.location.origin + '/docs/oauth2-redirect',
       presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
       requestInterceptor: function(req) {{
-        if (currentWorkspace) req.headers['LIGHTRAG-WORKSPACE'] = currentWorkspace;
+        if (currentWorkspace) req.headers['LIGHTRAG-WORKSPACE'] = encodeURIComponent(currentWorkspace);
         return req;
       }}
     }});
