@@ -491,7 +491,7 @@
   "workspace": {
     "loading": "Chargement de l'espace de travail...",
     "loadFailedTitle": "Échec du chargement de l'espace de travail",
-    "loadFailedDescription": "Le serveur répond, mais les données de l'espace de travail ne se sont pas chargées à temps. Cela peut arriver après une reconnexion VPN ou une réinitialisation de connexion à la base de données.",
+    "loadFailedDescription": "Le serveur répond, mais les données de l'espace de travail ne se sont pas chargées à temps. Réessayez dans un instant ou vérifiez la connectivité du service à la base de données.",
     "retryLoad": "Réessayer",
     "requiredFields": "Veuillez renseigner tous les champs obligatoires",
     "createDescription": "Créez un nouvel espace de travail pour isoler les données.",

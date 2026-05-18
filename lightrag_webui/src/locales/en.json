@@ -1378,7 +1378,7 @@
     "noWorkspaces": "No workspaces found",
     "loading": "Loading workspace...",
     "loadFailedTitle": "Workspace load failed",
-    "loadFailedDescription": "The server is reachable, but workspace data did not load in time. This can happen after VPN reconnects or database connection resets.",
+    "loadFailedDescription": "The server is reachable, but workspace data did not load in time. Please retry shortly or check service database connectivity.",
     "retryLoad": "Retry",
     "default": "Default",
     "docsCount": "{{count}} docs",

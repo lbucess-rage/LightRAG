@@ -265,7 +265,7 @@ function App() {
                             <p className="text-sm text-muted-foreground">
                               {t(
                                 'workspace.loadFailedDescription',
-                                'The server is reachable, but workspace data did not load in time. This can happen after VPN reconnects or database connection resets.'
+                                'The server is reachable, but workspace data did not load in time. Please retry shortly or check service database connectivity.'
                               )}
                             </p>
                             <p className="break-words rounded bg-muted px-2 py-1 text-xs text-muted-foreground">

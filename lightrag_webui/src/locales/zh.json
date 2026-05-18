@@ -491,7 +491,7 @@
   "workspace": {
     "loading": "正在加载工作区...",
     "loadFailedTitle": "工作区加载失败",
-    "loadFailedDescription": "服务器可访问，但工作区数据未能及时加载。VPN 重新连接或数据库连接重置后可能发生这种情况。",
+    "loadFailedDescription": "服务器可访问，但工作区数据未能及时加载。请稍后重试或检查服务的数据库连接状态。",
     "retryLoad": "重试",
     "requiredFields": "请填写所有必填字段",
     "createDescription": "创建用于数据隔离的新工作区。",

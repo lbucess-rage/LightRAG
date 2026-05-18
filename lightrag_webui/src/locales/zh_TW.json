@@ -491,7 +491,7 @@
   "workspace": {
     "loading": "正在載入工作空間...",
     "loadFailedTitle": "工作空間載入失敗",
-    "loadFailedDescription": "伺服器可連線，但工作空間資料未能及時載入。VPN 重新連線或資料庫連線重設後可能發生這種情況。",
+    "loadFailedDescription": "伺服器可連線，但工作空間資料未能及時載入。請稍後重試或檢查服務的資料庫連線狀態。",
     "retryLoad": "重試",
     "requiredFields": "請填寫所有必填欄位",
     "createDescription": "建立用於資料隔離的新工作區。",

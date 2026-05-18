@@ -113,12 +113,18 @@ class PostgreSQLDB:
             self.connection_retry_backoff,
             config["connection_retry_backoff_max"],
         )
+        self.connection_acquire_timeout = float(config["connection_acquire_timeout"])
+        self.connection_operation_timeout = float(
+            config["connection_operation_timeout"]
+        )
         self.pool_close_timeout = config["pool_close_timeout"]
         logger.info(
-            "PostgreSQL, Retry config: attempts=%s, backoff=%.1fs, backoff_max=%.1fs, pool_close_timeout=%.1fs",
+            "PostgreSQL, Retry config: attempts=%s, backoff=%.1fs, backoff_max=%.1fs, acquire_timeout=%.1fs, operation_timeout=%.1fs, pool_close_timeout=%.1fs",
             self.connection_retry_attempts,
             self.connection_retry_backoff,
             self.connection_retry_backoff_max,
+            self.connection_acquire_timeout,
+            self.connection_operation_timeout,
             self.pool_close_timeout,
         )
 
@@ -202,6 +208,7 @@ class PostgreSQLDB:
             "port": self.port,
             "min_size": 1,
             "max_size": self.max,
+            "command_timeout": self.connection_operation_timeout,
         }
 
         # Only add statement_cache_size if it's configured
@@ -253,12 +260,33 @@ class PostgreSQLDB:
         )
 
         async def _create_pool_once() -> None:
-            pool = await asyncpg.create_pool(**connection_params)  # type: ignore
+            pool = await asyncio.wait_for(
+                asyncpg.create_pool(**connection_params),  # type: ignore
+                timeout=self.connection_operation_timeout,
+            )
             try:
-                async with pool.acquire() as connection:
-                    await self.configure_vector_extension(connection)
+                async with pool.acquire(
+                    timeout=self.connection_acquire_timeout
+                ) as connection:
+                    await asyncio.wait_for(
+                        self.configure_vector_extension(connection),
+                        timeout=self.connection_operation_timeout,
+                    )
             except Exception:
-                await pool.close()
+                try:
+                    await asyncio.wait_for(
+                        pool.close(), timeout=self.pool_close_timeout
+                    )
+                except asyncio.TimeoutError:
+                    logger.error(
+                        "PostgreSQL, Timed out closing newly created pool after %.2fs",
+                        self.pool_close_timeout,
+                    )
+                except Exception as close_error:
+                    logger.warning(
+                        "PostgreSQL, Failed to close newly created pool cleanly: %r",
+                        close_error,
+                    )
                 raise
             self.pool = pool
 
@@ -358,16 +386,29 @@ class PostgreSQLDB:
             reraise=True,
         ):
             with attempt:
-                await self._ensure_pool()
+                await asyncio.wait_for(
+                    self._ensure_pool(), timeout=self.connection_operation_timeout
+                )
                 assert self.pool is not None
-                async with self.pool.acquire() as connection:  # type: ignore[arg-type]
+                async with self.pool.acquire(  # type: ignore[arg-type]
+                    timeout=self.connection_acquire_timeout
+                ) as connection:
                     if with_age and graph_name:
-                        await self.configure_age(connection, graph_name)
+                        await asyncio.wait_for(
+                            self.configure_age(connection, graph_name),
+                            timeout=self.connection_operation_timeout,
+                        )
                     elif with_age and not graph_name:
                         raise ValueError("Graph name is required when with_age is True")
                     if self.vector_index_type == "VCHORDRQ":
-                        await self.configure_vchordrq(connection)
-                    return await operation(connection)
+                        await asyncio.wait_for(
+                            self.configure_vchordrq(connection),
+                            timeout=self.connection_operation_timeout,
+                        )
+                    return await asyncio.wait_for(
+                        operation(connection),
+                        timeout=self.connection_operation_timeout,
+                    )
 
     @staticmethod
     async def configure_vector_extension(connection: asyncpg.Connection) -> None:
@@ -2317,6 +2358,38 @@ class ClientManager:
                     )
                 ),
             ),
+            "connection_acquire_timeout": max(
+                1.0,
+                min(
+                    60.0,
+                    float(
+                        os.environ.get(
+                            "POSTGRES_CONNECTION_ACQUIRE_TIMEOUT",
+                            config.get(
+                                "postgres",
+                                "connection_acquire_timeout",
+                                fallback=5.0,
+                            ),
+                        )
+                    ),
+                ),
+            ),
+            "connection_operation_timeout": max(
+                2.0,
+                min(
+                    600.0,
+                    float(
+                        os.environ.get(
+                            "POSTGRES_CONNECTION_OPERATION_TIMEOUT",
+                            config.get(
+                                "postgres",
+                                "connection_operation_timeout",
+                                fallback=30.0,
+                            ),
+                        )
+                    ),
+                ),
+            ),
             "pool_close_timeout": min(
                 30.0,
                 float(
@@ -4098,9 +4171,7 @@ class PGGraphStorage(BaseGraphStorage):
             )
 
             # Create AGE extension and configure graph environment once at initialization
-            async with self.db.pool.acquire() as connection:
-                # First ensure AGE extension is created
-                await PostgreSQLDB.configure_age_extension(connection)
+            await self.db._run_with_retry(PostgreSQLDB.configure_age_extension)
 
             # Execute each statement separately and ignore errors
             queries = [
