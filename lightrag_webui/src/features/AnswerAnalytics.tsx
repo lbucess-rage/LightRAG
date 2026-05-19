@@ -111,7 +111,7 @@ export default function AnswerAnalytics() {
 
       <div className="grid gap-3 md:grid-cols-4">
         <Metric label={t('answerCatalog.library.total', 'Total')} value={Number(stats.answers?.total || 0)} />
-        <Metric label={t('answerCatalog.analytics.resolveEvents', 'Resolve Events')} value={Number(stats.events?.resolves || filteredEvents.length)} />
+        <Metric label={t('answerCatalog.analytics.resolveEvents', 'Lookup History')} value={Number(stats.events?.resolves || filteredEvents.length)} />
         <Metric label={t('answerCatalog.analytics.noMatch', 'No Match')} value={noMatch} />
         <Metric label={t('answerCatalog.analytics.avgLatency', 'Avg Latency')} value={avgLatency} suffix="ms" />
       </div>

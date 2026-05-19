@@ -275,7 +275,7 @@ export default function WorkspaceManagement() {
                   <div className="mt-2">
                     <Badge variant="outline">
                       {getWorkspaceMode(workspace) === 'answer_catalog'
-                        ? t('workspace.modeAnswerCatalog', 'FAQ / Fixed Answer')
+                        ? t('workspace.modeAnswerCatalog', 'FAQ / Approved Answers')
                         : getWorkspaceMode(workspace) === 'hybrid'
                           ? t('workspace.modeHybrid', 'Hybrid')
                           : t('workspace.modeKms', 'KMS')}

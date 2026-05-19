@@ -153,7 +153,7 @@ export default function AnswerStructuredData() {
         .filter((field) => ['title', 'category', 'id'].includes(field.semantic_role))
         .map((field) => field.name)
         .slice(0, 5))
-      toast.success(t('answerCatalog.structured.profileComplete', 'Structured source profile is ready.'))
+      toast.success(t('answerCatalog.structured.profileComplete', 'Structured source analysis is ready.'))
       return result
     } catch (err) {
       toast.error(localizedErrorMessage(err, t))
@@ -199,7 +199,7 @@ export default function AnswerStructuredData() {
         metadata: { created_from_ui: 'structured_data' },
       })
       const createdCount = response.answers?.length || 1
-      toast.success(t('answerCatalog.structured.materializeComplete', 'Structured dataset draft was created.', { count: createdCount }))
+      toast.success(t('answerCatalog.structured.materializeComplete', '{{count}} structured draft(s) were created.', { count: createdCount }))
       setSelectedDatasetId(response.dataset.answer_id)
       setProfile(response.profile)
       await fetchDatasets()
@@ -258,7 +258,7 @@ export default function AnswerStructuredData() {
               <Badge variant="outline">Phase 5 MVP</Badge>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              {t('answerCatalog.structured.description', 'Profile DB/NoSQL/table sources and expose safe semantic views for deterministic lookup.')}
+              {t('answerCatalog.structured.description', 'Analyze DB, NoSQL, and table sources so they can be searched safely with fixed conditions.')}
             </p>
           </div>
         </div>
@@ -272,7 +272,7 @@ export default function AnswerStructuredData() {
       </div>
 
       <div className="grid gap-3 md:grid-cols-4">
-        <Metric label={t('answerCatalog.structured.profiledAnswers', 'Profiled Answers')} value={filtered.length} />
+        <Metric label={t('answerCatalog.structured.profiledAnswers', 'Analyzed Answers')} value={filtered.length} />
         <Metric label={t('answerCatalog.structured.totalColumns', 'Detected Fields')} value={allColumns.length} />
         <Metric label={t('answerCatalog.structured.tableRows', 'Known Rows')} value={filtered.reduce((sum, item) => sum + item.row_count, 0)} />
         <Metric label={t('answerCatalog.library.total', 'Total')} value={datasets.length} />
@@ -320,7 +320,7 @@ export default function AnswerStructuredData() {
                 </Select>
               </div>
               <div className="grid gap-2">
-                <Label>{t('answerCatalog.structured.materializationMode', 'Materialization Mode')}</Label>
+                <Label>{t('answerCatalog.structured.materializationMode', 'Creation Mode')}</Label>
                 <Select
                   value={materializationMode}
                   onValueChange={(value) => setMaterializationMode(value as 'table_as_dataset' | 'row_per_answer')}
@@ -343,7 +343,7 @@ export default function AnswerStructuredData() {
             </div>
             <div className="grid gap-3 md:grid-cols-2">
               <div className="grid gap-2">
-                <Label>{t('answerCatalog.structured.sourceUri', 'Source URI')}</Label>
+                <Label>{t('answerCatalog.structured.sourceUri', 'Source Location')}</Label>
                 <Input
                   value={sourceUri}
                   onChange={(event) => setSourceUri(event.target.value)}
@@ -376,7 +376,7 @@ export default function AnswerStructuredData() {
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" onClick={handleProfileSource} disabled={isProfiling || isMaterializing}>
                 <WandSparklesIcon className={isProfiling ? 'h-4 w-4 animate-pulse' : 'h-4 w-4'} />
-                {t('answerCatalog.structured.profileSource', 'Profile Source')}
+                {t('answerCatalog.structured.profileSource', 'Analyze Source')}
               </Button>
               <Button onClick={handleMaterializeSource} disabled={isProfiling || isMaterializing}>
                 {isMaterializing ? <RefreshCwIcon className="h-4 w-4 animate-spin" /> : <SaveIcon className="h-4 w-4" />}
@@ -393,7 +393,7 @@ export default function AnswerStructuredData() {
 
         <div className="rounded-md border p-4">
           <div className="mb-3 flex items-center justify-between gap-2">
-            <div className="font-semibold">{t('answerCatalog.structured.profilePreview', 'Profile Preview')}</div>
+            <div className="font-semibold">{t('answerCatalog.structured.profilePreview', 'Analysis Preview')}</div>
             {profile && (
               <div className="flex flex-wrap gap-1">
                 <Badge variant="outline">{profile.kind}</Badge>
@@ -446,7 +446,7 @@ export default function AnswerStructuredData() {
                       <th className="p-2 text-left">{t('answerCatalog.structured.role', 'Role')}</th>
                       <th className="p-2 text-right">{t('answerCatalog.structured.nullRate', 'Null')}</th>
                       <th className="p-2 text-right">{t('answerCatalog.structured.distinct', 'Distinct')}</th>
-                      <th className="p-2 text-left">{t('answerCatalog.structured.guidance', 'Guidance')}</th>
+                      <th className="p-2 text-left">{t('answerCatalog.structured.guidance', 'Matching Hint')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -480,7 +480,7 @@ export default function AnswerStructuredData() {
             </div>
           ) : (
             <div className="rounded-md bg-muted/30 p-6 text-sm text-muted-foreground">
-              {t('answerCatalog.structured.profileHint', 'Paste a structured source and run profiling to inspect fields, inferred types, role mapping, and guidance candidates before creating a dataset.')}
+              {t('answerCatalog.structured.profileHint', 'Paste a structured source and run analysis to inspect fields, inferred types, role mapping, and matching hint candidates before creating a dataset.')}
             </div>
           )}
         </div>
@@ -490,7 +490,7 @@ export default function AnswerStructuredData() {
         <div className="rounded-md border p-4">
           <div className="mb-3 flex items-center gap-2 font-semibold">
             <PlayIcon className="h-4 w-4" />
-            {t('answerCatalog.structured.safeQuery', 'Safe Query Preview / Execute')}
+            {t('answerCatalog.structured.safeQuery', 'Safe Lookup Preview / Run')}
           </div>
           <div className="grid gap-3">
             <div className="grid gap-2">
@@ -592,7 +592,7 @@ export default function AnswerStructuredData() {
             </div>
           ) : (
             <div className="text-sm text-muted-foreground">
-              {t('answerCatalog.structured.queryHint', 'Choose a dataset, add an optional condition, then preview or execute a safe query.')}
+              {t('answerCatalog.structured.queryHint', 'Choose a dataset, add an optional condition, then preview or run a safe lookup.')}
             </div>
           )}
           <div className="mt-5 border-t pt-4">

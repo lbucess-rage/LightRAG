@@ -180,7 +180,7 @@ export default function QuerySettings() {
               </div>
             </>
 
-            {/* Top K */}
+            {/* Graph candidate count */}
             <>
               <TooltipProvider>
                 <Tooltip>
@@ -220,7 +220,7 @@ export default function QuerySettings() {
               </div>
             </>
 
-            {/* Chunk Top K */}
+            {/* Chunk candidate count */}
             <>
               <TooltipProvider>
                 <Tooltip>

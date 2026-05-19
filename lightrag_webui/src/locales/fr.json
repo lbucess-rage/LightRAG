@@ -442,12 +442,12 @@
         "threeLineSummary": "Résumé en trois lignes",
         "briefAnswer": "Réponse brève"
       },
-      "topK": "KG Top K",
-      "topKTooltip": "Nombre d'entités et de relations à récupérer. Applicable pour les modes non-naïfs.",
-      "topKPlaceholder": "Entrez la valeur top_k",
-      "chunkTopK": "Top K des Chunks",
-      "chunkTopKTooltip": "Nombre de morceaux de texte à récupérer, applicable à tous les modes.",
-      "chunkTopKPlaceholder": "Entrez la valeur chunk_top_k",
+      "topK": "Nombre de candidats du graphe",
+      "topKTooltip": "Nombre d'entités et de relations à inclure dans la recherche.",
+      "topKPlaceholder": "Entrez le nombre de candidats du graphe",
+      "chunkTopK": "Nombre de chunks candidats",
+      "chunkTopKTooltip": "Nombre de chunks de texte à inclure dans la recherche.",
+      "chunkTopKPlaceholder": "Entrez le nombre de chunks candidats",
       "maxEntityTokens": "Limite de jetons d'entité",
       "maxEntityTokensTooltip": "Nombre maximum de jetons alloués au contexte d'entité dans le système de contrôle de jetons unifié",
       "maxRelationTokens": "Limite de jetons de relation",
@@ -499,7 +499,7 @@
     "mode": "Type d'espace de travail",
     "modeKms": "KMS",
     "modeKmsDesc": "Utilise le flux existant de documents, graphe, schéma et recherche RAG.",
-    "modeAnswerCatalog": "FAQ / Réponse fixe",
+    "modeAnswerCatalog": "FAQ / Réponses approuvées",
     "modeAnswerCatalogDesc": "Gérez les réponses approuvées, les données de correspondance, les sources et les analyses de recherche.",
     "modeHybrid": "Hybride",
     "modeHybridDesc": "Utilise la recherche de réponses fixes avec le flux KMS/RAG existant.",
@@ -509,7 +509,7 @@
   },
   "answerCatalog": {
     "errors": {
-      "workspaceModeRequired": "Cette fonctionnalité est disponible uniquement dans les espaces FAQ / Réponse fixe ou hybrides."
+      "workspaceModeRequired": "Cette fonctionnalité est disponible uniquement dans les espaces FAQ / réponses approuvées ou hybrides."
     },
     "status": {
       "draft": "Brouillon",
@@ -588,17 +588,17 @@
       "queryRequired": "Saisissez une requête à tester.",
       "query": "Requête utilisateur",
       "placeholder": "Exemple : comment obtenir un remboursement ?",
-      "topK": "Top K",
+      "topK": "Nombre de candidats",
       "strategy": "Stratégie",
       "strategyBalanced": "Équilibrée",
       "strategyFast": "Rapide",
       "minScore": "Score minimum",
       "includeDrafts": "Inclure les brouillons",
-      "run": "Résoudre",
+      "run": "Trouver la réponse",
       "selected": "Réponse sélectionnée",
       "candidates": "Candidats",
       "noCandidates": "Aucun candidat trouvé.",
-      "trace": "Trace"
+      "trace": "ID de traitement"
     },
     "placeholder": {
       "pending": "Cette zone est réservée afin de séparer l'UX de l'espace de travail pendant que l'implémentation continue à la phase suivante."
@@ -614,7 +614,7 @@
       "sourceType": "Type de source",
       "sourceUri": "URI source",
       "file": "Fichier",
-      "materialize": "Matérialiser le brouillon",
+      "materialize": "Créer le brouillon",
       "sourceBody": "Contenu source / réponse",
       "created": "Brouillon de réponse créé depuis la source.",
       "reviewHint": "Les brouillons sont créés non publiés afin d'être révisés avant utilisation.",
@@ -631,7 +631,7 @@
         "connectorRegistry": "Registre des connecteurs",
         "snapshotHistory": "Historique des instantanés de source",
         "profilingPreview": "Aperçu du profilage et du mapping",
-        "draftMaterialization": "Matérialisation du brouillon de réponse"
+        "draftMaterialization": "Création du brouillon de réponse"
       }
     },
     "matching": {
@@ -650,7 +650,7 @@
       "items": {
         "datasetProfiling": "Profilage de jeu de données",
         "fieldMapping": "Mapping des rôles de champs",
-        "semanticViews": "Matérialisation des vues sémantiques",
+        "semanticViews": "Création des vues structurées",
         "safeSql": "Aperçu/exécution SQL sécurisés"
       }
     },

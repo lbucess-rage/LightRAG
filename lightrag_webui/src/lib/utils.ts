@@ -24,7 +24,7 @@ export function localizedErrorMessage(error: any, t: (key: string, fallback?: st
   if (message.includes('Answer catalog APIs require an answer_catalog or hybrid workspace')) {
     return t(
       'answerCatalog.errors.workspaceModeRequired',
-      'This feature is available only in FAQ / Fixed Answer or Hybrid workspaces.'
+      'This feature is available only in FAQ / Approved Answer or Hybrid workspaces.'
     )
   }
   return message

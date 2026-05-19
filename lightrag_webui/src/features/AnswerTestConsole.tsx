@@ -81,7 +81,7 @@ export default function AnswerTestConsole() {
             />
           </div>
           <div>
-            <Label>{t('answerCatalog.test.topK', 'Top K')}</Label>
+            <Label>{t('answerCatalog.test.topK', 'Candidate Count')}</Label>
             <Select value={topK} onValueChange={setTopK}>
               <SelectTrigger className="mt-1">
                 <SelectValue />
@@ -112,7 +112,7 @@ export default function AnswerTestConsole() {
           <div className="flex items-end">
             <Button onClick={handleResolve} disabled={isLoading}>
               {isLoading ? <Loader2Icon className="h-4 w-4 animate-spin" /> : <SearchIcon className="h-4 w-4" />}
-              {t('answerCatalog.test.run', 'Resolve')}
+              {t('answerCatalog.test.run', 'Find Answer')}
             </Button>
           </div>
         </div>
@@ -153,7 +153,7 @@ export default function AnswerTestConsole() {
               <div className="text-sm text-muted-foreground">{result.rationale}</div>
             )}
             <div className="mt-4 text-xs text-muted-foreground">
-              {t('answerCatalog.test.trace', 'Trace')}: {result.trace_id}
+              {t('answerCatalog.test.trace', 'Trace ID')}: {result.trace_id}
             </div>
           </div>
 

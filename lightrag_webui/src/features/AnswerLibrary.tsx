@@ -148,7 +148,7 @@ export default function AnswerLibrary() {
         <div>
           <h1 className="text-2xl font-bold">{t('answerCatalog.library.title', 'Answer Library')}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {t('answerCatalog.library.description', 'Manage approved fixed answers, versions, validity, and matching guidance.')}
+            {t('answerCatalog.library.description', 'Manage approved answers, versions, validity, and matching hints.')}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -202,7 +202,7 @@ export default function AnswerLibrary() {
             <BookOpenIcon className="mb-3 h-8 w-8 text-muted-foreground" />
             <div className="text-sm font-medium">{t('answerCatalog.library.empty', 'No answers yet')}</div>
             <div className="mt-1 text-sm text-muted-foreground">
-              {t('answerCatalog.library.emptyDesc', 'Create the first fixed answer for this workspace.')}
+              {t('answerCatalog.library.emptyDesc', 'Create the first approved answer for this workspace.')}
             </div>
           </div>
         ) : (
@@ -755,7 +755,7 @@ function CreateAnswerDialog({
       </DialogTrigger>
       <DialogContent className="sm:max-w-3xl max-h-[86vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{t('answerCatalog.library.createTitle', 'Create Fixed Answer')}</DialogTitle>
+          <DialogTitle>{t('answerCatalog.library.createTitle', 'Create Approved Answer')}</DialogTitle>
           <DialogDescription>
             {t('answerCatalog.library.createDesc', 'Create a draft answer first. Publish it after review.')}
           </DialogDescription>

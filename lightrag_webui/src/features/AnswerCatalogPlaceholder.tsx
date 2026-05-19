@@ -21,9 +21,9 @@ const content: Record<PlaceholderKind, {
     description: 'Connect text, HTML, markdown, URL, DB, NoSQL, and document sources for answer candidate generation.',
     items: [
       { key: 'answerCatalog.sources.items.connectorRegistry', fallback: 'Connector registry' },
-      { key: 'answerCatalog.sources.items.snapshotHistory', fallback: 'Source snapshot history' },
-      { key: 'answerCatalog.sources.items.profilingPreview', fallback: 'Profiling and mapping preview' },
-      { key: 'answerCatalog.sources.items.draftMaterialization', fallback: 'Answer draft materialization' },
+      { key: 'answerCatalog.sources.items.snapshotHistory', fallback: 'Source records' },
+      { key: 'answerCatalog.sources.items.profilingPreview', fallback: 'Structure analysis and mapping preview' },
+      { key: 'answerCatalog.sources.items.draftMaterialization', fallback: 'Answer draft creation' },
     ],
   },
   matching: {
@@ -31,9 +31,9 @@ const content: Record<PlaceholderKind, {
     titleKey: 'answerCatalog.matching.title',
     title: 'Matching Setup',
     descriptionKey: 'answerCatalog.matching.description',
-    description: 'Manage keywords, canonical questions, negative terms, KG guidance, and optional LLM suggestions.',
+    description: 'Manage keywords, representative questions, exclusion terms, graph-based matching hints, and optional LLM suggestions.',
     items: [
-      { key: 'answerCatalog.matching.items.guidanceCrud', fallback: 'Guidance CRUD' },
+      { key: 'answerCatalog.matching.items.guidanceCrud', fallback: 'Add/edit/delete matching hints' },
       { key: 'answerCatalog.matching.items.weighting', fallback: 'Keyword/question weighting' },
       { key: 'answerCatalog.matching.items.scoreInspection', fallback: 'Candidate score inspection' },
       { key: 'answerCatalog.matching.items.llmSuggestions', fallback: 'LLM suggestion workflow' },
@@ -44,12 +44,12 @@ const content: Record<PlaceholderKind, {
     titleKey: 'answerCatalog.structured.title',
     title: 'Structured Data',
     descriptionKey: 'answerCatalog.structured.description',
-    description: 'Profile DB/NoSQL/table sources and expose safe semantic views for deterministic lookup.',
+    description: 'Analyze DB, NoSQL, and table sources so they can be searched safely with fixed conditions.',
     items: [
-      { key: 'answerCatalog.structured.items.datasetProfiling', fallback: 'Dataset profiling' },
+      { key: 'answerCatalog.structured.items.datasetProfiling', fallback: 'Dataset structure analysis' },
       { key: 'answerCatalog.structured.items.fieldMapping', fallback: 'Field role mapping' },
-      { key: 'answerCatalog.structured.items.semanticViews', fallback: 'Semantic view materialization' },
-      { key: 'answerCatalog.structured.items.safeSql', fallback: 'Safe SQL preview/execute' },
+      { key: 'answerCatalog.structured.items.semanticViews', fallback: 'Structured view creation' },
+      { key: 'answerCatalog.structured.items.safeSql', fallback: 'Safe lookup preview/run' },
     ],
   },
   analytics: {
@@ -59,7 +59,7 @@ const content: Record<PlaceholderKind, {
     descriptionKey: 'answerCatalog.analytics.description',
     description: 'Review answer usage, no-match queries, ambiguous matches, feedback, and stale answer candidates.',
     items: [
-      { key: 'answerCatalog.analytics.items.resolveEvents', fallback: 'Resolve events' },
+      { key: 'answerCatalog.analytics.items.resolveEvents', fallback: 'Lookup history' },
       { key: 'answerCatalog.analytics.items.topQueries', fallback: 'Top queries' },
       { key: 'answerCatalog.analytics.items.noMatchReview', fallback: 'No-match review' },
       { key: 'answerCatalog.analytics.items.feedbackLoop', fallback: 'Feedback loop' },

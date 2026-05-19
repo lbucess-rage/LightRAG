@@ -221,7 +221,7 @@ export default function WorkspaceDialog({ mode, open, onOpenChange }: WorkspaceD
                 selected={workspaceMode === 'answer_catalog'}
                 onSelect={setWorkspaceMode}
                 icon={BookOpenIcon}
-                title={t('workspace.modeAnswerCatalog', 'FAQ / Fixed Answer')}
+                title={t('workspace.modeAnswerCatalog', 'FAQ / Approved Answers')}
                 description={t('workspace.modeAnswerCatalogDesc', 'Manage approved answers, matching data, sources, and lookup analytics.')}
               />
               <WorkspaceModeCard

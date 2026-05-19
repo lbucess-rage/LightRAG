@@ -154,7 +154,7 @@ export default function AnswerMatching() {
 
   const handleAddGuidance = async () => {
     if (!selectedAnswerId || !guidanceText.trim()) {
-      toast.error(t('answerCatalog.matching.addRequired', 'Select an answer and enter guidance text.'))
+      toast.error(t('answerCatalog.matching.addRequired', 'Select an answer and enter matching hint text.'))
       return
     }
     setIsSaving(true)
@@ -168,7 +168,7 @@ export default function AnswerMatching() {
         },
       })
       setGuidanceText('')
-      toast.success(t('answerCatalog.library.guidanceAdded', 'Guidance added.'))
+      toast.success(t('answerCatalog.library.guidanceAdded', 'Matching hint added.'))
       fetchData()
     } catch (err) {
       toast.error(localizedErrorMessage(err, t))
@@ -180,7 +180,7 @@ export default function AnswerMatching() {
   const handleDeleteGuidance = async (item: GuidanceRow) => {
     try {
       await deleteAnswerGuidance(item.answer_id, item.guidance_id)
-      toast.success(t('answerCatalog.library.guidanceDeleted', 'Guidance deleted.'))
+      toast.success(t('answerCatalog.library.guidanceDeleted', 'Matching hint deleted.'))
       fetchData()
     } catch (err) {
       toast.error(localizedErrorMessage(err, t))
@@ -225,7 +225,7 @@ export default function AnswerMatching() {
               </Badge>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              {t('answerCatalog.matching.description', 'Manage keywords, canonical questions, negative terms, KG guidance, and optional LLM suggestions.')}
+              {t('answerCatalog.matching.description', 'Manage keywords, representative questions, exclusion terms, graph-based matching hints, and optional LLM suggestions.')}
             </p>
           </div>
         </div>
@@ -245,7 +245,7 @@ export default function AnswerMatching() {
 
       <div className="grid gap-3 md:grid-cols-4">
         <Metric label={t('answerCatalog.matching.answerCount', 'Answers')} value={stats.answers} className={metricCards[0]} />
-        <Metric label={t('answerCatalog.matching.guidanceCount', 'Guidance')} value={stats.guidance} className={metricCards[1]} />
+        <Metric label={t('answerCatalog.matching.guidanceCount', 'Matching Hints')} value={stats.guidance} className={metricCards[1]} />
         <Metric label={t('answerCatalog.matching.questionCount', 'Questions')} value={stats.questions} className={metricCards[2]} />
         <Metric label={t('answerCatalog.matching.negativeCount', 'Negative Terms')} value={stats.negatives} className={metricCards[3]} />
       </div>
@@ -254,7 +254,7 @@ export default function AnswerMatching() {
         <div className="flex min-h-0 flex-col gap-4">
           <div className="rounded-md border bg-card p-4">
             <div className="mb-3 font-semibold">
-              {t('answerCatalog.matching.addGuidance', 'Add Matching Guidance')}
+              {t('answerCatalog.matching.addGuidance', 'Add Matching Hint')}
             </div>
             <div className="grid gap-3">
               <div className="grid gap-2">
@@ -297,7 +297,7 @@ export default function AnswerMatching() {
                 </div>
               </div>
               <div className="grid gap-2">
-                <Label>{t('answerCatalog.library.guidanceText', 'Guidance Text')}</Label>
+                <Label>{t('answerCatalog.library.guidanceText', 'Matching Hint Text')}</Label>
                 <Input
                   value={guidanceText}
                   onChange={(event) => setGuidanceText(event.target.value)}
@@ -312,7 +312,7 @@ export default function AnswerMatching() {
                 disabled={isSaving || !selectedAnswerId}
               >
                 {isSaving ? <Loader2Icon className="h-4 w-4 animate-spin" /> : <PlusIcon className="h-4 w-4" />}
-                {t('answerCatalog.matching.add', 'Add Guidance')}
+                {t('answerCatalog.matching.add', 'Add Matching Hint')}
               </Button>
             </div>
           </div>
@@ -348,7 +348,7 @@ export default function AnswerMatching() {
                 disabled={isTesting}
               >
                 {isTesting ? <Loader2Icon className="h-4 w-4 animate-spin" /> : <SearchIcon className="h-4 w-4" />}
-                {t('answerCatalog.test.run', 'Resolve')}
+                {t('answerCatalog.test.run', 'Find Answer')}
               </Button>
               {result && (
                 <div className="rounded-md border bg-muted/30 p-3 text-sm">
@@ -393,7 +393,7 @@ export default function AnswerMatching() {
               className="min-w-56 flex-1"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder={t('answerCatalog.matching.search', 'Search answer or guidance...')}
+              placeholder={t('answerCatalog.matching.search', 'Search answer or matching hint...')}
             />
             <Select value={status} onValueChange={setStatus}>
               <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
@@ -417,14 +417,14 @@ export default function AnswerMatching() {
             </Select>
             <label className="flex items-center gap-2 text-sm text-muted-foreground">
               <Checkbox checked={onlyUnguided} onCheckedChange={(checked) => setOnlyUnguided(Boolean(checked))} />
-              {t('answerCatalog.matching.onlyUnguided', 'No guidance')}
+              {t('answerCatalog.matching.onlyUnguided', 'No matching hints')}
             </label>
           </div>
 
           {onlyUnguided ? (
             <div className="min-h-0 overflow-auto rounded-md border bg-background">
               <div className="border-b bg-muted/30 p-3 text-sm font-medium">
-                {t('answerCatalog.matching.unguidedAnswers', 'Answers without guidance')}
+                {t('answerCatalog.matching.unguidedAnswers', 'Answers without matching hints')}
               </div>
               {displayedAnswers.length === 0 ? (
                 <div className="p-4 text-sm text-muted-foreground">
@@ -460,7 +460,7 @@ export default function AnswerMatching() {
                 </div>
               ) : guidanceRows.length === 0 ? (
                 <div className="p-4 text-sm text-muted-foreground">
-                  {t('answerCatalog.library.noGuidance', 'No guidance is registered.')}
+                  {t('answerCatalog.library.noGuidance', 'No matching hints are registered.')}
                 </div>
               ) : (
                 <div className="divide-y">

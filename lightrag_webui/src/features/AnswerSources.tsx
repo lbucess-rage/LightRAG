@@ -394,10 +394,10 @@ export default function AnswerSources() {
   }, [fetchConnectors, fetchSnapshots])
 
   const sourceHelp = useMemo(() => {
-    if (sourceType === 'url') return t('answerCatalog.sources.urlHelp', 'URL is stored as source metadata. Paste the relevant content to create a reviewable answer draft.')
+    if (sourceType === 'url') return t('answerCatalog.sources.urlHelp', 'The URL is stored as source information. Paste the relevant content to create a reviewable answer draft.')
     if (sourceType === 'file') return t('answerCatalog.sources.fileHelp', 'Text, Markdown, and HTML files can be read locally and converted into an answer draft.')
-    if (sourceType === 'structured') return t('answerCatalog.sources.structuredHelp', 'Paste a table row, JSON record, DB extract, or NoSQL document snapshot. Structured profiling will be expanded later.')
-    return t('answerCatalog.sources.textHelp', 'Paste source material and create a draft fixed answer for review.')
+    if (sourceType === 'structured') return t('answerCatalog.sources.structuredHelp', 'Paste a table row, JSON record, DB extract, or NoSQL document sample. You can review the structure analysis before creating answer drafts.')
+    return t('answerCatalog.sources.textHelp', 'Paste source material and create a draft approved answer for review.')
   }, [sourceType, t])
 
   const selectedConnector = useMemo(
@@ -576,7 +576,7 @@ export default function AnswerSources() {
       })
       if (workspaceId !== useWorkspaceStore.getState().currentWorkspaceId) return
       toast.success(t('answerCatalog.sources.connectorMaterialized', {
-        defaultValue: 'Connector materialized into {{count}} answer draft(s).',
+        defaultValue: '{{count}} answer draft(s) were created from the connector.',
         count: result.materialized.answers.length,
       }))
       fetchConnectors()
@@ -664,7 +664,7 @@ export default function AnswerSources() {
             <div>
               <div className="font-semibold">{t('answerCatalog.sources.connectorRegistry', 'Connector Registry')}</div>
               <div className="text-xs text-muted-foreground">
-                {t('answerCatalog.sources.connectorRegistryDesc', 'Register DB, NoSQL, web, or manual table samples and materialize them into answer drafts.')}
+                {t('answerCatalog.sources.connectorRegistryDesc', 'Register DB, NoSQL, web, or manual table samples and create answer drafts from them.')}
               </div>
             </div>
           </div>
@@ -700,7 +700,7 @@ export default function AnswerSources() {
               </div>
             </div>
             <div className="grid gap-2">
-              <Label>{t('answerCatalog.sources.connectorUri', 'Connector URI')}</Label>
+              <Label>{t('answerCatalog.sources.connectorUri', 'Connector Location')}</Label>
               <Input
                 value={connectorUri}
                 onChange={(event) => setConnectorUri(event.target.value)}
@@ -744,7 +744,7 @@ export default function AnswerSources() {
                 </Select>
               </div>
               <div className="grid gap-2">
-                <Label>{t('answerCatalog.sources.connectorMode', 'Materialization Mode')}</Label>
+                <Label>{t('answerCatalog.sources.connectorMode', 'Creation Mode')}</Label>
                 <Select value={connectorMode} onValueChange={(value) => {
                   setConnectorMode(value as ConnectorMaterializationMode)
                   setConnectorPreview(null)
@@ -771,7 +771,7 @@ export default function AnswerSources() {
                 </div>
                 {Array.isArray(selectedConnector.metadata?.last_materialized_answer_ids) && (
                   <div className="text-xs text-muted-foreground">
-                    {t('answerCatalog.sources.lastMaterialized', 'Last materialized answers')}: {selectedConnector.metadata.last_materialized_answer_ids.length}
+                    {t('answerCatalog.sources.lastMaterialized', 'Recently created answers')}: {selectedConnector.metadata.last_materialized_answer_ids.length}
                   </div>
                 )}
               </div>
@@ -792,7 +792,7 @@ export default function AnswerSources() {
               </Button>
               <Button onClick={handleMaterializeConnector} disabled={isConnectorBusy || !selectedConnectorId}>
                 {isConnectorBusy ? <Loader2Icon className="h-4 w-4 animate-spin" /> : <SparklesIcon className="h-4 w-4" />}
-                {t('answerCatalog.sources.materializeConnector', 'Materialize')}
+                {t('answerCatalog.sources.materializeConnector', 'Create Drafts')}
               </Button>
             </div>
 
@@ -814,7 +814,7 @@ export default function AnswerSources() {
                     items={Object.entries(connectorPreview.mapping).map(([target, source]) => `${target}: ${source}`)}
                   />
                   <PreviewList
-                    title={t('answerCatalog.sources.guidanceColumns', 'Guidance Columns')}
+                    title={t('answerCatalog.sources.guidanceColumns', 'Matching Hint Columns')}
                     items={connectorPreview.guidance_columns}
                   />
                 </div>
@@ -824,7 +824,7 @@ export default function AnswerSources() {
               </div>
             ) : (
               <div className="rounded-md border border-dashed bg-background p-3 text-sm text-muted-foreground">
-                {t('answerCatalog.sources.connectorPreviewHint', 'Preview a connector to inspect detected columns, answer mapping, and guidance fields before materialization.')}
+                {t('answerCatalog.sources.connectorPreviewHint', 'Preview a connector to inspect detected columns, answer mapping, and matching hint fields before creating drafts.')}
               </div>
             )}
           </div>
@@ -856,7 +856,7 @@ export default function AnswerSources() {
                   <SelectItem value="html">{t('answerCatalog.sources.types.html', 'HTML')}</SelectItem>
                   <SelectItem value="url">{t('answerCatalog.sources.types.url', 'URL')}</SelectItem>
                   <SelectItem value="file">{t('answerCatalog.sources.types.file', 'Text File')}</SelectItem>
-                  <SelectItem value="structured">{t('answerCatalog.sources.types.structured', 'Structured Snapshot')}</SelectItem>
+                  <SelectItem value="structured">{t('answerCatalog.sources.types.structured', 'Structured Sample')}</SelectItem>
                 </SelectContent>
               </Select>
               <p className="text-xs leading-5 text-muted-foreground">{sourceHelp}</p>
@@ -864,7 +864,7 @@ export default function AnswerSources() {
 
             {(sourceType === 'url' || sourceType === 'structured') && (
               <div className="grid gap-2">
-                <Label>{t('answerCatalog.sources.sourceUri', 'Source URI')}</Label>
+                <Label>{t('answerCatalog.sources.sourceUri', 'Source Location')}</Label>
                 <Input
                   value={sourceUri}
                   onChange={(event) => setSourceUri(event.target.value)}
@@ -917,7 +917,7 @@ export default function AnswerSources() {
         <div className="rounded-md border p-4">
           <div className="mb-4 flex items-center gap-2">
             <DatabaseIcon className="h-4 w-4" />
-            <div className="font-semibold">{t('answerCatalog.sources.materialize', 'Materialize Draft')}</div>
+            <div className="font-semibold">{t('answerCatalog.sources.materialize', 'Create Draft')}</div>
           </div>
           <div className="grid gap-4">
             <div className="grid gap-2">
@@ -936,7 +936,7 @@ export default function AnswerSources() {
               }} />
             </div>
             <div className="grid gap-2">
-              <Label>{t('answerCatalog.library.guidance', 'Guidance Questions / Keywords')}</Label>
+              <Label>{t('answerCatalog.library.guidance', 'Representative Questions / Keywords')}</Label>
               <Textarea
                 rows={4}
                 value={guidance}
@@ -966,7 +966,7 @@ export default function AnswerSources() {
                 )}
                 {candidate.profile.structured.columns.length > 0 && (
                   <div className="rounded-md border bg-background p-3">
-                    <div className="mb-2 text-sm font-medium">{t('answerCatalog.sources.structuredProfile', 'Structured Profile')}</div>
+                    <div className="mb-2 text-sm font-medium">{t('answerCatalog.sources.structuredProfile', 'Structure Analysis')}</div>
                     <div className="flex flex-wrap gap-1">
                       {candidate.profile.structured.columns.map((column) => (
                         <Badge key={column} variant="outline">{column}</Badge>
@@ -976,7 +976,7 @@ export default function AnswerSources() {
                 )}
                 <div className="rounded-md border bg-background p-3">
                   <div className="mb-3 flex items-center justify-between gap-2">
-                    <div className="text-sm font-medium">{t('answerCatalog.sources.guidanceCandidates', 'Guidance Candidates')}</div>
+                    <div className="text-sm font-medium">{t('answerCatalog.sources.guidanceCandidates', 'Matching Hint Candidates')}</div>
                     <Button
                       size="sm"
                       variant="outline"
@@ -989,7 +989,7 @@ export default function AnswerSources() {
                   <div className="grid gap-2">
                     {guidanceCandidates.length === 0 ? (
                       <div className="text-sm text-muted-foreground">
-                        {t('answerCatalog.library.noGuidance', 'No guidance is registered.')}
+                        {t('answerCatalog.library.noGuidance', 'No matching hints are registered.')}
                       </div>
                     ) : (
                       guidanceCandidates.map((item, index) => (
@@ -1029,7 +1029,7 @@ export default function AnswerSources() {
               </div>
             ) : (
               <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-                {t('answerCatalog.sources.previewHint', 'Preview the source first to inspect profiling, candidate keywords, and structured fields before creating a draft.')}
+                {t('answerCatalog.sources.previewHint', 'Preview the source first to inspect structure analysis, candidate keywords, and structured fields before creating a draft.')}
               </div>
             )}
 
@@ -1056,7 +1056,7 @@ export default function AnswerSources() {
 
       <div className="rounded-md border p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <div className="font-semibold">{t('answerCatalog.sources.snapshotHistory', 'Source Snapshot History')}</div>
+          <div className="font-semibold">{t('answerCatalog.sources.snapshotHistory', 'Source Records')}</div>
           <Button variant="outline" size="sm" onClick={fetchSnapshots} disabled={isLoadingSnapshots}>
             {isLoadingSnapshots ? <Loader2Icon className="h-4 w-4 animate-spin" /> : <EyeIcon className="h-4 w-4" />}
             {t('common.refresh', 'Refresh')}
@@ -1064,7 +1064,7 @@ export default function AnswerSources() {
         </div>
         {snapshots.length === 0 ? (
           <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-            {t('answerCatalog.sources.noSnapshots', 'No source snapshots have been recorded yet.')}
+            {t('answerCatalog.sources.noSnapshots', 'No source records have been recorded yet.')}
           </div>
         ) : (
           <div className="grid gap-2">

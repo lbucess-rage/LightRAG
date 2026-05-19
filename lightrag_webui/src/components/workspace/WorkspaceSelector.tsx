@@ -105,7 +105,7 @@ export default function WorkspaceSelector() {
 
   const getWorkspaceModeLabel = (workspace: WorkspaceInfo) => {
     const mode = getWorkspaceMode(workspace)
-    if (mode === 'answer_catalog') return t('workspace.modeAnswerCatalog', 'FAQ / Fixed Answer')
+    if (mode === 'answer_catalog') return t('workspace.modeAnswerCatalog', 'FAQ / Approved Answers')
     if (mode === 'hybrid') return t('workspace.modeHybrid', 'Hybrid')
     return t('workspace.modeKms', 'KMS')
   }
