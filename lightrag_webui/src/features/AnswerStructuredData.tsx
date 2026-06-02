@@ -271,13 +271,6 @@ export default function AnswerStructuredData() {
         </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-4">
-        <Metric label={t('answerCatalog.structured.profiledAnswers', 'Analyzed Answers')} value={filtered.length} />
-        <Metric label={t('answerCatalog.structured.totalColumns', 'Detected Fields')} value={allColumns.length} />
-        <Metric label={t('answerCatalog.structured.tableRows', 'Known Rows')} value={filtered.reduce((sum, item) => sum + item.row_count, 0)} />
-        <Metric label={t('answerCatalog.library.total', 'Total')} value={datasets.length} />
-      </div>
-
       <div className="flex flex-wrap items-center gap-2 rounded-md border p-3">
         <Input
           className="min-w-64 flex-1"
@@ -694,15 +687,6 @@ export default function AnswerStructuredData() {
           </div>
         )}
       </div>
-    </div>
-  )
-}
-
-function Metric({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-md border p-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 text-2xl font-semibold">{value.toLocaleString()}</div>
     </div>
   )
 }

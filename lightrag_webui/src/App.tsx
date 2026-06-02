@@ -30,6 +30,7 @@ import AnswerMatching from '@/features/AnswerMatching'
 import AnswerStructuredData from '@/features/AnswerStructuredData'
 import AnswerTestConsole from '@/features/AnswerTestConsole'
 import AnswerAnalytics from '@/features/AnswerAnalytics'
+import AnswerDetailedAnalytics from '@/features/AnswerDetailedAnalytics'
 import AnswerHelp from '@/features/AnswerHelp'
 
 import { Tabs, TabsContent } from '@/components/ui/Tabs'
@@ -349,6 +350,11 @@ function App() {
                 {canShowTab('answer-analytics') && (
                   <TabsContent value="answer-analytics" className="absolute top-0 right-0 bottom-0 left-0 overflow-auto">
                     <AnswerAnalytics />
+                  </TabsContent>
+                )}
+                {canShowTab('answer-detailed-analytics') && (
+                  <TabsContent value="answer-detailed-analytics" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
+                    <AnswerDetailedAnalytics />
                   </TabsContent>
                 )}
                 {canShowTab('answer-help') && (

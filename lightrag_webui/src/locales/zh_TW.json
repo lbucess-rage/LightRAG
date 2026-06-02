@@ -13,7 +13,7 @@
     "retrieval": "檢索",
     "api": "API",
     "projectRepository": "專案庫",
-    "answers": "答案",
+    "answers": "查看答案",
     "answerSources": "資料來源",
     "answerMatching": "匹配",
     "structuredData": "結構化資料",
@@ -535,7 +535,7 @@
       "description": "逐步說明如何建立固定答案、管理匹配規則並驗證使用者問題會選擇哪個答案。"
     },
     "library": {
-      "title": "答案庫",
+      "title": "查看答案",
       "description": "管理已核准的固定答案、版本、有效期與匹配指引。",
       "published": "答案已發布。",
       "archived": "答案已封存。",
@@ -565,7 +565,8 @@
       "contentFormat": "格式",
       "validFrom": "有效開始",
       "validUntil": "有效結束",
-      "summary": "核准摘要",
+      "summary": "答案備註",
+      "summaryHelp": "用於核准請求、審核備註或變更原因的內部資訊。它與實際答案正文分開管理。",
       "body": "正文",
       "tags": "標籤",
       "tagsPlaceholder": "帳單, 退款, 會員",

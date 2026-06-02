@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-import json
 import csv
 import hashlib
 import io
+import json
 import re
 import time
 import traceback
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
 
 from lightrag.kg.shared_storage import get_default_workspace
@@ -31,6 +31,7 @@ DisplayPolicy = Literal["summary", "full", "both"]
 ContentFormat = Literal["plain", "markdown", "html"]
 GuidanceType = Literal["keyword", "question", "synonym", "negative_keyword", "note"]
 ResolveStrategy = Literal["fast", "balanced"]
+RetrievalMode = Literal["keyword", "hybrid", "llm_rerank"]
 StructuredOperator = Literal["contains", "equals", "starts_with", "ends_with"]
 StructuredSourceType = Literal["csv", "json"]
 StructuredMaterializationMode = Literal["table_as_dataset", "row_per_answer"]
@@ -39,6 +40,10 @@ SourceConnectorStatus = Literal["draft", "active", "paused", "error"]
 
 VALID_WORKSPACE_MODES = {"kms", "answer_catalog", "hybrid"}
 ANSWER_WORKSPACE_MODES = {"answer_catalog", "hybrid"}
+MAX_EXCEL_UPLOAD_BYTES = 200 * 1024 * 1024
+MAX_EXCEL_ROWS_PER_PREVIEW = 1000
+MAX_EXCEL_COLUMNS_PER_PREVIEW = 300
+MAX_STRUCTURED_ROWS_PER_ANSWER_BATCH = 1000
 TOKEN_RE = re.compile(r"[0-9A-Za-z가-힣_]+")
 GUIDANCE_TYPE_MULTIPLIER = {
     "question": 1.25,
@@ -213,6 +218,21 @@ async def _ensure_tables(db) -> None:
         )
         """,
         """
+        CREATE TABLE IF NOT EXISTS LIGHTRAG_ANSWER_VECTORS (
+            vector_id TEXT PRIMARY KEY,
+            workspace TEXT NOT NULL,
+            answer_id TEXT NOT NULL,
+            answer_version INTEGER NOT NULL DEFAULT 1,
+            vector_kind TEXT NOT NULL DEFAULT 'combined',
+            content_hash TEXT NOT NULL,
+            content TEXT NOT NULL,
+            embedding JSONB NOT NULL,
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            create_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            update_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        """
         CREATE TABLE IF NOT EXISTS LIGHTRAG_ANSWER_SOURCE_SNAPSHOTS (
             snapshot_id TEXT PRIMARY KEY,
             workspace TEXT NOT NULL,
@@ -278,6 +298,8 @@ async def _ensure_tables(db) -> None:
         "CREATE INDEX IF NOT EXISTS IDX_ANSWERS_WORKSPACE_UPDATE ON LIGHTRAG_ANSWER_ITEMS(workspace, update_time DESC)",
         "CREATE INDEX IF NOT EXISTS IDX_ANSWER_GUIDANCE_WORKSPACE_ANSWER ON LIGHTRAG_ANSWER_GUIDANCE(workspace, answer_id)",
         "CREATE INDEX IF NOT EXISTS IDX_ANSWER_EVENTS_WORKSPACE_TIME ON LIGHTRAG_ANSWER_EVENTS(workspace, create_time DESC)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS UIDX_ANSWER_VECTORS_WORKSPACE_ANSWER_KIND ON LIGHTRAG_ANSWER_VECTORS(workspace, answer_id, vector_kind)",
+        "CREATE INDEX IF NOT EXISTS IDX_ANSWER_VECTORS_WORKSPACE_UPDATE ON LIGHTRAG_ANSWER_VECTORS(workspace, update_time DESC)",
         "CREATE INDEX IF NOT EXISTS IDX_ANSWER_SOURCE_SNAPSHOTS_WORKSPACE_TIME ON LIGHTRAG_ANSWER_SOURCE_SNAPSHOTS(workspace, create_time DESC)",
         "CREATE INDEX IF NOT EXISTS IDX_ANSWER_SOURCE_SNAPSHOTS_WORKSPACE_HASH ON LIGHTRAG_ANSWER_SOURCE_SNAPSHOTS(workspace, content_hash)",
         "CREATE INDEX IF NOT EXISTS IDX_ANSWER_SOURCE_LINKS_WORKSPACE_ANSWER ON LIGHTRAG_ANSWER_SOURCE_LINKS(workspace, answer_id)",
@@ -388,12 +410,46 @@ class AnswerListResponse(BaseModel):
     page_size: int
 
 
+class AnswerEventListResponse(BaseModel):
+    events: list[AnswerEvent]
+    answers: list[AnswerItem] = Field(default_factory=list)
+    total: int
+    page: int
+    page_size: int
+
+
+class AnswerAnalyticsGroupRow(BaseModel):
+    key: str
+    label: str
+    count: int
+
+
+class AnswerEventStatsResponse(BaseModel):
+    workspace: str
+    total_events: int
+    no_match: int
+    avg_latency_ms: int
+    timezone: str
+    selected_answers: list[AnswerAnalyticsGroupRow] = Field(default_factory=list)
+    queries: list[AnswerAnalyticsGroupRow] = Field(default_factory=list)
+    sources: list[AnswerAnalyticsGroupRow] = Field(default_factory=list)
+    modes: list[AnswerAnalyticsGroupRow] = Field(default_factory=list)
+    dates: list[AnswerAnalyticsGroupRow] = Field(default_factory=list)
+    hours: list[AnswerAnalyticsGroupRow] = Field(default_factory=list)
+
+
 class ResolveRequest(BaseModel):
     query: str = Field(..., min_length=1)
     top_k: int = Field(default=5, ge=1, le=20)
     min_score: float = Field(default=0.18, ge=0.0, le=1.0)
     include_drafts: bool = False
     strategy: ResolveStrategy = "balanced"
+    retrieval_mode: RetrievalMode = Field(
+        default="keyword",
+        description="keyword keeps the current deterministic scorer, hybrid adds optional answer vectors, llm_rerank lets the LLM choose only from candidate IDs.",
+    )
+    vector_top_k: int = Field(default=8, ge=1, le=50)
+    llm_candidate_count: int = Field(default=5, ge=1, le=10)
 
 
 class ResolveCandidate(BaseModel):
@@ -402,6 +458,7 @@ class ResolveCandidate(BaseModel):
     matched_guidance: list[str] = Field(default_factory=list)
     reason: str
     score_details: dict[str, float] = Field(default_factory=dict)
+    selected_by: str = "keyword"
 
 
 class ResolveResponse(BaseModel):
@@ -410,6 +467,8 @@ class ResolveResponse(BaseModel):
     candidates: list[ResolveCandidate]
     trace_id: str
     rationale: str
+    retrieval_mode: RetrievalMode = "keyword"
+    selected_by: str = "keyword"
 
 
 class AnswerSearchRequest(BaseModel):
@@ -418,6 +477,9 @@ class AnswerSearchRequest(BaseModel):
     min_score: float = Field(default=0.18, ge=0.0, le=1.0)
     include_drafts: bool = False
     strategy: ResolveStrategy = "balanced"
+    retrieval_mode: RetrievalMode = "keyword"
+    vector_top_k: int = Field(default=8, ge=1, le=50)
+    llm_candidate_count: int = Field(default=5, ge=1, le=10)
     response_policy: Optional[DisplayPolicy] = None
     include_candidates: bool = True
 
@@ -442,6 +504,8 @@ class AnswerSearchResponse(BaseModel):
     candidates: list[ResolveCandidate] = Field(default_factory=list)
     trace_id: str
     rationale: str
+    retrieval_mode: RetrievalMode = "keyword"
+    selected_by: str = "keyword"
 
 
 class AnswerViewRequest(BaseModel):
@@ -465,9 +529,20 @@ class SourceGuidanceCandidate(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class GuidanceSuggestRequest(BaseModel):
+    query_examples: list[str] = Field(default_factory=list)
+    max_suggestions: int = Field(default=12, ge=1, le=30)
+    use_llm: bool = False
+
+
+class GuidanceSuggestResponse(BaseModel):
+    suggestions: list[SourceGuidanceCandidate] = Field(default_factory=list)
+    mode: str = "heuristic"
+
+
 class AnswerSourceDraftRequest(BaseModel):
     answer_id: Optional[str] = Field(default=None, description="Optional stable answer id. Defaults to ANS-<uuid>.")
-    source_type: Literal["plain", "markdown", "html", "url", "file", "structured"] = "plain"
+    source_type: Literal["plain", "markdown", "html", "url", "file", "excel", "structured"] = "plain"
     source_uri: Optional[str] = None
     file_name: Optional[str] = None
     title: str = Field(..., min_length=1, max_length=500)
@@ -582,6 +657,27 @@ class StructuredProfileResponse(BaseModel):
     fields: list[StructuredFieldProfile] = Field(default_factory=list)
     sample_rows: list[dict[str, Any]] = Field(default_factory=list)
     mapping_suggestions: dict[str, Optional[str]] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class ExcelSheetInfo(BaseModel):
+    name: str
+    max_row: int = 0
+    max_column: int = 0
+
+
+class ExcelPreviewResponse(BaseModel):
+    file_name: str
+    file_size: int
+    sheets: list[ExcelSheetInfo] = Field(default_factory=list)
+    selected_sheet: str
+    header_row: int
+    data_start_row: int
+    row_count: int
+    columns: list[str] = Field(default_factory=list)
+    raw_content: str
+    source_uri: str
+    profile: StructuredProfileResponse
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -778,6 +874,139 @@ def _event_from_row(row: dict[str, Any]) -> AnswerEvent:
     )
 
 
+def _analytics_group_from_row(row: dict[str, Any]) -> AnswerAnalyticsGroupRow:
+    return AnswerAnalyticsGroupRow(
+        key=str(row.get("key") or "-"),
+        label=str(row.get("label") or row.get("key") or "-"),
+        count=int(row.get("count") or 0),
+    )
+
+
+def _safe_timezone(value: str | None) -> str:
+    timezone_name = (value or "Asia/Seoul").strip()
+    if not timezone_name or len(timezone_name) > 64:
+        return "Asia/Seoul"
+    if not re.fullmatch(r"[A-Za-z0-9_./+-]+", timezone_name):
+        return "Asia/Seoul"
+    return timezone_name
+
+
+def _add_answer_event_filters(
+    params: list[Any],
+    where: list[str],
+    *,
+    event_type: Optional[str] = None,
+    selected_answer_id: Optional[str] = None,
+    query_text: Optional[str] = None,
+    match_status: Optional[str] = None,
+    source: Optional[str] = None,
+    mode: Optional[str] = None,
+    date_key: Optional[str] = None,
+    hour_key: Optional[str] = None,
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
+    min_confidence: Optional[float] = None,
+    max_latency_ms: Optional[int] = None,
+    search: Optional[str] = None,
+    timezone_name: str = "Asia/Seoul",
+) -> None:
+    source_expr = (
+        "CASE WHEN e.selected_answer_id IS NULL THEN '__none__' "
+        "ELSE COALESCE(a.metadata->>'source_type', a.metadata->>'created_from', "
+        "a.metadata->>'materialization_mode', 'manual') END"
+    )
+    mode_expr = "COALESCE(e.metadata->>'mode', e.metadata->>'retrieval_mode', '-')"
+
+    if event_type and event_type != "all":
+        params.append(event_type)
+        where.append(f"e.event_type = ${len(params)}")
+
+    if selected_answer_id and selected_answer_id != "all":
+        if selected_answer_id == "__none__":
+            where.append("e.selected_answer_id IS NULL")
+        else:
+            params.append(selected_answer_id)
+            where.append(f"e.selected_answer_id = ${len(params)}")
+
+    if query_text:
+        params.append(query_text)
+        where.append(f"COALESCE(e.query, '') = ${len(params)}")
+
+    if match_status == "matched":
+        where.append("e.selected_answer_id IS NOT NULL")
+    elif match_status == "no_match":
+        where.append("e.selected_answer_id IS NULL")
+
+    if source and source != "all":
+        params.append(source)
+        where.append(f"{source_expr} = ${len(params)}")
+
+    if mode and mode != "all":
+        params.append(mode)
+        where.append(f"{mode_expr} = ${len(params)}")
+
+    timezone_placeholder: Optional[str] = None
+    if date_key or hour_key:
+        params.append(timezone_name)
+        timezone_placeholder = f"${len(params)}"
+
+    if date_key:
+        params.append(date_key)
+        where.append(
+            f"TO_CHAR(e.create_time AT TIME ZONE {timezone_placeholder}, 'YYYY-MM-DD') = ${len(params)}"
+        )
+
+    if hour_key:
+        params.append(hour_key)
+        where.append(
+            f"TO_CHAR(e.create_time AT TIME ZONE {timezone_placeholder}, 'HH24:00') = ${len(params)}"
+        )
+
+    if date_from:
+        params.append(date_from)
+        where.append(f"e.create_time >= ${len(params)}")
+
+    if date_to:
+        params.append(date_to)
+        where.append(f"e.create_time <= ${len(params)}")
+
+    if min_confidence is not None:
+        params.append(min_confidence)
+        where.append(
+            "("
+            "e.selected_answer_id IS NOT NULL AND "
+            "COALESCE(NULLIF(e.scores->>e.selected_answer_id, ''), '0') ~ '^[0-9]+(\\.[0-9]+)?$' AND "
+            f"(e.scores->>e.selected_answer_id)::DOUBLE PRECISION >= ${len(params)}"
+            ")"
+        )
+
+    if max_latency_ms is not None:
+        params.append(max_latency_ms)
+        where.append(
+            "("
+            "COALESCE(NULLIF(e.metadata->>'latency_ms', ''), '0') ~ '^[0-9]+(\\.[0-9]+)?$' AND "
+            f"(e.metadata->>'latency_ms')::DOUBLE PRECISION <= ${len(params)}"
+            ")"
+        )
+
+    if search:
+        term = f"%{search.strip().lower()}%"
+        params.append(term)
+        search_placeholder = f"${len(params)}"
+        where.append(
+            "("
+            f"LOWER(COALESCE(e.query, '')) LIKE {search_placeholder} OR "
+            f"LOWER(COALESCE(e.event_id, '')) LIKE {search_placeholder} OR "
+            f"LOWER(COALESCE(e.selected_answer_id, '')) LIKE {search_placeholder} OR "
+            f"LOWER(COALESCE(a.title, '')) LIKE {search_placeholder} OR "
+            f"LOWER(COALESCE(a.metadata->>'source_type', '')) LIKE {search_placeholder} OR "
+            f"LOWER(COALESCE(a.metadata->>'source_uri', '')) LIKE {search_placeholder} OR "
+            f"LOWER(COALESCE(e.metadata->>'mode', '')) LIKE {search_placeholder} OR "
+            f"LOWER(COALESCE(e.metadata->>'retrieval_mode', '')) LIKE {search_placeholder}"
+            ")"
+        )
+
+
 def _structured_lookup_log_from_row(row: dict[str, Any]) -> StructuredLookupLog:
     filters = _coerce_json(row.get("filters"), [])
     if not isinstance(filters, list):
@@ -917,9 +1146,134 @@ def _structured_profile(answer: AnswerItem) -> dict[str, Any]:
 
 
 def _row_value(value: Any) -> Any:
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     return json.dumps(value, ensure_ascii=False)
+
+
+async def _read_upload_limited(file: UploadFile, max_bytes: int) -> tuple[bytes, int]:
+    total = 0
+    chunks: list[bytes] = []
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Excel upload exceeds the {max_bytes // 1024 // 1024}MB limit",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks), total
+
+
+def _unique_excel_column_name(value: Any, index: int, seen: set[str]) -> str:
+    base = str(_row_value(value) or "").strip() or f"Column {index}"
+    if len(base) > 120:
+        base = base[:120].strip()
+    name = base
+    suffix = 2
+    while name in seen:
+        name = f"{base}_{suffix}"
+        suffix += 1
+    seen.add(name)
+    return name
+
+
+def _extract_excel_rows(
+    content: bytes,
+    *,
+    sheet_name: Optional[str] = None,
+    header_row: int = 1,
+    data_start_row: Optional[int] = None,
+    max_rows: int = MAX_EXCEL_ROWS_PER_PREVIEW,
+) -> tuple[list[ExcelSheetInfo], str, int, int, list[dict[str, Any]], list[str], list[str]]:
+    try:
+        from openpyxl import load_workbook  # type: ignore
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="openpyxl is required to process Excel sources",
+        ) from exc
+
+    if header_row < 1:
+        raise HTTPException(status_code=400, detail="header_row must be greater than or equal to 1")
+
+    try:
+        workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid Excel workbook: {exc}") from exc
+
+    try:
+        sheets = [
+            ExcelSheetInfo(name=worksheet.title, max_row=worksheet.max_row or 0, max_column=worksheet.max_column or 0)
+            for worksheet in workbook.worksheets
+        ]
+        if not sheets:
+            raise HTTPException(status_code=400, detail="Excel workbook has no sheets")
+
+        selected_sheet = sheet_name if sheet_name in workbook.sheetnames else workbook.sheetnames[0]
+        if sheet_name and sheet_name not in workbook.sheetnames:
+            raise HTTPException(status_code=400, detail=f"Sheet '{sheet_name}' was not found")
+
+        worksheet = workbook[selected_sheet]
+        start_row = data_start_row if data_start_row and data_start_row > header_row else header_row + 1
+        warnings: list[str] = []
+
+        header_values = next(
+            worksheet.iter_rows(
+                min_row=header_row,
+                max_row=header_row,
+                values_only=True,
+            ),
+            None,
+        )
+        if not header_values:
+            raise HTTPException(status_code=400, detail="Excel sheet must include a header row")
+
+        seen_columns: set[str] = set()
+        columns = [
+            _unique_excel_column_name(value, index + 1, seen_columns)
+            for index, value in enumerate(header_values[:MAX_EXCEL_COLUMNS_PER_PREVIEW])
+        ]
+        while columns and columns[-1].startswith("Column ") and len(columns[-1].split()) == 2:
+            columns.pop()
+        if not columns:
+            raise HTTPException(status_code=400, detail="Excel sheet header row is empty")
+        if len(header_values) > len(columns):
+            warnings.append(f"Only the first {len(columns)} Excel columns were loaded")
+
+        rows: list[dict[str, Any]] = []
+        skipped_empty = 0
+        reached_limit = False
+        for values in worksheet.iter_rows(min_row=start_row, values_only=True):
+            if len(rows) >= max_rows:
+                reached_limit = True
+                break
+            sliced_values = list(values[: len(columns)])
+            if all(_is_empty_cell(value) for value in sliced_values):
+                skipped_empty += 1
+                continue
+            rows.append(
+                {
+                    column: _row_value(sliced_values[index]) if index < len(sliced_values) else ""
+                    for index, column in enumerate(columns)
+                }
+            )
+
+        if skipped_empty:
+            warnings.append(f"{skipped_empty} empty Excel row(s) were ignored")
+        if reached_limit:
+            warnings.append(f"Only the first {max_rows} Excel data rows were loaded")
+        if not rows:
+            raise HTTPException(status_code=400, detail="Excel sheet must include at least one data row")
+
+        return sheets, selected_sheet, header_row, start_row, rows, columns, warnings
+    finally:
+        workbook.close()
 
 
 def _parse_structured_rows(
@@ -997,6 +1351,82 @@ def _column_order_from_rows(rows: list[dict[str, Any]]) -> list[str]:
     return columns
 
 
+def _connector_has_inline_sample(config: dict[str, Any]) -> bool:
+    raw_content = str(config.get("raw_content") or "").strip()
+    if raw_content:
+        return True
+    for key in ("sample_rows", "rows", "documents", "tables"):
+        value = config.get(key)
+        if isinstance(value, list) and value:
+            return True
+        if isinstance(value, dict):
+            return True
+    return False
+
+
+def _quote_pg_identifier(identifier: str) -> str:
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", identifier):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid DB table identifier '{identifier}'. Use schema.table with letters, numbers, and underscores.",
+        )
+    return f'"{identifier}"'
+
+
+def _parse_db_table_ref(source_uri: Any) -> tuple[str, str]:
+    table_ref = str(source_uri or "").strip()
+    if table_ref.startswith("db://"):
+        table_ref = table_ref[len("db://") :]
+    table_ref = table_ref.split("?", 1)[0].strip().strip("/")
+    table_ref = table_ref.replace("/", ".")
+    parts = [part for part in table_ref.split(".") if part]
+    if len(parts) == 1:
+        return "public", parts[0]
+    if len(parts) == 2:
+        return parts[0], parts[1]
+    raise HTTPException(
+        status_code=400,
+        detail="DB table source must use db://schema.table or schema.table.",
+    )
+
+
+async def _connector_raw_content_from_db(
+    db: Any,
+    connector: SourceConnector,
+    limit: int,
+) -> tuple[StructuredSourceType, str, Optional[str], list[str]]:
+    config = connector.config
+    if connector.connector_type != "db_table" or _connector_has_inline_sample(config):
+        return _connector_raw_content(connector, limit)
+
+    source_uri = config.get("source_uri") or config.get("table") or config.get("uri")
+    if not source_uri:
+        return _connector_raw_content(connector, limit)
+
+    schema, table = _parse_db_table_ref(source_uri)
+    row_limit = max(1, min(int(limit or 100), 1000))
+    qualified_table = f"{_quote_pg_identifier(schema)}.{_quote_pg_identifier(table)}"
+    rows = await db.query(
+        f"SELECT * FROM {qualified_table} LIMIT {row_limit}",
+        multirows=True,
+    )
+    object_rows = [
+        {str(key): _row_value(value) for key, value in row.items()}
+        for row in rows or []
+    ]
+    if not object_rows:
+        raise HTTPException(
+            status_code=400,
+            detail=f"DB table '{schema}.{table}' returned no rows.",
+        )
+    return (
+        "json",
+        json.dumps(object_rows, ensure_ascii=False),
+        str(source_uri),
+        [f"Loaded {len(object_rows)} row(s) from DB table {schema}.{table}"],
+    )
+
+
 def _connector_raw_content(connector: SourceConnector, limit: int) -> tuple[StructuredSourceType, str, Optional[str], list[str]]:
     config = connector.config
     warnings: list[str] = []
@@ -1062,8 +1492,14 @@ def _connector_raw_content(connector: SourceConnector, limit: int) -> tuple[Stru
     return "json", json.dumps([row], ensure_ascii=False), source_uri, warnings
 
 
-def _connector_sample_response(connector: SourceConnector, limit: int) -> SourceConnectorSampleResponse:
-    source_type, raw_content, source_uri, warnings = _connector_raw_content(connector, limit)
+def _connector_sample_response_from_raw(
+    connector: SourceConnector,
+    source_type: StructuredSourceType,
+    raw_content: str,
+    source_uri: Optional[str],
+    warnings: list[str],
+    limit: int = 1000,
+) -> SourceConnectorSampleResponse:
     rows, _, parse_warnings = _parse_structured_rows(source_type, raw_content, max_rows=limit)
     warnings.extend(parse_warnings)
     return SourceConnectorSampleResponse(
@@ -1076,6 +1512,14 @@ def _connector_sample_response(connector: SourceConnector, limit: int) -> Source
         columns=_column_order_from_rows(rows),
         row_count=len(rows),
         warnings=warnings,
+    )
+
+
+def _connector_sample_response(connector: SourceConnector, limit: int) -> SourceConnectorSampleResponse:
+    return _connector_sample_response_from_raw(
+        connector,
+        *_connector_raw_content(connector, limit),
+        limit=limit,
     )
 
 
@@ -1357,6 +1801,60 @@ def _tags_for_structured_row(
     return tags
 
 
+def _status_for_structured_row(
+    row: dict[str, Any],
+    mapping: dict[str, str],
+    fallback: AnswerStatus,
+) -> AnswerStatus:
+    text = _structured_row_text(row, mapping.get("status")).strip().lower()
+    if not text:
+        return fallback
+    status_aliases: dict[str, AnswerStatus] = {
+        "draft": "draft",
+        "초안": "draft",
+        "검토": "draft",
+        "검토중": "draft",
+        "검토 중": "draft",
+        "published": "published",
+        "publish": "published",
+        "active": "published",
+        "게시": "published",
+        "게시됨": "published",
+        "사용": "published",
+        "운영": "published",
+        "archived": "archived",
+        "archive": "archived",
+        "보관": "archived",
+        "보관됨": "archived",
+        "숨김": "archived",
+        "expired": "expired",
+        "expire": "expired",
+        "만료": "expired",
+        "종료": "expired",
+    }
+    return status_aliases.get(text, fallback)
+
+
+def _datetime_for_structured_row(
+    row: dict[str, Any],
+    mapping: dict[str, str],
+    role: Literal["valid_from", "valid_until"],
+) -> Optional[datetime]:
+    text = _structured_row_text(row, mapping.get(role))
+    if not text:
+        return None
+    normalized = text.strip().replace("Z", "+00:00")
+    if re.fullmatch(r"\d{4}[./]\d{1,2}[./]\d{1,2}", normalized):
+        normalized = normalized.replace(".", "-").replace("/", "-")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
 def _rows_from_answer(answer: AnswerItem) -> tuple[list[dict[str, Any]], list[str], str]:
     body = answer.body.strip()
     rows: list[dict[str, Any]] = []
@@ -1496,6 +1994,333 @@ def _add_score(details: dict[str, float], key: str, amount: float) -> None:
     if amount == 0:
         return
     details[key] = round(details.get(key, 0.0) + amount, 4)
+
+
+def _safe_float(value: Any, default: float, minimum: Optional[float] = None, maximum: Optional[float] = None) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        number = default
+    if minimum is not None:
+        number = max(minimum, number)
+    if maximum is not None:
+        number = min(maximum, number)
+    return number
+
+
+def _embedding_func_from_rag(rag):
+    if hasattr(rag, "embedding_func") and rag.embedding_func:
+        return rag.embedding_func
+    if hasattr(rag, "text_chunks") and hasattr(rag.text_chunks, "embedding_func"):
+        return rag.text_chunks.embedding_func
+    return None
+
+
+def _embedding_to_list(value: Any) -> list[float]:
+    if hasattr(value, "tolist"):
+        value = value.tolist()
+    if isinstance(value, tuple):
+        value = list(value)
+    if isinstance(value, list) and value and isinstance(value[0], (list, tuple)):
+        value = value[0]
+    if not isinstance(value, list):
+        return []
+    converted: list[float] = []
+    for item in value:
+        try:
+            converted.append(float(item))
+        except (TypeError, ValueError):
+            return []
+    return converted
+
+
+def _cosine_similarity(left: list[float], right: list[float]) -> float:
+    if not left or not right:
+        return 0.0
+    pairs = list(zip(left, right))
+    if not pairs:
+        return 0.0
+    dot = sum(a * b for a, b in pairs)
+    left_norm = sum(a * a for a, _ in pairs) ** 0.5
+    right_norm = sum(b * b for _, b in pairs) ** 0.5
+    if left_norm == 0 or right_norm == 0:
+        return 0.0
+    return max(0.0, min(1.0, dot / (left_norm * right_norm)))
+
+
+def _answer_vector_content(answer: AnswerItem, guidance: list[AnswerGuidance]) -> str:
+    guidance_text = "\n".join(
+        f"{item.guidance_type}: {item.text}"
+        for item in guidance
+        if item.guidance_type != "negative_keyword"
+    )
+    tags = ", ".join(answer.tags)
+    body_preview = answer.body[:1600]
+    return "\n".join(
+        part
+        for part in [
+            f"Title: {answer.title}",
+            f"Summary: {answer.approved_summary or ''}",
+            f"Tags: {tags}",
+            f"Matching hints:\n{guidance_text}",
+            f"Answer:\n{body_preview}",
+        ]
+        if part.strip()
+    )
+
+
+def _answer_vector_hash(answer: AnswerItem, content: str) -> str:
+    raw = f"{answer.answer_id}:{answer.version}:{content}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+async def _delete_answer_vectors(db, workspace: str, answer_id: str) -> None:
+    await db.execute(
+        """
+        DELETE FROM LIGHTRAG_ANSWER_VECTORS
+        WHERE workspace = $1 AND answer_id = $2
+        """,
+        {"workspace": workspace, "answer_id": answer_id},
+    )
+
+
+async def _ensure_answer_vector(
+    db,
+    workspace: str,
+    rag,
+    answer: AnswerItem,
+    guidance: list[AnswerGuidance],
+) -> Optional[list[float]]:
+    content = _answer_vector_content(answer, guidance)
+    content_hash = _answer_vector_hash(answer, content)
+    existing = await db.query(
+        """
+        SELECT embedding, content_hash
+        FROM LIGHTRAG_ANSWER_VECTORS
+        WHERE workspace = $1 AND answer_id = $2 AND vector_kind = 'combined'
+        """,
+        [workspace, answer.answer_id],
+    )
+    if existing and existing.get("content_hash") == content_hash:
+        embedding = _coerce_json(existing.get("embedding"), [])
+        return _embedding_to_list(embedding)
+
+    embedding_func = _embedding_func_from_rag(rag)
+    if embedding_func is None:
+        return None
+
+    try:
+        embedding_result = await embedding_func([content])
+        embedding = _embedding_to_list(embedding_result)
+    except Exception as exc:
+        logger.warning("[Answers] Failed to build answer vector for %s: %s", answer.answer_id, exc)
+        return None
+
+    if not embedding:
+        return None
+
+    await db.query(
+        """
+        INSERT INTO LIGHTRAG_ANSWER_VECTORS
+            (vector_id, workspace, answer_id, answer_version, vector_kind, content_hash, content, embedding, metadata)
+        VALUES ($1, $2, $3, $4, 'combined', $5, $6, $7::jsonb, $8::jsonb)
+        ON CONFLICT (workspace, answer_id, vector_kind)
+        DO UPDATE SET
+            answer_version = EXCLUDED.answer_version,
+            content_hash = EXCLUDED.content_hash,
+            content = EXCLUDED.content,
+            embedding = EXCLUDED.embedding,
+            metadata = EXCLUDED.metadata,
+            update_time = NOW()
+        """,
+        [
+            f"avec-{uuid.uuid4().hex}",
+            workspace,
+            answer.answer_id,
+            answer.version,
+            content_hash,
+            content,
+            _json_list(embedding),
+            _json({"source": "answer_catalog_hybrid"}),
+        ],
+    )
+    return embedding
+
+
+async def _answer_vector_scores(
+    db,
+    workspace: str,
+    rag,
+    query: str,
+    answers: list[AnswerItem],
+    guidance_by_answer: dict[str, list[AnswerGuidance]],
+    top_k: int,
+) -> tuple[dict[str, float], str]:
+    embedding_func = _embedding_func_from_rag(rag)
+    if embedding_func is None:
+        return {}, "vector_unavailable"
+
+    try:
+        query_embedding = _embedding_to_list(await embedding_func([query]))
+    except Exception as exc:
+        logger.warning("[Answers] Failed to embed answer query: %s", exc)
+        return {}, "vector_query_failed"
+
+    if not query_embedding:
+        return {}, "vector_query_empty"
+
+    scores: dict[str, float] = {}
+    for answer in answers:
+        answer_embedding = await _ensure_answer_vector(
+            db,
+            workspace,
+            rag,
+            answer,
+            guidance_by_answer.get(answer.answer_id, []),
+        )
+        if not answer_embedding:
+            continue
+        score = _cosine_similarity(query_embedding, answer_embedding)
+        if score > 0:
+            scores[answer.answer_id] = round(score, 4)
+
+    top_scores = sorted(scores.items(), key=lambda item: item[1], reverse=True)[:top_k]
+    return dict(top_scores), "vector_ready"
+
+
+def _extract_json_object(text: str) -> Optional[dict[str, Any]]:
+    if not text:
+        return None
+    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL)
+    candidate = fenced.group(1) if fenced else text
+    if "{" in candidate and "}" in candidate:
+        candidate = candidate[candidate.find("{") : candidate.rfind("}") + 1]
+    try:
+        parsed = json.loads(candidate)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _extract_json_array(text: str) -> list[Any]:
+    if not text:
+        return []
+    fenced = re.search(r"```(?:json)?\s*(\[.*?\])\s*```", text, flags=re.DOTALL)
+    candidate = fenced.group(1) if fenced else text
+    if "[" in candidate and "]" in candidate:
+        candidate = candidate[candidate.find("[") : candidate.rfind("]") + 1]
+    try:
+        parsed = json.loads(candidate)
+    except json.JSONDecodeError:
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+async def _llm_select_candidate(rag, query: str, candidates: list[ResolveCandidate]) -> tuple[Optional[str], dict[str, Any]]:
+    llm_func = getattr(rag, "llm_model_func", None)
+    if llm_func is None or not candidates:
+        return None, {"status": "llm_unavailable"}
+
+    candidate_payload = [
+        {
+            "answer_id": item.answer.answer_id,
+            "title": item.answer.title,
+            "summary": item.answer.approved_summary,
+            "score": item.score,
+            "matched_guidance": item.matched_guidance,
+            "reason": item.reason,
+        }
+        for item in candidates
+    ]
+    system_prompt = (
+        "You choose one approved FAQ answer ID from provided candidates. "
+        "Never create answer content. Return only strict JSON."
+    )
+    prompt = (
+        "User query:\n"
+        f"{query}\n\n"
+        "Candidates:\n"
+        f"{json.dumps(candidate_payload, ensure_ascii=False)}\n\n"
+        'Return {"answer_id": string|null, "confidence": number, "rationale": string}. '
+        "answer_id must be one of the candidate answer_id values, or null if none match."
+    )
+    try:
+        raw = await llm_func(prompt, system_prompt=system_prompt)
+    except Exception as exc:
+        logger.warning("[Answers] LLM answer selector failed: %s", exc)
+        return None, {"status": "llm_failed", "error": str(exc)}
+
+    parsed = _extract_json_object(str(raw))
+    if not parsed:
+        return None, {"status": "llm_invalid_json", "raw": str(raw)[:500]}
+
+    allowed = {item.answer.answer_id for item in candidates}
+    answer_id = parsed.get("answer_id")
+    if answer_id is not None and answer_id not in allowed:
+        return None, {"status": "llm_id_rejected", "answer_id": answer_id}
+
+    return answer_id, {
+        "status": "llm_ready",
+        "answer_id": answer_id,
+        "confidence": parsed.get("confidence"),
+        "rationale": parsed.get("rationale"),
+    }
+
+
+def _sentence_candidates(text: str, limit: int = 4) -> list[str]:
+    pieces = re.split(r"[\n\r.!?？。]+", text or "")
+    return [piece.strip() for piece in pieces if 4 <= len(piece.strip()) <= 80][:limit]
+
+
+def _heuristic_guidance_suggestions(
+    answer: AnswerItem,
+    existing_guidance: list[AnswerGuidance],
+    query_examples: list[str],
+    max_suggestions: int,
+) -> list[SourceGuidanceCandidate]:
+    seen = {_normalise_text(item.text) for item in existing_guidance}
+    suggestions: list[SourceGuidanceCandidate] = []
+
+    def add(guidance_type: GuidanceType, text: Any, weight: float, source: str) -> None:
+        value = " ".join(str(text or "").split())
+        if not value or len(value) < 2:
+            return
+        key = _normalise_text(value)
+        if key in seen:
+            return
+        seen.add(key)
+        suggestions.append(
+            SourceGuidanceCandidate(
+                guidance_type=guidance_type,
+                text=value[:200],
+                weight=weight,
+                source=source,
+                metadata={"suggested_by": "heuristic"},
+            )
+        )
+
+    add("question" if "?" in answer.title or "？" in answer.title else "keyword", answer.title, 1.0, "title")
+    add("question", f"{answer.title} 문의", 0.9, "title")
+    add("question", f"{answer.title} 안내", 0.9, "title")
+    for tag in answer.tags:
+        add("keyword", tag, 0.85, "tag")
+    for example in query_examples:
+        add("question", example, 1.0, "query_example")
+    for sentence in _sentence_candidates(answer.approved_summary or "", 4):
+        add("keyword", sentence, 0.75, "summary")
+    for sentence in _sentence_candidates(answer.body, 4):
+        add("synonym", sentence, 0.65, "body")
+
+    metadata = answer.metadata if isinstance(answer.metadata, dict) else {}
+    for key in ["category", "type", "detail_type", "question", "keywords", "source_title"]:
+        value = metadata.get(key)
+        if isinstance(value, list):
+            for item in value[:6]:
+                add("keyword", item, 0.8, f"metadata.{key}")
+        elif value:
+            add("keyword", value, 0.8, f"metadata.{key}")
+
+    return suggestions[:max_suggestions]
 
 
 async def _get_answer_row(db, workspace: str, answer_id: str) -> dict[str, Any]:
@@ -1711,6 +2536,8 @@ async def _insert_answer_item(
     priority: int,
     tags: list[str],
     metadata: dict[str, Any],
+    valid_from: Optional[datetime] = None,
+    valid_until: Optional[datetime] = None,
 ) -> AnswerItem:
     row = await db.query(
         """
@@ -1719,8 +2546,8 @@ async def _insert_answer_item(
              display_policy, status, version, valid_from, valid_until, priority,
              tags, metadata, publish_time)
         VALUES
-            ($1, $2, $3, $4, $5, $6, $7, $8, 1, NULL, NULL, $9,
-             $10::jsonb, $11::jsonb, CASE WHEN $8 = 'published' THEN NOW() ELSE NULL END)
+            ($1, $2, $3, $4, $5, $6, $7, $8, 1, $9, $10, $11,
+             $12::jsonb, $13::jsonb, CASE WHEN $8 = 'published' THEN NOW() ELSE NULL END)
         RETURNING workspace, answer_id, title, body, approved_summary, content_format,
                   display_policy, status, version, valid_from, valid_until, priority,
                   tags, metadata, publish_time, create_time, update_time
@@ -1734,6 +2561,8 @@ async def _insert_answer_item(
             content_format,
             display_policy,
             status,
+            valid_from,
+            valid_until,
             priority,
             _json_list(tags),
             _json(metadata),
@@ -1892,37 +2721,109 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
         await _ensure_tables(db)
         return workspace, db
 
+    async def rag_for_workspace(workspace: str):
+        workspace_rag = await get_workspace_rag(workspace)
+        if workspace_rag is None:
+            workspace_rag = rag
+        return workspace_rag
+
     @router.get("", response_model=AnswerListResponse, dependencies=[Depends(combined_auth)])
     async def list_answers(
         request: Request,
         status: Optional[str] = Query(default=None),
         search: Optional[str] = Query(default=None),
+        content_format: Optional[str] = Query(default=None),
+        display_policy: Optional[str] = Query(default=None),
+        validity: Optional[str] = Query(default=None),
+        tag: Optional[str] = Query(default=None),
+        source_type: Optional[str] = Query(default=None),
+        has_guidance: Optional[bool] = Query(default=None),
+        has_source: Optional[bool] = Query(default=None),
+        min_priority: Optional[int] = Query(default=None),
         page: int = Query(default=1, ge=1),
         page_size: int = Query(default=20, ge=1, le=100),
     ):
         workspace, db = await db_for_request(request)
         params: list[Any] = [workspace]
-        where = ["workspace = $1"]
+        where = ["a.workspace = $1"]
         if status and status != "all":
             params.append(status)
-            where.append(f"status = ${len(params)}")
+            where.append(f"a.status = ${len(params)}")
         if search:
             params.append(f"%{search}%")
             p = f"${len(params)}"
-            where.append(f"(title ILIKE {p} OR body ILIKE {p} OR approved_summary ILIKE {p})")
+            where.append(
+                f"(a.title ILIKE {p} OR a.body ILIKE {p} OR a.approved_summary ILIKE {p} "
+                f"OR a.answer_id ILIKE {p})"
+            )
+        if content_format and content_format != "all":
+            params.append(content_format)
+            where.append(f"a.content_format = ${len(params)}")
+        if display_policy and display_policy != "all":
+            params.append(display_policy)
+            where.append(f"a.display_policy = ${len(params)}")
+        if validity and validity != "all":
+            if validity == "active":
+                where.append(
+                    "(a.status != 'expired' AND (a.valid_from IS NULL OR a.valid_from <= NOW()) "
+                    "AND (a.valid_until IS NULL OR a.valid_until >= NOW()))"
+                )
+            elif validity == "scheduled":
+                where.append("a.valid_from IS NOT NULL AND a.valid_from > NOW()")
+            elif validity == "expired":
+                where.append("(a.status = 'expired' OR (a.valid_until IS NOT NULL AND a.valid_until < NOW()))")
+            elif validity == "no_period":
+                where.append("a.valid_from IS NULL AND a.valid_until IS NULL")
+        if tag:
+            params.append(f"%{tag}%")
+            where.append(
+                "EXISTS ("
+                "SELECT 1 FROM jsonb_array_elements_text(a.tags) AS tag_value "
+                f"WHERE tag_value ILIKE ${len(params)}"
+                ")"
+            )
+        if source_type and source_type != "all":
+            params.append(source_type)
+            where.append(
+                "EXISTS ("
+                "SELECT 1 FROM LIGHTRAG_ANSWER_SOURCE_LINKS l "
+                "JOIN LIGHTRAG_ANSWER_SOURCE_SNAPSHOTS s "
+                "ON s.workspace = l.workspace AND s.snapshot_id = l.snapshot_id "
+                "WHERE l.workspace = a.workspace AND l.answer_id = a.answer_id "
+                f"AND s.source_type = ${len(params)}"
+                ")"
+            )
+        if has_guidance is not None:
+            guidance_exists = (
+                "EXISTS (SELECT 1 FROM LIGHTRAG_ANSWER_GUIDANCE g "
+                "WHERE g.workspace = a.workspace AND g.answer_id = a.answer_id)"
+            )
+            where.append(guidance_exists if has_guidance else f"NOT {guidance_exists}")
+        if has_source is not None:
+            source_exists = (
+                "EXISTS (SELECT 1 FROM LIGHTRAG_ANSWER_SOURCE_LINKS l "
+                "WHERE l.workspace = a.workspace AND l.answer_id = a.answer_id)"
+            )
+            where.append(source_exists if has_source else f"NOT {source_exists}")
+        if min_priority is not None:
+            params.append(min_priority)
+            where.append(f"a.priority >= ${len(params)}")
         where_sql = " AND ".join(where)
-        count = await db.query(f"SELECT COUNT(*)::INT AS total FROM LIGHTRAG_ANSWER_ITEMS WHERE {where_sql}", params)
+        count = await db.query(
+            f"SELECT COUNT(*)::INT AS total FROM LIGHTRAG_ANSWER_ITEMS a WHERE {where_sql}",
+            params,
+        )
         total = int((count or {}).get("total") or 0)
 
         page_params = [*params, page_size, (page - 1) * page_size]
         rows = await db.query(
             f"""
-            SELECT workspace, answer_id, title, body, approved_summary, content_format,
-                   display_policy, status, version, valid_from, valid_until, priority,
-                   tags, metadata, publish_time, create_time, update_time
-            FROM LIGHTRAG_ANSWER_ITEMS
+            SELECT a.workspace, a.answer_id, a.title, a.body, a.approved_summary, a.content_format,
+                   a.display_policy, a.status, a.version, a.valid_from, a.valid_until, a.priority,
+                   a.tags, a.metadata, a.publish_time, a.create_time, a.update_time
+            FROM LIGHTRAG_ANSWER_ITEMS a
             WHERE {where_sql}
-            ORDER BY update_time DESC, answer_id ASC
+            ORDER BY a.update_time DESC, a.answer_id ASC
             LIMIT ${len(page_params) - 1} OFFSET ${len(page_params)}
             """,
             page_params,
@@ -2138,7 +3039,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
         request: Request,
         event_type: Optional[str] = Query(default=None),
         selected_answer_id: Optional[str] = Query(default=None),
-        limit: int = Query(default=50, ge=1, le=200),
+        limit: int = Query(default=50, ge=1, le=1000),
     ):
         workspace, db = await db_for_request(request)
         params: list[Any] = [workspace]
@@ -2164,6 +3065,103 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
         )
         return [_event_from_row(dict(row)) for row in rows or []]
 
+    @router.get("/events/page", response_model=AnswerEventListResponse, dependencies=[Depends(combined_auth)])
+    async def list_events_page(
+        request: Request,
+        event_type: Optional[str] = Query(default=None),
+        selected_answer_id: Optional[str] = Query(default=None),
+        query: Optional[str] = Query(default=None),
+        match_status: Optional[Literal["all", "matched", "no_match"]] = Query(default=None),
+        source: Optional[str] = Query(default=None),
+        mode: Optional[str] = Query(default=None),
+        date: Optional[str] = Query(default=None),
+        hour: Optional[str] = Query(default=None),
+        date_from: Optional[datetime] = Query(default=None),
+        date_to: Optional[datetime] = Query(default=None),
+        min_confidence: Optional[float] = Query(default=None, ge=0.0, le=1.0),
+        max_latency_ms: Optional[int] = Query(default=None, ge=0),
+        search: Optional[str] = Query(default=None),
+        timezone: str = Query(default="Asia/Seoul", max_length=64),
+        page: int = Query(default=1, ge=1),
+        page_size: int = Query(default=25, ge=5, le=100),
+    ):
+        workspace, db = await db_for_request(request)
+        timezone_name = _safe_timezone(timezone)
+        params: list[Any] = [workspace]
+        where = ["e.workspace = $1"]
+        _add_answer_event_filters(
+            params,
+            where,
+            event_type=event_type,
+            selected_answer_id=selected_answer_id,
+            query_text=query,
+            match_status=None if match_status == "all" else match_status,
+            source=source,
+            mode=mode,
+            date_key=date,
+            hour_key=hour,
+            date_from=date_from,
+            date_to=date_to,
+            min_confidence=min_confidence,
+            max_latency_ms=max_latency_ms,
+            search=search.strip() if search else None,
+            timezone_name=timezone_name,
+        )
+        where_sql = " AND ".join(where)
+        from_sql = """
+            FROM LIGHTRAG_ANSWER_EVENTS e
+            LEFT JOIN LIGHTRAG_ANSWER_ITEMS a
+              ON a.workspace = e.workspace AND a.answer_id = e.selected_answer_id
+        """
+        total_row = await db.query(
+            f"SELECT COUNT(*)::INT AS total {from_sql} WHERE {where_sql}",
+            params,
+        )
+        total = int((total_row or {}).get("total") or 0)
+        offset = (page - 1) * page_size
+        rows_params = [*params, page_size, offset]
+        rows = await db.query(
+            f"""
+            SELECT e.event_id, e.workspace, e.event_type, e.query, e.selected_answer_id,
+                   e.candidate_ids, e.scores, e.metadata, e.create_time
+            {from_sql}
+            WHERE {where_sql}
+            ORDER BY e.create_time DESC
+            LIMIT ${len(params) + 1}
+            OFFSET ${len(params) + 2}
+            """,
+            rows_params,
+            multirows=True,
+        )
+        events = [_event_from_row(dict(row)) for row in rows or []]
+        answer_ids = {
+            answer_id
+            for event in events
+            for answer_id in [event.selected_answer_id, *event.candidate_ids]
+            if answer_id
+        }
+        answers: list[AnswerItem] = []
+        if answer_ids:
+            answer_rows = await db.query(
+                """
+                SELECT workspace, answer_id, title, body, approved_summary, content_format,
+                       display_policy, status, version, valid_from, valid_until, priority,
+                       tags, metadata, publish_time, create_time, update_time
+                FROM LIGHTRAG_ANSWER_ITEMS
+                WHERE workspace = $1 AND answer_id = ANY($2::text[])
+                """,
+                [workspace, list(answer_ids)],
+                multirows=True,
+            )
+            answers = [_answer_from_row(dict(row)) for row in answer_rows or []]
+        return AnswerEventListResponse(
+            events=events,
+            answers=answers,
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+
     @router.post(
         "/structured/profile",
         response_model=StructuredProfileResponse,
@@ -2175,6 +3173,56 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             payload.source_type,
             payload.raw_content,
             sample_limit=payload.sample_limit,
+        )
+
+    @router.post(
+        "/structured/excel/preview",
+        response_model=ExcelPreviewResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def preview_excel_source(
+        request: Request,
+        file: UploadFile = File(...),
+        sheet_name: Optional[str] = Form(default=None),
+        header_row: int = Form(default=1, ge=1),
+        data_start_row: Optional[int] = Form(default=None),
+        sample_limit: int = Form(default=20, ge=1, le=100),
+        max_rows: int = Form(default=MAX_EXCEL_ROWS_PER_PREVIEW, ge=1, le=MAX_EXCEL_ROWS_PER_PREVIEW),
+    ):
+        await db_for_request(request)
+        filename = file.filename or "uploaded.xlsx"
+        lower_name = filename.lower()
+        if not lower_name.endswith((".xlsx", ".xlsm", ".xltx", ".xltm")):
+            raise HTTPException(
+                status_code=400,
+                detail="Only .xlsx, .xlsm, .xltx, and .xltm Excel files are supported",
+            )
+
+        content, file_size = await _read_upload_limited(file, MAX_EXCEL_UPLOAD_BYTES)
+        sheets, selected_sheet, header, start_row, rows, columns, warnings = _extract_excel_rows(
+            content,
+            sheet_name=sheet_name,
+            header_row=header_row,
+            data_start_row=data_start_row,
+            max_rows=max_rows,
+        )
+        raw_content = json.dumps(rows, ensure_ascii=False)
+        profile = _profile_structured_source("json", raw_content, sample_limit=sample_limit)
+        profile.warnings.extend(warnings)
+        source_uri = f"xlsx://{filename}/{selected_sheet}"
+        return ExcelPreviewResponse(
+            file_name=filename,
+            file_size=file_size,
+            sheets=sheets,
+            selected_sheet=selected_sheet,
+            header_row=header,
+            data_start_row=start_row,
+            row_count=len(rows),
+            columns=columns,
+            raw_content=raw_content,
+            source_uri=source_uri,
+            profile=profile,
+            warnings=warnings,
         )
 
     @router.post(
@@ -2213,10 +3261,10 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             if text and text not in tags:
                 tags.append(text)
 
-        if payload.materialization_mode == "row_per_answer" and len(rows) > 200:
+        if payload.materialization_mode == "row_per_answer" and len(rows) > MAX_STRUCTURED_ROWS_PER_ANSWER_BATCH:
             raise HTTPException(
                 status_code=400,
-                detail="Row-per-answer materialization supports up to 200 rows per request",
+                detail=f"Row-per-answer materialization supports up to {MAX_STRUCTURED_ROWS_PER_ANSWER_BATCH} rows per request",
             )
 
         answer_ids = (
@@ -2313,11 +3361,19 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             else:
                 for row_index, row_data in enumerate(rows):
                     row_answer_id = answer_ids[row_index]
+                    row_status = _status_for_structured_row(row_data, mapping, payload.status)
+                    row_valid_from = _datetime_for_structured_row(row_data, mapping, "valid_from")
+                    row_valid_until = _datetime_for_structured_row(row_data, mapping, "valid_until")
                     row_metadata = {
                         **source_metadata,
                         "source_row_index": row_index,
                         "source_row_hash": _content_hash(json.dumps(row_data, ensure_ascii=False, sort_keys=True)),
                         "source_row": row_data,
+                        "row_policy": {
+                            "status": row_status,
+                            "valid_from": row_valid_from.isoformat() if row_valid_from else None,
+                            "valid_until": row_valid_until.isoformat() if row_valid_until else None,
+                        },
                     }
                     answer = await _insert_answer_item(
                         db,
@@ -2328,10 +3384,12 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                         approved_summary=_summary_for_structured_row(row_data, mapping, payload.approved_summary),
                         content_format="plain",
                         display_policy="both",
-                        status=payload.status,
+                        status=row_status,
                         priority=payload.priority,
                         tags=_tags_for_structured_row(tags, row_data, mapping, payload.source_type),
                         metadata=row_metadata,
+                        valid_from=row_valid_from,
+                        valid_until=row_valid_until,
                     )
                     created_answers.append(answer)
                     created_datasets.append(_dataset_from_answer(answer))
@@ -2656,7 +3714,11 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
         connector = _source_connector_from_row(await _get_connector_row(db, workspace, connector_id))
         if not connector.enabled:
             raise HTTPException(status_code=409, detail=f"Source connector '{connector_id}' is disabled")
-        return _connector_sample_response(connector, payload.limit)
+        return _connector_sample_response_from_raw(
+            connector,
+            *await _connector_raw_content_from_db(db, connector, payload.limit),
+            limit=payload.limit,
+        )
 
     @router.post(
         "/connectors/{connector_id}/profile",
@@ -2670,7 +3732,11 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
     ):
         workspace, db = await db_for_request(request)
         connector = _source_connector_from_row(await _get_connector_row(db, workspace, connector_id))
-        sample = _connector_sample_response(connector, payload.limit)
+        sample = _connector_sample_response_from_raw(
+            connector,
+            *await _connector_raw_content_from_db(db, connector, payload.limit),
+            limit=payload.limit,
+        )
         return _profile_structured_source(sample.source_type, sample.raw_content, sample_limit=min(payload.limit, 100))
 
     @router.post(
@@ -2685,7 +3751,11 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
     ):
         workspace, db = await db_for_request(request)
         connector = _source_connector_from_row(await _get_connector_row(db, workspace, connector_id))
-        sample = _connector_sample_response(connector, 100)
+        sample = _connector_sample_response_from_raw(
+            connector,
+            *await _connector_raw_content_from_db(db, connector, 100),
+            limit=100,
+        )
         profile = _profile_structured_source(sample.source_type, sample.raw_content, sample_limit=20)
         mapping = _mapping_from_profile(profile, payload.mapping)
         return SourceConnectorMappingPreviewResponse(
@@ -2709,7 +3779,11 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
     ):
         workspace, db = await db_for_request(request)
         connector = _source_connector_from_row(await _get_connector_row(db, workspace, connector_id))
-        sample = _connector_sample_response(connector, 1000)
+        sample = _connector_sample_response_from_raw(
+            connector,
+            *await _connector_raw_content_from_db(db, connector, 1000),
+            limit=1000,
+        )
         profile = _profile_structured_source(sample.source_type, sample.raw_content, sample_limit=20)
         mapping = _mapping_from_profile(profile, payload.mapping)
         guidance_columns = _guidance_columns_from_profile(profile, mapping, payload.guidance_columns)
@@ -2971,6 +4045,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
         if not row:
             raise HTTPException(status_code=404, detail=f"Answer '{answer_id}' not found")
         await _record_revision(db, dict(row))
+        await _delete_answer_vectors(db, workspace, answer_id)
         return _answer_from_row(dict(row))
 
     @router.post("/{answer_id}/publish", response_model=AnswerItem, dependencies=[Depends(combined_auth)])
@@ -3081,6 +4156,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
         if not row:
             raise HTTPException(status_code=404, detail=f"Answer '{answer_id}' not found")
         await _record_revision(db, dict(row))
+        await _delete_answer_vectors(db, workspace, answer_id)
         return _answer_from_row(dict(row))
 
     @router.get("/{answer_id}/guidance", response_model=list[AnswerGuidance], dependencies=[Depends(combined_auth)])
@@ -3098,6 +4174,84 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             multirows=True,
         )
         return [_guidance_from_row(dict(row)) for row in rows or []]
+
+    @router.post(
+        "/{answer_id}/guidance/suggest",
+        response_model=GuidanceSuggestResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def suggest_guidance(request: Request, answer_id: str, payload: GuidanceSuggestRequest):
+        workspace, db = await db_for_request(request)
+        answer = _answer_from_row(await _get_answer_row(db, workspace, answer_id))
+        guidance_rows = await db.query(
+            """
+            SELECT guidance_id, workspace, answer_id, guidance_type, text, weight, metadata, create_time
+            FROM LIGHTRAG_ANSWER_GUIDANCE
+            WHERE workspace = $1 AND answer_id = $2
+            ORDER BY create_time DESC
+            """,
+            [workspace, answer_id],
+            multirows=True,
+        )
+        existing_guidance = [_guidance_from_row(dict(row)) for row in guidance_rows or []]
+        suggestions = _heuristic_guidance_suggestions(
+            answer,
+            existing_guidance,
+            payload.query_examples,
+            payload.max_suggestions,
+        )
+        mode = "heuristic"
+
+        if payload.use_llm:
+            workspace_rag = await rag_for_workspace(workspace)
+            llm_func = getattr(workspace_rag, "llm_model_func", None)
+            if llm_func is not None:
+                prompt = (
+                    "Create matching hints for a fixed FAQ answer. "
+                    "Return only a JSON array. Each item must contain guidance_type, text, weight. "
+                    "Allowed guidance_type values: question, keyword, synonym, negative_keyword, note.\n\n"
+                    f"Answer title: {answer.title}\n"
+                    f"Summary: {answer.approved_summary or ''}\n"
+                    f"Body:\n{answer.body[:1800]}\n"
+                    f"Existing hints: {json.dumps([item.text for item in existing_guidance], ensure_ascii=False)}\n"
+                    f"Query examples: {json.dumps(payload.query_examples, ensure_ascii=False)}"
+                )
+                try:
+                    raw = await llm_func(
+                        prompt,
+                        system_prompt=(
+                            "You help FAQ operators add short representative questions, keywords, and synonyms. "
+                            "Do not create final answer content."
+                        ),
+                    )
+                    seen = {_normalise_text(item.text) for item in existing_guidance + suggestions}
+                    allowed_types = {"question", "keyword", "synonym", "negative_keyword", "note"}
+                    for item in _extract_json_array(str(raw)):
+                        if not isinstance(item, dict):
+                            continue
+                        guidance_type = item.get("guidance_type") or "keyword"
+                        text = item.get("text")
+                        if guidance_type not in allowed_types or not text:
+                            continue
+                        key = _normalise_text(text)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        suggestions.append(
+                            SourceGuidanceCandidate(
+                                guidance_type=guidance_type,
+                                text=str(text).strip()[:200],
+                                weight=_safe_float(item.get("weight"), 1.0, 0.0, 10.0),
+                                source="llm",
+                                metadata={"suggested_by": "llm"},
+                            )
+                        )
+                    if suggestions:
+                        mode = "llm"
+                except Exception as exc:
+                    logger.warning("[Answers] LLM guidance suggestion failed for %s: %s", answer_id, exc)
+
+        return GuidanceSuggestResponse(suggestions=suggestions[: payload.max_suggestions], mode=mode)
 
     @router.post("/{answer_id}/guidance", response_model=AnswerGuidance, dependencies=[Depends(combined_auth)])
     async def create_guidance(request: Request, answer_id: str, payload: GuidanceCreateRequest):
@@ -3123,6 +4277,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
         )
         if not row:
             raise HTTPException(status_code=500, detail="Failed to create guidance")
+        await _delete_answer_vectors(db, workspace, answer_id)
         return _guidance_from_row(dict(row))
 
     @router.delete("/{answer_id}/guidance/{guidance_id}", dependencies=[Depends(combined_auth)])
@@ -3135,7 +4290,86 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             """,
             {"workspace": workspace, "answer_id": answer_id, "guidance_id": guidance_id},
         )
+        await _delete_answer_vectors(db, workspace, answer_id)
         return {"message": "Guidance deleted", "guidance_id": guidance_id}
+
+    @router.post("/{answer_id}/vectors/rebuild", dependencies=[Depends(combined_auth)])
+    async def rebuild_answer_vector(request: Request, answer_id: str):
+        workspace, db = await db_for_request(request)
+        answer = _answer_from_row(await _get_answer_row(db, workspace, answer_id))
+        guidance_rows = await db.query(
+            """
+            SELECT guidance_id, workspace, answer_id, guidance_type, text, weight, metadata, create_time
+            FROM LIGHTRAG_ANSWER_GUIDANCE
+            WHERE workspace = $1 AND answer_id = $2
+            """,
+            [workspace, answer_id],
+            multirows=True,
+        )
+        workspace_rag = await rag_for_workspace(workspace)
+        embedding = await _ensure_answer_vector(
+            db,
+            workspace,
+            workspace_rag,
+            answer,
+            [_guidance_from_row(dict(row)) for row in guidance_rows or []],
+        )
+        if not embedding:
+            raise HTTPException(status_code=409, detail="Answer vector could not be built. Check embedding configuration.")
+        return {"message": "Answer vector rebuilt", "answer_id": answer_id, "dimensions": len(embedding)}
+
+    @router.post("/vectors/rebuild", dependencies=[Depends(combined_auth)])
+    async def rebuild_answer_vectors(
+        request: Request,
+        status: Optional[str] = Query(default=None),
+        limit: int = Query(default=100, ge=1, le=500),
+    ):
+        workspace, db = await db_for_request(request)
+        status_filter = [status] if status and status != "all" else ["draft", "published"]
+        rows = await db.query(
+            """
+            SELECT workspace, answer_id, title, body, approved_summary, content_format,
+                   display_policy, status, version, valid_from, valid_until, priority,
+                   tags, metadata, publish_time, create_time, update_time
+            FROM LIGHTRAG_ANSWER_ITEMS
+            WHERE workspace = $1 AND status = ANY($2::text[])
+            ORDER BY priority DESC, update_time DESC
+            LIMIT $3
+            """,
+            [workspace, status_filter, limit],
+            multirows=True,
+        )
+        guidance_rows = await db.query(
+            """
+            SELECT guidance_id, workspace, answer_id, guidance_type, text, weight, metadata, create_time
+            FROM LIGHTRAG_ANSWER_GUIDANCE
+            WHERE workspace = $1
+            """,
+            [workspace],
+            multirows=True,
+        )
+        guidance_by_answer: dict[str, list[AnswerGuidance]] = {}
+        for row in guidance_rows or []:
+            guidance = _guidance_from_row(dict(row))
+            guidance_by_answer.setdefault(guidance.answer_id, []).append(guidance)
+
+        workspace_rag = await rag_for_workspace(workspace)
+        rebuilt = 0
+        failed: list[str] = []
+        for row in rows or []:
+            answer = _answer_from_row(dict(row))
+            embedding = await _ensure_answer_vector(
+                db,
+                workspace,
+                workspace_rag,
+                answer,
+                guidance_by_answer.get(answer.answer_id, []),
+            )
+            if embedding:
+                rebuilt += 1
+            else:
+                failed.append(answer.answer_id)
+        return {"message": "Answer vectors rebuild completed", "rebuilt": rebuilt, "failed": failed}
 
     async def resolve_answer_candidates(
         workspace: str,
@@ -3177,34 +4411,117 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             guidance = _guidance_from_row(dict(row))
             guidance_by_answer.setdefault(guidance.answer_id, []).append(guidance)
 
-        candidates: list[ResolveCandidate] = []
+        answers = [_answer_from_row(dict(row)) for row in rows or []]
+        answer_by_id = {answer.answer_id: answer for answer in answers}
+        keyword_scores: dict[str, tuple[float, list[str], str, dict[str, float]]] = {}
+        vector_scores: dict[str, float] = {}
+        vector_status = "not_requested"
+        workspace_rag = await rag_for_workspace(workspace)
+
+        if payload.retrieval_mode in {"hybrid", "llm_rerank"}:
+            vector_scores, vector_status = await _answer_vector_scores(
+                db,
+                workspace,
+                workspace_rag,
+                payload.query,
+                answers,
+                guidance_by_answer,
+                payload.vector_top_k,
+            )
+
         for row in rows or []:
-            answer = _answer_from_row(dict(row))
+            answer = answer_by_id[str(row["answer_id"])]
             score, matched_guidance, reason, score_details = _score_candidate(
                 answer,
                 guidance_by_answer.get(answer.answer_id, []),
                 payload.query,
                 payload.strategy,
             )
-            if score > 0:
-                candidates.append(
-                    ResolveCandidate(
-                        answer=answer,
-                        score=round(score, 4),
-                        matched_guidance=matched_guidance,
-                        reason=reason,
-                        score_details=score_details,
-                    )
+            keyword_scores[answer.answer_id] = (score, matched_guidance, reason, score_details)
+
+        candidate_ids = {
+            answer_id
+            for answer_id, (keyword_score, _, _, _) in keyword_scores.items()
+            if keyword_score > 0
+        } | {answer_id for answer_id, vector_score in vector_scores.items() if vector_score > 0}
+
+        candidates: list[ResolveCandidate] = []
+        for answer_id in candidate_ids:
+            answer = answer_by_id.get(answer_id)
+            if answer is None:
+                continue
+            keyword_score, matched_guidance, reason, score_details = keyword_scores.get(
+                answer_id,
+                (0.0, [], "vector_match", {}),
+            )
+            vector_score = vector_scores.get(answer_id, 0.0)
+            selected_by = "keyword"
+            final_score = keyword_score
+            detail_payload = dict(score_details)
+            _add_score(detail_payload, "keyword_score", keyword_score)
+            if payload.retrieval_mode in {"hybrid", "llm_rerank"}:
+                priority_boost = min(0.05, max(answer.priority, 0) * 0.005)
+                final_score = min(1.0, keyword_score * 0.6 + vector_score * 0.35 + priority_boost)
+                _add_score(detail_payload, "vector_score", vector_score)
+                _add_score(detail_payload, "hybrid_priority", priority_boost)
+                _add_score(detail_payload, "hybrid_score", final_score)
+                if vector_score > keyword_score:
+                    selected_by = "vector"
+                elif vector_score > 0:
+                    selected_by = "hybrid"
+                reason = (
+                    f"hybrid keyword:{keyword_score:.2f}, vector:{vector_score:.2f}"
+                    if vector_score > 0
+                    else reason
                 )
+            candidates.append(
+                ResolveCandidate(
+                    answer=answer,
+                    score=round(final_score, 4),
+                    matched_guidance=matched_guidance,
+                    reason=reason,
+                    score_details=detail_payload,
+                    selected_by=selected_by,
+                )
+            )
 
         candidates.sort(key=lambda item: (item.score, item.answer.priority, item.answer.update_time or ""), reverse=True)
+        llm_selection: dict[str, Any] = {"status": "not_requested"}
+        if payload.retrieval_mode == "llm_rerank":
+            llm_candidates = candidates[: payload.llm_candidate_count]
+            llm_answer_id, llm_selection = await _llm_select_candidate(workspace_rag, payload.query, llm_candidates)
+            if llm_answer_id:
+                candidates.sort(
+                    key=lambda item: (
+                        item.answer.answer_id == llm_answer_id,
+                        item.score,
+                        item.answer.priority,
+                        item.answer.update_time or "",
+                    ),
+                    reverse=True,
+                )
+                for item in candidates:
+                    if item.answer.answer_id == llm_answer_id:
+                        item.selected_by = "llm_id_selector"
+                        item.reason = f"LLM selected candidate ID. {item.reason}"
+                        item.score_details["llm_confidence"] = _safe_float(
+                            llm_selection.get("confidence"),
+                            item.score,
+                            0.0,
+                            1.0,
+                        )
+                        break
+
         candidates = candidates[: payload.top_k]
         selected = candidates[0] if candidates and candidates[0].score >= payload.min_score else None
+        selected_by = selected.selected_by if selected else "none"
         rationale = (
-            f"Selected {selected.answer.answer_id} by weighted deterministic score: {selected.reason}."
+            f"Selected {selected.answer.answer_id} by {selected_by}: {selected.reason}."
             if selected
-            else "No candidate reached the minimum weighted deterministic score."
+            else "No candidate reached the minimum answer matching score."
         )
+        if selected and llm_selection.get("rationale"):
+            rationale = f"{rationale} LLM rationale: {llm_selection['rationale']}"
         trace_id = await _log_event(
             db,
             workspace,
@@ -3216,8 +4533,11 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             metadata={
                 **(event_metadata or {}),
                 "latency_ms": int((time.time() - started) * 1000),
-                "mode": "weighted_deterministic",
+                "mode": payload.retrieval_mode,
                 "strategy": payload.strategy,
+                "selected_by": selected_by,
+                "vector_status": vector_status,
+                "llm_selection": llm_selection,
                 "score_details": {item.answer.answer_id: item.score_details for item in candidates},
             },
         )
@@ -3227,6 +4547,8 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             candidates=candidates,
             trace_id=trace_id,
             rationale=rationale,
+            retrieval_mode=payload.retrieval_mode,
+            selected_by=selected_by,
         )
 
     @router.post("/resolve", response_model=ResolveResponse, dependencies=[Depends(combined_auth)])
@@ -3246,6 +4568,9 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 min_score=payload.min_score,
                 include_drafts=payload.include_drafts,
                 strategy=payload.strategy,
+                retrieval_mode=payload.retrieval_mode,
+                vector_top_k=payload.vector_top_k,
+                llm_candidate_count=payload.llm_candidate_count,
             ),
             event_type="search",
             event_metadata={
@@ -3261,6 +4586,8 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 candidates=result.candidates if payload.include_candidates else [],
                 trace_id=result.trace_id,
                 rationale=result.rationale,
+                retrieval_mode=result.retrieval_mode,
+                selected_by=result.selected_by,
             )
 
         response_text, display_policy = _render_answer_response(answer, payload.response_policy)
@@ -3284,6 +4611,151 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             candidates=result.candidates if payload.include_candidates else [],
             trace_id=result.trace_id,
             rationale=result.rationale,
+            retrieval_mode=result.retrieval_mode,
+            selected_by=result.selected_by,
+        )
+
+    @router.get("/stats/events", response_model=AnswerEventStatsResponse, dependencies=[Depends(combined_auth)])
+    async def answer_event_stats(
+        request: Request,
+        event_type: Optional[str] = Query(default=None),
+        match_status: Optional[Literal["all", "matched", "no_match"]] = Query(default=None),
+        source: Optional[str] = Query(default=None),
+        mode: Optional[str] = Query(default=None),
+        date_from: Optional[datetime] = Query(default=None),
+        date_to: Optional[datetime] = Query(default=None),
+        min_confidence: Optional[float] = Query(default=None, ge=0.0, le=1.0),
+        max_latency_ms: Optional[int] = Query(default=None, ge=0),
+        search: Optional[str] = Query(default=None),
+        timezone: str = Query(default="Asia/Seoul", max_length=64),
+        limit: int = Query(default=20, ge=1, le=100),
+    ):
+        workspace, db = await db_for_request(request)
+        timezone_name = _safe_timezone(timezone)
+        params: list[Any] = [workspace]
+        where = ["e.workspace = $1"]
+        _add_answer_event_filters(
+            params,
+            where,
+            event_type=event_type,
+            match_status=None if match_status == "all" else match_status,
+            source=source,
+            mode=mode,
+            date_from=date_from,
+            date_to=date_to,
+            min_confidence=min_confidence,
+            max_latency_ms=max_latency_ms,
+            search=search.strip() if search else None,
+            timezone_name=timezone_name,
+        )
+        where_sql = " AND ".join(where)
+        from_sql = """
+            FROM LIGHTRAG_ANSWER_EVENTS e
+            LEFT JOIN LIGHTRAG_ANSWER_ITEMS a
+              ON a.workspace = e.workspace AND a.answer_id = e.selected_answer_id
+        """
+        base = await db.query(
+            f"""
+            SELECT
+              COUNT(*)::INT AS total_events,
+              COUNT(*) FILTER (WHERE e.selected_answer_id IS NULL)::INT AS no_match,
+              COALESCE(ROUND(AVG(
+                CASE
+                  WHEN e.metadata->>'latency_ms' ~ '^[0-9]+(\\.[0-9]+)?$'
+                  THEN (e.metadata->>'latency_ms')::DOUBLE PRECISION
+                  ELSE NULL
+                END
+              ))::INT, 0) AS avg_latency_ms
+            {from_sql}
+            WHERE {where_sql}
+            """,
+            params,
+        )
+
+        async def group_rows(select_sql: str, extra_params: Optional[list[Any]] = None) -> list[AnswerAnalyticsGroupRow]:
+            local_params = [*params, *(extra_params or []), limit]
+            rows = await db.query(
+                f"""
+                SELECT key, label, COUNT(*)::INT AS count
+                FROM (
+                  {select_sql}
+                  {from_sql}
+                  WHERE {where_sql}
+                ) grouped
+                GROUP BY key, label
+                ORDER BY count DESC, label ASC
+                LIMIT ${len(local_params)}
+                """,
+                local_params,
+                multirows=True,
+            )
+            return [_analytics_group_from_row(dict(row)) for row in rows or []]
+
+        selected_answers = await group_rows(
+            """
+            SELECT
+              COALESCE(e.selected_answer_id, '__none__') AS key,
+              CASE
+                WHEN e.selected_answer_id IS NULL THEN 'No Match'
+                ELSE COALESCE(a.title, e.selected_answer_id)
+              END AS label
+            """
+        )
+        queries = await group_rows(
+            """
+            SELECT
+              LOWER(COALESCE(NULLIF(BTRIM(e.query), ''), '-')) AS key,
+              COALESCE(NULLIF(BTRIM(e.query), ''), '-') AS label
+            """
+        )
+        sources = await group_rows(
+            """
+            SELECT
+              CASE
+                WHEN e.selected_answer_id IS NULL THEN '__none__'
+                ELSE COALESCE(a.metadata->>'source_type', a.metadata->>'created_from', a.metadata->>'materialization_mode', 'manual')
+              END AS key,
+              CASE
+                WHEN e.selected_answer_id IS NULL THEN 'No Match'
+                ELSE COALESCE(a.metadata->>'source_type', a.metadata->>'created_from', a.metadata->>'materialization_mode', 'manual')
+              END AS label
+            """
+        )
+        modes = await group_rows(
+            """
+            SELECT
+              COALESCE(e.metadata->>'mode', e.metadata->>'retrieval_mode', '-') AS key,
+              COALESCE(e.metadata->>'mode', e.metadata->>'retrieval_mode', '-') AS label
+            """
+        )
+        dates = await group_rows(
+            f"""
+            SELECT
+              TO_CHAR(e.create_time AT TIME ZONE ${len(params) + 1}, 'YYYY-MM-DD') AS key,
+              TO_CHAR(e.create_time AT TIME ZONE ${len(params) + 1}, 'YYYY-MM-DD') AS label
+            """,
+            [timezone_name],
+        )
+        hours = await group_rows(
+            f"""
+            SELECT
+              TO_CHAR(e.create_time AT TIME ZONE ${len(params) + 1}, 'HH24:00') AS key,
+              TO_CHAR(e.create_time AT TIME ZONE ${len(params) + 1}, 'HH24:00') AS label
+            """,
+            [timezone_name],
+        )
+        return AnswerEventStatsResponse(
+            workspace=workspace,
+            total_events=int((base or {}).get("total_events") or 0),
+            no_match=int((base or {}).get("no_match") or 0),
+            avg_latency_ms=int((base or {}).get("avg_latency_ms") or 0),
+            timezone=timezone_name,
+            selected_answers=selected_answers,
+            queries=queries,
+            sources=sources,
+            modes=modes,
+            dates=dates,
+            hours=hours,
         )
 
     @router.get("/stats/summary", dependencies=[Depends(combined_auth)])

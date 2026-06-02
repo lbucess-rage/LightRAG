@@ -27,7 +27,6 @@ import {
   AnswerStatus,
   addAnswerGuidance,
   archiveAnswer,
-  createAnswer,
   deleteAnswerGuidance,
   listAnswerSourceLinks,
   listAnswerGuidance,
@@ -37,10 +36,12 @@ import {
   restoreAnswerRevision,
   updateAnswer,
 } from '@/api/lightrag'
+import AnswerContentPreview from '@/components/answers/AnswerContentPreview'
 import Badge from '@/components/ui/Badge'
 import AnswerHelpButton from '@/components/answers/AnswerHelpButton'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
+import PaginationControls from '@/components/ui/PaginationControls'
 import Textarea from '@/components/ui/Textarea'
 import { Label } from '@/components/ui/Label'
 import {
@@ -50,7 +51,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from '@/components/ui/Dialog'
 import {
   Select,
@@ -60,6 +60,7 @@ import {
   SelectValue,
 } from '@/components/ui/Select'
 import { localizedErrorMessage } from '@/lib/utils'
+import { useSettingsStore } from '@/stores/settings'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 const statusVariant = (status: AnswerStatus): 'default' | 'secondary' | 'destructive' | 'outline' => {
@@ -80,47 +81,149 @@ const toLocalDateTimeValue = (value?: string | null) => {
 }
 
 const fromLocalDateTimeValue = (value: string) => (value ? new Date(value).toISOString() : null)
+const ANSWER_PAGE_SIZE_OPTIONS = [
+  { value: 10, label: '10' },
+  { value: 20, label: '20' },
+  { value: 50, label: '50' },
+  { value: 100, label: '100' },
+]
+
+const answerSourceTypeOptions = [
+  'plain',
+  'markdown',
+  'html',
+  'url',
+  'file',
+  'excel',
+  'structured',
+  'manual_table',
+  'db_table',
+  'multi_table',
+  'nosql_collection',
+  'web',
+]
 
 export default function AnswerLibrary() {
   const { t } = useTranslation()
   const currentWorkspaceId = useWorkspaceStore.use.currentWorkspaceId()
+  const setCurrentTab = useSettingsStore.use.setCurrentTab()
   const [answers, setAnswers] = useState<AnswerItem[]>([])
   const [status, setStatus] = useState<string>('all')
   const [search, setSearch] = useState('')
+  const [contentFormat, setContentFormat] = useState<string>('all')
+  const [displayPolicy, setDisplayPolicy] = useState<string>('all')
+  const [validity, setValidity] = useState<string>('all')
+  const [tag, setTag] = useState('')
+  const [sourceType, setSourceType] = useState<string>('all')
+  const [hasGuidance, setHasGuidance] = useState<string>('all')
+  const [hasSource, setHasSource] = useState<string>('all')
+  const [minPriority, setMinPriority] = useState('')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const [totalAnswers, setTotalAnswers] = useState(0)
   const [isLoading, setIsLoading] = useState(false)
-  const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [selectedAnswer, setSelectedAnswer] = useState<AnswerItem | null>(null)
 
   const fetchAnswers = useCallback(async () => {
     const workspaceId = currentWorkspaceId
     setIsLoading(true)
     try {
-      const result = await listAnswers({ status, search: search.trim() || undefined, page: 1, page_size: 100 })
+      const trimmedMinPriority = minPriority.trim()
+      const result = await listAnswers({
+        status,
+        search: search.trim() || undefined,
+        content_format: contentFormat !== 'all' ? contentFormat : undefined,
+        display_policy: displayPolicy !== 'all' ? displayPolicy : undefined,
+        validity: validity !== 'all' ? validity : undefined,
+        tag: tag.trim() || undefined,
+        source_type: sourceType !== 'all' ? sourceType : undefined,
+        has_guidance: hasGuidance === 'all' ? undefined : hasGuidance === 'yes',
+        has_source: hasSource === 'all' ? undefined : hasSource === 'yes',
+        min_priority: trimmedMinPriority ? Number(trimmedMinPriority) : undefined,
+        page,
+        page_size: pageSize,
+      })
       if (workspaceId !== useWorkspaceStore.getState().currentWorkspaceId) return
+      const totalPages = Math.max(1, Math.ceil(result.total / result.page_size))
+      if (result.answers.length === 0 && result.total > 0 && page > totalPages) {
+        setPage(totalPages)
+        return
+      }
       setAnswers(result.answers)
+      setTotalAnswers(result.total)
     } catch (err) {
       toast.error(localizedErrorMessage(err, t))
     } finally {
       setIsLoading(false)
     }
-  }, [currentWorkspaceId, search, status, t])
+  }, [
+    contentFormat,
+    currentWorkspaceId,
+    displayPolicy,
+    hasGuidance,
+    hasSource,
+    minPriority,
+    page,
+    pageSize,
+    search,
+    sourceType,
+    status,
+    tag,
+    t,
+    validity,
+  ])
 
   useEffect(() => {
     setAnswers([])
+    setPage(1)
+    setTotalAnswers(0)
     setSelectedAnswer(null)
-    setIsCreateOpen(false)
+    setStatus('all')
+    setSearch('')
+    setContentFormat('all')
+    setDisplayPolicy('all')
+    setValidity('all')
+    setTag('')
+    setSourceType('all')
+    setHasGuidance('all')
+    setHasSource('all')
+    setMinPriority('')
   }, [currentWorkspaceId])
 
   useEffect(() => {
     fetchAnswers()
   }, [fetchAnswers])
 
-  const counts = useMemo(() => ({
-    total: answers.length,
-    draft: answers.filter((answer) => answer.status === 'draft').length,
-    published: answers.filter((answer) => answer.status === 'published').length,
-    archived: answers.filter((answer) => answer.status === 'archived').length,
-  }), [answers])
+  const totalPages = useMemo(() => Math.max(1, Math.ceil(totalAnswers / pageSize)), [pageSize, totalAnswers])
+
+  const handleSearchChange = (value: string) => {
+    setSearch(value)
+    setPage(1)
+  }
+
+  const handleStatusChange = (value: string) => {
+    setStatus(value)
+    setPage(1)
+  }
+
+  const resetFilters = () => {
+    setStatus('all')
+    setSearch('')
+    setContentFormat('all')
+    setDisplayPolicy('all')
+    setValidity('all')
+    setTag('')
+    setSourceType('all')
+    setHasGuidance('all')
+    setHasSource('all')
+    setMinPriority('')
+    setPage(1)
+  }
+
+  const handlePageSizeChange = (value: number) => {
+    setPageSize(value)
+    setPage(1)
+  }
 
   const handlePublish = async (answer: AnswerItem) => {
     try {
@@ -146,7 +249,7 @@ export default function AnswerLibrary() {
     <div className="flex h-full flex-col gap-4 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">{t('answerCatalog.library.title', 'Answer Library')}</h1>
+          <h1 className="text-2xl font-bold">{t('answerCatalog.library.title', 'View Answers')}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {t('answerCatalog.library.description', 'Manage approved answers, versions, validity, and matching hints.')}
           </p>
@@ -157,43 +260,150 @@ export default function AnswerLibrary() {
             <RefreshCwIcon className={isLoading ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
             {t('common.refresh', 'Refresh')}
           </Button>
-          <CreateAnswerDialog
-            open={isCreateOpen}
-            onOpenChange={setIsCreateOpen}
-            onCreated={fetchAnswers}
-          />
+          <Button size="sm" onClick={() => setCurrentTab('answer-sources')}>
+            <PlusIcon className="h-4 w-4" />
+            {t('answerCatalog.library.openAddAnswers', '답변 추가 열기')}
+          </Button>
         </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-4">
-        <Metric label={t('answerCatalog.library.total', 'Total')} value={counts.total} />
-        <Metric label={t('answerCatalog.library.draft', 'Draft')} value={counts.draft} />
-        <Metric label={t('answerCatalog.library.publishedCount', 'Published')} value={counts.published} />
-        <Metric label={t('answerCatalog.library.archivedCount', 'Archived')} value={counts.archived} />
-      </div>
-
-      <div className="flex flex-wrap gap-2 rounded-md border p-3">
-        <Input
-          className="min-w-64 flex-1"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder={t('answerCatalog.library.search', 'Search answers...')}
-        />
-        <Select value={status} onValueChange={setStatus}>
-          <SelectTrigger className="w-40">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">{t('common.all', 'All')}</SelectItem>
-            <SelectItem value="draft">{t('answerCatalog.status.draft', 'Draft')}</SelectItem>
-            <SelectItem value="published">{t('answerCatalog.status.published', 'Published')}</SelectItem>
-            <SelectItem value="archived">{t('answerCatalog.status.archived', 'Archived')}</SelectItem>
-          </SelectContent>
-        </Select>
-        <Button onClick={fetchAnswers} disabled={isLoading}>
-          {isLoading ? <Loader2Icon className="h-4 w-4 animate-spin" /> : <RefreshCwIcon className="h-4 w-4" />}
-          {t('common.search', 'Search')}
-        </Button>
+      <div className="grid gap-3 rounded-md border p-3">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(220px,1.6fr)_repeat(4,minmax(140px,1fr))]">
+          <div className="grid gap-1.5">
+            <Label className="text-xs">{t('answerCatalog.library.searchLabel', '검색어')}</Label>
+            <Input
+              value={search}
+              onChange={(event) => handleSearchChange(event.target.value)}
+              placeholder={t('answerCatalog.library.search', 'Search answers...')}
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label className="text-xs">{t('answerCatalog.library.status', 'Status')}</Label>
+            <Select value={status} onValueChange={handleStatusChange}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t('common.all', 'All')}</SelectItem>
+                <SelectItem value="draft">{t('answerCatalog.status.draft', 'Draft')}</SelectItem>
+                <SelectItem value="published">{t('answerCatalog.status.published', 'Published')}</SelectItem>
+                <SelectItem value="archived">{t('answerCatalog.status.archived', 'Archived')}</SelectItem>
+                <SelectItem value="expired">{t('answerCatalog.status.expired', 'Expired')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-1.5">
+            <Label className="text-xs">{t('answerCatalog.library.contentFormat', 'Format')}</Label>
+            <Select value={contentFormat} onValueChange={(value) => { setContentFormat(value); setPage(1) }}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t('answerCatalog.library.allFormats', '전체 형식')}</SelectItem>
+                <SelectItem value="plain">{t('answerCatalog.sources.types.plain', 'Plain Text')}</SelectItem>
+                <SelectItem value="markdown">{t('answerCatalog.sources.types.markdown', 'Markdown')}</SelectItem>
+                <SelectItem value="html">{t('answerCatalog.sources.types.html', 'HTML')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-1.5">
+            <Label className="text-xs">{t('answerCatalog.library.displayPolicy', 'Display Option')}</Label>
+            <Select value={displayPolicy} onValueChange={(value) => { setDisplayPolicy(value); setPage(1) }}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t('answerCatalog.library.allDisplayPolicies', '전체 표시 방식')}</SelectItem>
+                <SelectItem value="summary">{t('answerCatalog.displayPolicy.summary', 'Summary')}</SelectItem>
+                <SelectItem value="full">{t('answerCatalog.displayPolicy.full', 'Full')}</SelectItem>
+                <SelectItem value="both">{t('answerCatalog.displayPolicy.both', 'Both')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-1.5">
+            <Label className="text-xs">{t('answerCatalog.library.validity', 'Validity')}</Label>
+            <Select value={validity} onValueChange={(value) => { setValidity(value); setPage(1) }}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t('common.all', 'All')}</SelectItem>
+                <SelectItem value="active">{t('answerCatalog.library.validityActive', '현재 사용 가능')}</SelectItem>
+                <SelectItem value="scheduled">{t('answerCatalog.library.validityScheduled', '예약됨')}</SelectItem>
+                <SelectItem value="expired">{t('answerCatalog.library.validityExpired', '만료됨')}</SelectItem>
+                <SelectItem value="no_period">{t('answerCatalog.library.validityNoPeriod', '기간 없음')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(160px,1fr)_minmax(160px,1fr)_120px_140px_140px_auto_auto]">
+          <div className="grid gap-1.5">
+            <Label className="text-xs">{t('answerCatalog.library.tagFilter', '태그')}</Label>
+            <Input
+              value={tag}
+              onChange={(event) => { setTag(event.target.value); setPage(1) }}
+              placeholder={t('answerCatalog.library.tagFilterPlaceholder', '태그명')}
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label className="text-xs">{t('answerCatalog.library.sourceTypeFilter', '답변 추가 유형')}</Label>
+            <Select value={sourceType} onValueChange={(value) => { setSourceType(value); setPage(1) }}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t('common.all', 'All')}</SelectItem>
+                {answerSourceTypeOptions.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {t(`answerCatalog.sources.types.${option}`, t(`answerCatalog.sources.connectorTypes.${option}`, option))}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-1.5">
+            <Label className="text-xs">{t('answerCatalog.library.minPriority', '최소 우선순위')}</Label>
+            <Input
+              type="number"
+              value={minPriority}
+              onChange={(event) => { setMinPriority(event.target.value); setPage(1) }}
+              placeholder="0"
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label className="text-xs">{t('answerCatalog.library.hasGuidance', '찾기 힌트')}</Label>
+            <Select value={hasGuidance} onValueChange={(value) => { setHasGuidance(value); setPage(1) }}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t('common.all', 'All')}</SelectItem>
+                <SelectItem value="yes">{t('answerCatalog.library.exists', '있음')}</SelectItem>
+                <SelectItem value="no">{t('answerCatalog.library.missing', '없음')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-1.5">
+            <Label className="text-xs">{t('answerCatalog.library.hasSource', '생성 기록')}</Label>
+            <Select value={hasSource} onValueChange={(value) => { setHasSource(value); setPage(1) }}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t('common.all', 'All')}</SelectItem>
+                <SelectItem value="yes">{t('answerCatalog.library.exists', '있음')}</SelectItem>
+                <SelectItem value="no">{t('answerCatalog.library.missing', '없음')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <Button variant="outline" onClick={resetFilters} className="self-end">
+            {t('answerCatalog.library.resetFilters', '조건 초기화')}
+          </Button>
+          <Button onClick={fetchAnswers} disabled={isLoading} className="self-end">
+            {isLoading ? <Loader2Icon className="h-4 w-4 animate-spin" /> : <RefreshCwIcon className="h-4 w-4" />}
+            {t('common.search', 'Search')}
+          </Button>
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto rounded-md border">
@@ -202,7 +412,7 @@ export default function AnswerLibrary() {
             <BookOpenIcon className="mb-3 h-8 w-8 text-muted-foreground" />
             <div className="text-sm font-medium">{t('answerCatalog.library.empty', 'No answers yet')}</div>
             <div className="mt-1 text-sm text-muted-foreground">
-              {t('answerCatalog.library.emptyDesc', 'Create the first approved answer for this workspace.')}
+              {t('answerCatalog.library.emptyDesc', 'Create the first answer candidate from Add Answers.')}
             </div>
           </div>
         ) : (
@@ -218,9 +428,6 @@ export default function AnswerLibrary() {
                     <Badge variant="outline">v{answer.version}</Badge>
                     <span className="font-mono text-xs text-muted-foreground">{answer.answer_id}</span>
                   </div>
-                  {answer.approved_summary && (
-                    <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">{answer.approved_summary}</p>
-                  )}
                   <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-sm">{answer.body}</p>
                   {answer.tags.length > 0 && (
                     <div className="mt-3 flex flex-wrap gap-1">
@@ -253,6 +460,16 @@ export default function AnswerLibrary() {
           </div>
         )}
       </div>
+      <PaginationControls
+        currentPage={page}
+        totalPages={totalPages}
+        pageSize={pageSize}
+        totalCount={totalAnswers}
+        onPageChange={setPage}
+        onPageSizeChange={handlePageSizeChange}
+        pageSizeOptions={ANSWER_PAGE_SIZE_OPTIONS}
+        isLoading={isLoading}
+      />
       <AnswerDetailDialog
         answer={selectedAnswer}
         open={Boolean(selectedAnswer)}
@@ -264,15 +481,6 @@ export default function AnswerLibrary() {
           fetchAnswers()
         }}
       />
-    </div>
-  )
-}
-
-function Metric({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-md border p-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 text-2xl font-semibold">{value}</div>
     </div>
   )
 }
@@ -501,9 +709,9 @@ function AnswerDetailDialog({
                 <Select value={contentFormat} onValueChange={(value) => setContentFormat(value as AnswerContentFormat)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="plain">Plain</SelectItem>
-                    <SelectItem value="markdown">Markdown</SelectItem>
-                    <SelectItem value="html">HTML</SelectItem>
+                    <SelectItem value="plain">{t('answerCatalog.sources.types.plain', 'Plain Text')}</SelectItem>
+                    <SelectItem value="markdown">{t('answerCatalog.sources.types.markdown', 'Markdown')}</SelectItem>
+                    <SelectItem value="html">{t('answerCatalog.sources.types.html', 'HTML')}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -518,12 +726,19 @@ function AnswerDetailDialog({
             </div>
 
             <div className="grid gap-2">
-              <Label>{t('answerCatalog.library.summary', 'Approved Summary')}</Label>
-              <Textarea value={summary} onChange={(event) => setSummary(event.target.value)} rows={3} />
-            </div>
-            <div className="grid gap-2">
               <Label>{t('answerCatalog.library.body', 'Body')}</Label>
               <Textarea value={body} onChange={(event) => setBody(event.target.value)} className="min-h-56" />
+            </div>
+            <AnswerContentPreview content={body} format={contentFormat} />
+            <div className="grid gap-2">
+              <Label>{t('answerCatalog.library.summary', 'Answer Memo')}</Label>
+              <Textarea value={summary} onChange={(event) => setSummary(event.target.value)} rows={3} />
+              <p className="text-xs leading-5 text-muted-foreground">
+                {t(
+                  'answerCatalog.library.summaryHelp',
+                  'Internal note for approval requests, review context, or change history. It is separate from the answer body.'
+                )}
+              </p>
             </div>
             <div className="grid gap-2">
               <Label>{t('answerCatalog.library.tags', 'Tags')}</Label>
@@ -685,119 +900,6 @@ function AnswerDetailDialog({
           <Button onClick={handleSave} disabled={isSaving}>
             {isSaving ? <Loader2Icon className="h-4 w-4 animate-spin" /> : <SaveIcon className="h-4 w-4" />}
             {t('common.save', 'Save')}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-function CreateAnswerDialog({
-  open,
-  onOpenChange,
-  onCreated,
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  onCreated: () => void
-}) {
-  const { t } = useTranslation()
-  const [title, setTitle] = useState('')
-  const [summary, setSummary] = useState('')
-  const [body, setBody] = useState('')
-  const [tags, setTags] = useState('')
-  const [guidance, setGuidance] = useState('')
-  const [isSubmitting, setIsSubmitting] = useState(false)
-
-  const reset = () => {
-    setTitle('')
-    setSummary('')
-    setBody('')
-    setTags('')
-    setGuidance('')
-  }
-
-  const handleCreate = async () => {
-    if (!title.trim() || !body.trim()) {
-      toast.error(t('answerCatalog.library.required', 'Title and body are required.'))
-      return
-    }
-    setIsSubmitting(true)
-    try {
-      await createAnswer({
-        title: title.trim(),
-        body: body.trim(),
-        approved_summary: summary.trim() || undefined,
-        content_format: 'markdown',
-        display_policy: 'both',
-        status: 'draft',
-        tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean),
-        guidance: guidance.split('\n').map((line) => line.trim()).filter(Boolean),
-      })
-      toast.success(t('answerCatalog.library.created', 'Answer created.'))
-      reset()
-      onOpenChange(false)
-      onCreated()
-    } catch (err) {
-      toast.error(localizedErrorMessage(err, t))
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogTrigger asChild>
-        <Button size="sm">
-          <PlusIcon className="h-4 w-4" />
-          {t('answerCatalog.library.create', 'Create Answer')}
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-3xl max-h-[86vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{t('answerCatalog.library.createTitle', 'Create Approved Answer')}</DialogTitle>
-          <DialogDescription>
-            {t('answerCatalog.library.createDesc', 'Create a draft answer first. Publish it after review.')}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-4 py-2">
-          <div className="grid gap-2">
-            <Label>{t('answerCatalog.library.answerTitle', 'Title')}</Label>
-            <Input value={title} onChange={(event) => setTitle(event.target.value)} />
-          </div>
-          <div className="grid gap-2">
-            <Label>{t('answerCatalog.library.summary', 'Approved Summary')}</Label>
-            <Textarea value={summary} onChange={(event) => setSummary(event.target.value)} rows={3} />
-          </div>
-          <div className="grid gap-2">
-            <Label>{t('answerCatalog.library.body', 'Body')}</Label>
-            <Textarea value={body} onChange={(event) => setBody(event.target.value)} className="min-h-44" />
-          </div>
-          <div className="grid gap-2">
-            <Label>{t('answerCatalog.library.tags', 'Tags')}</Label>
-            <Input
-              value={tags}
-              onChange={(event) => setTags(event.target.value)}
-              placeholder={t('answerCatalog.library.tagsPlaceholder', 'billing, refund, membership')}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label>{t('answerCatalog.library.guidance', 'Guidance Questions / Keywords')}</Label>
-            <Textarea
-              value={guidance}
-              onChange={(event) => setGuidance(event.target.value)}
-              rows={5}
-              placeholder={t('answerCatalog.library.guidancePlaceholder', 'How do I get a refund?\nCancel payment\nrefund policy')}
-            />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
-            {t('common.cancel', 'Cancel')}
-          </Button>
-          <Button onClick={handleCreate} disabled={isSubmitting}>
-            {isSubmitting && <Loader2Icon className="h-4 w-4 animate-spin" />}
-            {t('answerCatalog.library.create', 'Create Answer')}
           </Button>
         </DialogFooter>
       </DialogContent>

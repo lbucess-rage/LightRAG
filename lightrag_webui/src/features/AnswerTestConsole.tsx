@@ -21,6 +21,7 @@ export default function AnswerTestConsole() {
   const [topK, setTopK] = useState('5')
   const [minScore, setMinScore] = useState('0.18')
   const [strategy, setStrategy] = useState<'fast' | 'balanced'>('balanced')
+  const [retrievalMode, setRetrievalMode] = useState<'keyword' | 'hybrid' | 'llm_rerank'>('keyword')
   const [includeDrafts, setIncludeDrafts] = useState(false)
   const [result, setResult] = useState<AnswerResolveResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -43,6 +44,9 @@ export default function AnswerTestConsole() {
         top_k: Number(topK),
         min_score: Number(minScore),
         strategy,
+        retrieval_mode: retrievalMode,
+        vector_top_k: 8,
+        llm_candidate_count: 5,
         include_drafts: includeDrafts,
       })
       if (workspaceId !== useWorkspaceStore.getState().currentWorkspaceId) return
@@ -67,7 +71,7 @@ export default function AnswerTestConsole() {
       </div>
 
       <div className="rounded-md border p-4">
-        <div className="grid gap-3 lg:grid-cols-[1fr_140px_150px_160px_auto]">
+        <div className="grid gap-3 lg:grid-cols-[1fr_140px_150px_170px_160px_auto]">
           <div>
             <Label>{t('answerCatalog.test.query', 'User Query')}</Label>
             <Input
@@ -106,6 +110,19 @@ export default function AnswerTestConsole() {
             </Select>
           </div>
           <div>
+            <Label>{t('answerCatalog.test.retrievalMode', 'Retrieval Mode')}</Label>
+            <Select value={retrievalMode} onValueChange={(value) => setRetrievalMode(value as 'keyword' | 'hybrid' | 'llm_rerank')}>
+              <SelectTrigger className="mt-1">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="keyword">{t('answerCatalog.test.modeKeyword', 'Keyword')}</SelectItem>
+                <SelectItem value="hybrid">{t('answerCatalog.test.modeHybrid', 'Keyword + Vector')}</SelectItem>
+                <SelectItem value="llm_rerank">{t('answerCatalog.test.modeLlm', 'LLM ID Select')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
             <Label>{t('answerCatalog.test.minScore', 'Min Score')}</Label>
             <Input className="mt-1" value={minScore} onChange={(event) => setMinScore(event.target.value)} />
           </div>
@@ -133,6 +150,7 @@ export default function AnswerTestConsole() {
               )}
               <h2 className="font-semibold">{t('answerCatalog.test.selected', 'Selected Answer')}</h2>
               <Badge variant="outline">{Math.round(result.confidence * 100)}%</Badge>
+              <Badge variant="outline">{result.selected_by || result.retrieval_mode || retrievalMode}</Badge>
             </div>
             {result.selected_answer ? (
               <div className="space-y-3">
@@ -170,6 +188,7 @@ export default function AnswerTestConsole() {
                     <div className="flex flex-wrap items-center gap-2">
                       <div className="font-medium">{candidate.answer.title}</div>
                       <Badge variant="outline">{candidate.score}</Badge>
+                      <Badge variant="outline">{candidate.selected_by || result.retrieval_mode || retrievalMode}</Badge>
                       <Badge variant={candidate.answer.status === 'published' ? 'secondary' : 'default'}>
                         {t(`answerCatalog.status.${candidate.answer.status}`, candidate.answer.status)}
                       </Badge>

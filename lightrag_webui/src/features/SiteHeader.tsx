@@ -119,8 +119,8 @@ export default function SiteHeader() {
         )}
       </div>
 
-      <nav className="w-[200px] flex items-center justify-end">
-        <div className="flex items-center gap-2">
+      <nav className="flex w-[clamp(340px,30vw,560px)] shrink-0 items-center justify-end">
+        <div className="flex min-w-0 items-center gap-2">
           {versionDisplay && (
             <TooltipProvider>
               <Tooltip>

@@ -13,7 +13,7 @@
     "retrieval": "检索",
     "api": "API",
     "projectRepository": "项目仓库",
-    "answers": "答案",
+    "answers": "查看答案",
     "answerSources": "数据源",
     "answerMatching": "匹配",
     "structuredData": "结构化数据",
@@ -535,7 +535,7 @@
       "description": "逐步说明如何创建固定答案、管理匹配规则并验证用户问题会选择哪个答案。"
     },
     "library": {
-      "title": "答案库",
+      "title": "查看答案",
       "description": "管理已批准的固定答案、版本、有效期和匹配指引。",
       "published": "答案已发布。",
       "archived": "答案已归档。",
@@ -565,7 +565,8 @@
       "contentFormat": "格式",
       "validFrom": "有效开始",
       "validUntil": "有效结束",
-      "summary": "批准摘要",
+      "summary": "答案备注",
+      "summaryHelp": "用于审批请求、审核备注或变更原因的内部信息。它与实际答案正文分开管理。",
       "body": "正文",
       "tags": "标签",
       "tagsPlaceholder": "账单, 退款, 会员",

@@ -16,6 +16,7 @@ export type AppTab =
   | 'structured-data'
   | 'answer-test'
   | 'answer-analytics'
+  | 'answer-detailed-analytics'
   | 'answer-help'
 
 export type NavigationItem = {
@@ -32,12 +33,13 @@ export const navigationItems: NavigationItem[] = [
   { value: 'entity-management', labelKey: 'header.entityManagement', fallback: 'Entity-Relation', group: 'kms' },
   { value: 'schema', labelKey: 'header.schema', fallback: 'Schema', group: 'kms' },
   { value: 'retrieval', labelKey: 'header.retrieval', fallback: 'Search', group: 'kms' },
-  { value: 'answers', labelKey: 'header.answers', fallback: 'Answers', group: 'answer' },
-  { value: 'answer-sources', labelKey: 'header.answerSources', fallback: 'Sources', group: 'answer' },
-  { value: 'answer-matching', labelKey: 'header.answerMatching', fallback: 'Matching', group: 'answer' },
+  { value: 'answers', labelKey: 'header.answers', fallback: 'View Answers', group: 'answer' },
+  { value: 'answer-sources', labelKey: 'header.answerSources', fallback: 'Add Answers', group: 'answer' },
+  { value: 'answer-matching', labelKey: 'header.answerMatching', fallback: 'Answer Item Settings', group: 'answer' },
   { value: 'structured-data', labelKey: 'header.structuredData', fallback: 'Structured Data', group: 'answer' },
   { value: 'answer-test', labelKey: 'header.answerTest', fallback: 'Test Console', group: 'answer' },
   { value: 'answer-analytics', labelKey: 'header.answerAnalytics', fallback: 'Analytics', group: 'answer' },
+  { value: 'answer-detailed-analytics', labelKey: 'header.answerDetailedAnalytics', fallback: 'Detail Analytics', group: 'answer' },
   { value: 'answer-help', labelKey: 'header.answerHelp', fallback: 'Help', group: 'answer' },
   { value: 'api', labelKey: 'header.api', fallback: 'API', group: 'ops' },
   { value: 'prompts', labelKey: 'header.prompts', fallback: 'Prompts', group: 'ops' },
@@ -53,6 +55,7 @@ export const getVisibleTabsForMode = (mode: WorkspaceMode): AppTab[] => {
       'structured-data',
       'answer-test',
       'answer-analytics',
+      'answer-detailed-analytics',
       'answer-help',
       'api',
       'workspaces',
@@ -72,6 +75,7 @@ export const getVisibleTabsForMode = (mode: WorkspaceMode): AppTab[] => {
       'structured-data',
       'answer-test',
       'answer-analytics',
+      'answer-detailed-analytics',
       'answer-help',
       'api',
       'prompts',

@@ -13,7 +13,7 @@
     "retrieval": "Récupération",
     "api": "API",
     "projectRepository": "Référentiel du projet",
-    "answers": "Réponses",
+    "answers": "Consulter les réponses",
     "answerSources": "Sources",
     "answerMatching": "Correspondance",
     "structuredData": "Données structurées",
@@ -535,7 +535,7 @@
       "description": "Guide pas à pas pour créer des réponses fixes, gérer les règles de correspondance et vérifier quelle réponse est sélectionnée."
     },
     "library": {
-      "title": "Bibliothèque de réponses",
+      "title": "Consulter les réponses",
       "description": "Gérez les réponses fixes approuvées, les versions, la validité et les indications de correspondance.",
       "published": "Réponse publiée.",
       "archived": "Réponse archivée.",
@@ -565,7 +565,8 @@
       "contentFormat": "Format",
       "validFrom": "Valide à partir de",
       "validUntil": "Valide jusqu'à",
-      "summary": "Résumé approuvé",
+      "summary": "Mémo de réponse",
+      "summaryHelp": "Information interne pour les demandes d'approbation, les notes de révision ou les raisons de changement. Elle est distincte du contenu réel de la réponse.",
       "body": "Contenu",
       "tags": "Tags",
       "tagsPlaceholder": "facturation, remboursement, abonnement",

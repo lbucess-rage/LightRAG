@@ -13,12 +13,13 @@ export type PaginationControlsProps = {
   totalCount: number
   onPageChange: (page: number) => void
   onPageSizeChange: (pageSize: number) => void
+  pageSizeOptions?: Array<{ value: number; label: string }>
   isLoading?: boolean
   compact?: boolean
   className?: string
 }
 
-const PAGE_SIZE_OPTIONS = [
+const DEFAULT_PAGE_SIZE_OPTIONS = [
   { value: 10, label: '10' },
   { value: 20, label: '20' },
   { value: 50, label: '50' },
@@ -33,6 +34,7 @@ export default function PaginationControls({
   totalCount,
   onPageChange,
   onPageSizeChange,
+  pageSizeOptions = DEFAULT_PAGE_SIZE_OPTIONS,
   isLoading = false,
   compact = false,
   className
@@ -152,7 +154,7 @@ export default function PaginationControls({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {PAGE_SIZE_OPTIONS.map((option) => (
+            {pageSizeOptions.map((option) => (
               <SelectItem key={option.value} value={option.value.toString()}>
                 {option.label}
               </SelectItem>
@@ -245,7 +247,7 @@ export default function PaginationControls({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {PAGE_SIZE_OPTIONS.map((option) => (
+              {pageSizeOptions.map((option) => (
                 <SelectItem key={option.value} value={option.value.toString()}>
                   {option.label}
                 </SelectItem>

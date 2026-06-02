@@ -1918,6 +1918,34 @@ export type AnswerEvent = {
   create_time?: string | null
 }
 
+export type AnswerEventListResponse = {
+  events: AnswerEvent[]
+  answers: AnswerItem[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export type AnswerAnalyticsGroupRow = {
+  key: string
+  label: string
+  count: number
+}
+
+export type AnswerEventStatsResponse = {
+  workspace: string
+  total_events: number
+  no_match: number
+  avg_latency_ms: number
+  timezone: string
+  selected_answers: AnswerAnalyticsGroupRow[]
+  queries: AnswerAnalyticsGroupRow[]
+  sources: AnswerAnalyticsGroupRow[]
+  modes: AnswerAnalyticsGroupRow[]
+  dates: AnswerAnalyticsGroupRow[]
+  hours: AnswerAnalyticsGroupRow[]
+}
+
 export type AnswerStructuredDataset = {
   answer_id: string
   title: string
@@ -2012,6 +2040,27 @@ export type AnswerStructuredProfileResponse = {
   fields: AnswerStructuredFieldProfile[]
   sample_rows: Record<string, any>[]
   mapping_suggestions: Record<string, string | null>
+  warnings: string[]
+}
+
+export type AnswerExcelSheetInfo = {
+  name: string
+  max_row: number
+  max_column: number
+}
+
+export type AnswerExcelPreviewResponse = {
+  file_name: string
+  file_size: number
+  sheets: AnswerExcelSheetInfo[]
+  selected_sheet: string
+  header_row: number
+  data_start_row: number
+  row_count: number
+  columns: string[]
+  raw_content: string
+  source_uri: string
+  profile: AnswerStructuredProfileResponse
   warnings: string[]
 }
 
@@ -2154,6 +2203,9 @@ export type AnswerResolveRequest = {
   min_score?: number
   include_drafts?: boolean
   strategy?: 'fast' | 'balanced'
+  retrieval_mode?: 'keyword' | 'hybrid' | 'llm_rerank'
+  vector_top_k?: number
+  llm_candidate_count?: number
 }
 
 export type AnswerResolveCandidate = {
@@ -2162,6 +2214,7 @@ export type AnswerResolveCandidate = {
   matched_guidance: string[]
   reason: string
   score_details?: Record<string, number>
+  selected_by?: string
 }
 
 export type AnswerResolveResponse = {
@@ -2170,6 +2223,8 @@ export type AnswerResolveResponse = {
   candidates: AnswerResolveCandidate[]
   trace_id: string
   rationale: string
+  retrieval_mode?: 'keyword' | 'hybrid' | 'llm_rerank'
+  selected_by?: string
 }
 
 export type AnswerSearchRequest = AnswerResolveRequest & {
@@ -2197,6 +2252,19 @@ export type AnswerSearchResponse = {
   candidates: AnswerResolveCandidate[]
   trace_id: string
   rationale: string
+  retrieval_mode?: 'keyword' | 'hybrid' | 'llm_rerank'
+  selected_by?: string
+}
+
+export type AnswerGuidanceSuggestionRequest = {
+  query_examples?: string[]
+  max_suggestions?: number
+  use_llm?: boolean
+}
+
+export type AnswerGuidanceSuggestionResponse = {
+  suggestions: AnswerSourceGuidanceCandidate[]
+  mode: 'heuristic' | 'llm' | string
 }
 
 export type AnswerViewRequest = {
@@ -2222,7 +2290,7 @@ export type AnswerSourceGuidanceCandidate = {
 
 export type AnswerSourceDraftRequest = {
   answer_id?: string
-  source_type?: 'plain' | 'markdown' | 'html' | 'url' | 'file' | 'structured'
+  source_type?: 'plain' | 'markdown' | 'html' | 'url' | 'file' | 'excel' | 'structured'
   source_uri?: string | null
   file_name?: string | null
   title: string
@@ -2248,6 +2316,14 @@ export type AnswerSourceDraftResponse = {
 export const listAnswers = async (params?: {
   status?: string
   search?: string
+  content_format?: string
+  display_policy?: string
+  validity?: string
+  tag?: string
+  source_type?: string
+  has_guidance?: boolean
+  has_source?: boolean
+  min_priority?: number
   page?: number
   page_size?: number
 }): Promise<AnswerListResponse> => {
@@ -2320,6 +2396,29 @@ export const deleteAnswerGuidance = async (answerId: string, guidanceId: string)
   return response.data
 }
 
+export const suggestAnswerGuidance = async (
+  answerId: string,
+  request: AnswerGuidanceSuggestionRequest
+): Promise<AnswerGuidanceSuggestionResponse> => {
+  const response = await axiosInstance.post(`/api/answers/${encodeURIComponent(answerId)}/guidance/suggest`, request)
+  return response.data
+}
+
+export const rebuildAnswerVectors = async (params?: {
+  status?: string
+  limit?: number
+}): Promise<{ message: string; rebuilt: number; failed: string[] }> => {
+  const response = await axiosInstance.post('/api/answers/vectors/rebuild', null, { params })
+  return response.data
+}
+
+export const rebuildAnswerVector = async (
+  answerId: string
+): Promise<{ message: string; answer_id: string; dimensions: number }> => {
+  const response = await axiosInstance.post(`/api/answers/${encodeURIComponent(answerId)}/vectors/rebuild`)
+  return response.data
+}
+
 export const listAnswerRevisions = async (answerId: string): Promise<AnswerRevision[]> => {
   const response = await axiosInstance.get(`/api/answers/${encodeURIComponent(answerId)}/revisions`)
   return response.data
@@ -2367,6 +2466,45 @@ export const listAnswerEvents = async (params?: {
   return response.data
 }
 
+export const listAnswerEventsPage = async (params?: {
+  event_type?: string
+  selected_answer_id?: string
+  query?: string
+  match_status?: string
+  source?: string
+  mode?: string
+  date?: string
+  hour?: string
+  date_from?: string
+  date_to?: string
+  min_confidence?: number
+  max_latency_ms?: number
+  search?: string
+  timezone?: string
+  page?: number
+  page_size?: number
+}): Promise<AnswerEventListResponse> => {
+  const response = await axiosInstance.get('/api/answers/events/page', { params })
+  return response.data
+}
+
+export const getAnswerEventStats = async (params?: {
+  event_type?: string
+  match_status?: string
+  source?: string
+  mode?: string
+  date_from?: string
+  date_to?: string
+  min_confidence?: number
+  max_latency_ms?: number
+  search?: string
+  timezone?: string
+  limit?: number
+}): Promise<AnswerEventStatsResponse> => {
+  const response = await axiosInstance.get('/api/answers/stats/events', { params })
+  return response.data
+}
+
 export const listAnswerStructuredDatasets = async (params?: {
   structured_only?: boolean
   status?: string
@@ -2379,6 +2517,29 @@ export const profileAnswerStructuredSource = async (
   request: AnswerStructuredProfileRequest
 ): Promise<AnswerStructuredProfileResponse> => {
   const response = await axiosInstance.post('/api/answers/structured/profile', request)
+  return response.data
+}
+
+export const previewAnswerExcelSource = async (
+  file: File,
+  request: {
+    sheet_name?: string
+    header_row?: number
+    data_start_row?: number
+    sample_limit?: number
+    max_rows?: number
+  } = {}
+): Promise<AnswerExcelPreviewResponse> => {
+  const formData = new FormData()
+  formData.append('file', file)
+  if (request.sheet_name) formData.append('sheet_name', request.sheet_name)
+  if (request.header_row) formData.append('header_row', String(request.header_row))
+  if (request.data_start_row) formData.append('data_start_row', String(request.data_start_row))
+  if (request.sample_limit) formData.append('sample_limit', String(request.sample_limit))
+  if (request.max_rows) formData.append('max_rows', String(request.max_rows))
+  const response = await axiosInstance.post('/api/answers/structured/excel/preview', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
   return response.data
 }
 
