@@ -1,0 +1,1998 @@
+
+<!doctype html>
+<html lang="ko" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="LightRAG 프로젝트 기술 분석 및 설계 문서">
+      
+      
+      
+      
+        <link rel="prev" href="../2026-02-11_url-ingestion-pipeline-analysis/">
+      
+      
+        <link rel="next" href="../2026-02-10_query-pipeline-analysis/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>2026-02-10_query-response-structure - LightRAG 기술 문서</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Noto+Sans+KR:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Noto Sans KR";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#references-chunk-content-score" class="md-skip">
+          콘텐츠로 이동
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="상단/헤더">
+    <a href="../.." title="LightRAG 기술 문서" class="md-header__button md-logo" aria-label="LightRAG 기술 문서" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            LightRAG 기술 문서
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              2026-02-10_query-response-structure
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="다크 모드로 전환"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="다크 모드로 전환" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="라이트 모드로 전환"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="라이트 모드로 전환" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="검색" placeholder="검색" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="검색">
+        
+        <button type="reset" class="md-search__icon md-icon" title="지우기" aria-label="지우기" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            검색 초기화
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="네비게이션" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="LightRAG 기술 문서" class="md-nav__button md-logo" aria-label="LightRAG 기술 문서" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    LightRAG 기술 문서
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    홈
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    코드분석
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    코드분석
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-05-16_feature-capability-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-05-16_feature-capability-analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-13_board-api-ingestion-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-13_board-api-ingestion-guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-11_url-ingestion-pipeline-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-11_url-ingestion-pipeline-analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-response-structure
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-response-structure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="목차">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      목차
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        목차
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. 엔드포인트별 개요
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. 엔드포인트별 개요">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#query" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        /query — 표준 질의응답
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#querystream" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        /query/stream — 스트리밍 질의응답
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#querydata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        /query/data — 구조화 데이터 전체 반환
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. 파라미터별 응답 구조
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. 파라미터별 응답 구조">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-include_referencesfalse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 include_references=false
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-include_referencestrue-include_chunk_contentfalse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 include_references=true, include_chunk_content=false (기본값)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-include_referencestrue-include_chunk_contenttrue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 include_references=true, include_chunk_content=true
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#24-querydata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.4 /query/data 응답 (항상 전체)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-references" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. References 생성 기준
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. References 생성 기준">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 생성 위치
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 생성 시점
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 그룹핑 기준
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 예시
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35-s3-url-enrichment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.5 S3 URL Enrichment
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-chunk-content-enrichment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Chunk Content Enrichment 흐름
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Chunk Content Enrichment 흐름">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 조건
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-query_routespy504-538" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 처리 과정 (query_routes.py:504-538)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 병렬 배열 구조
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-score" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Score 파이프라인
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Score 파이프라인">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 스코어 종류
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 전파 경로
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 스코어 우선순위
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-scores-null" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 scores 배열의 null 값
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-content" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Content 경량화 규칙
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Content 경량화 규칙">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-convert_to_user_format-utilspy3234" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 규칙 (convert_to_user_format() — utils.py:3234)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-reference-query_routespy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 Reference 레벨 경량화 (query_routes.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 경량화 효과
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. 전체 데이터 흐름 다이어그램
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-pydantic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Pydantic 모델 정의
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. Pydantic 모델 정의">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#referenceitem-query_routespy184" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ReferenceItem (query_routes.py:184)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#queryresponse-query_routespy210" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        QueryResponse (query_routes.py:210)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        파라미터 요약
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-10_query-pipeline-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-pipeline-analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-10_query-mode-behavior-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-mode-behavior-analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-10_query-api-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-api-reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-10_image-analysis-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_image-analysis-pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="목차">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      목차
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        목차
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. 엔드포인트별 개요
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. 엔드포인트별 개요">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#query" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        /query — 표준 질의응답
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#querystream" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        /query/stream — 스트리밍 질의응답
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#querydata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        /query/data — 구조화 데이터 전체 반환
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. 파라미터별 응답 구조
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. 파라미터별 응답 구조">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-include_referencesfalse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 include_references=false
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-include_referencestrue-include_chunk_contentfalse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 include_references=true, include_chunk_content=false (기본값)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-include_referencestrue-include_chunk_contenttrue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 include_references=true, include_chunk_content=true
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#24-querydata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.4 /query/data 응답 (항상 전체)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-references" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. References 생성 기준
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. References 생성 기준">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 생성 위치
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 생성 시점
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 그룹핑 기준
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 예시
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35-s3-url-enrichment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.5 S3 URL Enrichment
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-chunk-content-enrichment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Chunk Content Enrichment 흐름
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Chunk Content Enrichment 흐름">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 조건
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-query_routespy504-538" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 처리 과정 (query_routes.py:504-538)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 병렬 배열 구조
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-score" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Score 파이프라인
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Score 파이프라인">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 스코어 종류
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 전파 경로
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 스코어 우선순위
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-scores-null" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 scores 배열의 null 값
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-content" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Content 경량화 규칙
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Content 경량화 규칙">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-convert_to_user_format-utilspy3234" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 규칙 (convert_to_user_format() — utils.py:3234)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-reference-query_routespy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 Reference 레벨 경량화 (query_routes.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 경량화 효과
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. 전체 데이터 흐름 다이어그램
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-pydantic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Pydantic 모델 정의
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. Pydantic 모델 정의">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#referenceitem-query_routespy184" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ReferenceItem (query_routes.py:184)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#queryresponse-query_routespy210" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        QueryResponse (query_routes.py:210)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        파라미터 요약
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="references-chunk-content-score">쿼리 응답 구조 분석: References, Chunk Content, Score<a class="headerlink" href="#references-chunk-content-score" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>분석일: 2026-02-10
+대상: <code>/query</code>, <code>/query/stream</code>, <code>/query/data</code> 엔드포인트 응답 구조
+분석 범위: <code>query_routes.py</code>, <code>utils.py</code>, <code>operate.py</code></p>
+</blockquote>
+<hr />
+<h2 id="_1">목차<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<ol>
+<li><a href="#1-엔드포인트별-개요">엔드포인트별 개요</a></li>
+<li><a href="#2-파라미터별-응답-구조">파라미터별 응답 구조</a></li>
+<li><a href="#3-references-생성-기준">References 생성 기준</a></li>
+<li><a href="#4-chunk-content-enrichment-흐름">Chunk Content Enrichment 흐름</a></li>
+<li><a href="#5-score-파이프라인">Score 파이프라인</a></li>
+<li><a href="#6-content-경량화-규칙">Content 경량화 규칙</a></li>
+<li><a href="#7-전체-데이터-흐름-다이어그램">전체 데이터 흐름 다이어그램</a></li>
+<li><a href="#8-pydantic-모델-정의">Pydantic 모델 정의</a></li>
+</ol>
+<hr />
+<h2 id="1">1. 엔드포인트별 개요<a class="headerlink" href="#1" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>엔드포인트</th>
+<th>메서드</th>
+<th>응답 형식</th>
+<th style="text-align: center;"><code>include_references</code> 적용</th>
+<th style="text-align: center;"><code>include_chunk_content</code> 적용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/query</code></td>
+<td>POST</td>
+<td>JSON</td>
+<td style="text-align: center;">O</td>
+<td style="text-align: center;">O</td>
+</tr>
+<tr>
+<td><code>/query/stream</code></td>
+<td>POST</td>
+<td>NDJSON (스트리밍)</td>
+<td style="text-align: center;">O</td>
+<td style="text-align: center;">O</td>
+</tr>
+<tr>
+<td><code>/query/data</code></td>
+<td>POST</td>
+<td>JSON (구조화 데이터)</td>
+<td style="text-align: center;"><strong>무시</strong> (항상 포함)</td>
+<td style="text-align: center;"><strong>무시</strong> (chunks 별도 제공)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="query"><code>/query</code> — 표준 질의응답<a class="headerlink" href="#query" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>요청 → LLM 응답 + (선택적) References 반환
+</code></pre></div>
+<h3 id="querystream"><code>/query/stream</code> — 스트리밍 질의응답<a class="headerlink" href="#querystream" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>요청 → [첫 줄: references JSON] + [이후: response 청크 스트리밍]
+</code></pre></div>
+<h3 id="querydata"><code>/query/data</code> — 구조화 데이터 전체 반환<a class="headerlink" href="#querydata" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>요청 → entities + relationships + chunks + references (항상 전체 포함)
+</code></pre></div>
+<hr />
+<h2 id="2">2. 파라미터별 응답 구조<a class="headerlink" href="#2" title="Permanent link">&para;</a></h2>
+<h3 id="21-include_referencesfalse">2.1 <code>include_references=false</code><a class="headerlink" href="#21-include_referencesfalse" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="p">{</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">&quot;response&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;LLM 응답 텍스트...&quot;</span><span class="p">,</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span><span class="nt">&quot;references&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li>응답 텍스트만 반환</li>
+<li>References 관련 후처리 (S3 URL, chunk enrichment) 전부 스킵</li>
+<li>가장 가벼운 응답</li>
+</ul>
+<h3 id="22-include_referencestrue-include_chunk_contentfalse">2.2 <code>include_references=true</code>, <code>include_chunk_content=false</code> (기본값)<a class="headerlink" href="#22-include_referencestrue-include_chunk_contentfalse" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="p">{</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">&quot;response&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;LLM 응답 텍스트...&quot;</span><span class="p">,</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span><span class="nt">&quot;references&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">    </span><span class="p">{</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">      </span><span class="nt">&quot;reference_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1&quot;</span><span class="p">,</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">      </span><span class="nt">&quot;file_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;긴급출동 메뉴얼.pdf&quot;</span><span class="p">,</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">      </span><span class="nt">&quot;doc_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;doc-276a9802186d...&quot;</span><span class="p">,</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">      </span><span class="nt">&quot;download_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://s3.../긴급출동 메뉴얼.pdf&quot;</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">    </span><span class="p">},</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="w">    </span><span class="p">{</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="w">      </span><span class="nt">&quot;reference_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2&quot;</span><span class="p">,</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="w">      </span><span class="nt">&quot;file_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;정비지침서.pdf&quot;</span><span class="p">,</span>
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="w">      </span><span class="nt">&quot;doc_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;doc-83bc1f...&quot;</span><span class="p">,</span>
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="w">      </span><span class="nt">&quot;download_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://s3.../정비지침서.pdf&quot;</span>
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a><span class="w">  </span><span class="p">]</span>
+<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li>참조 문서 목록 제공 (파일명, 문서 ID, S3 다운로드 URL)</li>
+<li>실제 chunk 텍스트/점수는 미포함</li>
+<li>출처 표시용</li>
+</ul>
+<h3 id="23-include_referencestrue-include_chunk_contenttrue">2.3 <code>include_references=true</code>, <code>include_chunk_content=true</code><a class="headerlink" href="#23-include_referencestrue-include_chunk_contenttrue" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="p">{</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">&quot;response&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;LLM 응답 텍스트...&quot;</span><span class="p">,</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span><span class="nt">&quot;references&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">    </span><span class="p">{</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">      </span><span class="nt">&quot;reference_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1&quot;</span><span class="p">,</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">      </span><span class="nt">&quot;file_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;긴급출동 메뉴얼.pdf&quot;</span><span class="p">,</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">      </span><span class="nt">&quot;doc_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;doc-276a9802186d...&quot;</span><span class="p">,</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">      </span><span class="nt">&quot;download_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://s3.../긴급출동 메뉴얼.pdf&quot;</span><span class="p">,</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">      </span><span class="nt">&quot;score&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.4719</span><span class="p">,</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="w">      </span><span class="nt">&quot;scores&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="mf">0.4719</span><span class="p">,</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="mf">0.4593</span><span class="p">,</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="mf">0.4278</span><span class="p">],</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="w">      </span><span class="nt">&quot;content&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[],</span>
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="w">      </span><span class="nt">&quot;structured_content&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="w">        </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;image&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;image&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;entity&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="err">...</span><span class="p">},</span><span class="w"> </span><span class="nt">&quot;source&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="err">...</span><span class="p">}},</span>
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="w">        </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;table&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;table&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;entity&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="err">...</span><span class="p">},</span><span class="w"> </span><span class="nt">&quot;source&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="err">...</span><span class="p">}}</span>
+<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="w">      </span><span class="p">]</span>
+<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a><span class="w">  </span><span class="p">]</span>
+<a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li><code>score</code>: 해당 문서의 최대 유사도 점수</li>
+<li><code>scores</code>: 개별 chunk별 유사도 점수 (병렬 배열, 유사도 내림차순)</li>
+<li><code>content</code>: 텍스트 chunk 배열 (structured_content 전용이면 <code>[]</code>)</li>
+<li><code>structured_content</code>: 멀티모달 구조화 데이터 배열</li>
+</ul>
+<h3 id="24-querydata">2.4 <code>/query/data</code> 응답 (항상 전체)<a class="headerlink" href="#24-querydata" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="p">{</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;success&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Query processed successfully&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">  </span><span class="nt">&quot;data&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">    </span><span class="nt">&quot;entities&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w">      </span><span class="p">{</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="w">        </span><span class="nt">&quot;entity&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;니로EV&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="w">        </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;VEHICLE_MODEL&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="w">        </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="w">        </span><span class="nt">&quot;source_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="w">        </span><span class="nt">&quot;file_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;긴급출동 메뉴얼.pdf&quot;</span>
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="w">      </span><span class="p">}</span>
+<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a><span class="w">    </span><span class="p">],</span>
+<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a><span class="w">    </span><span class="nt">&quot;relationships&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a><span class="w">      </span><span class="p">{</span>
+<a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a><span class="w">        </span><span class="nt">&quot;src_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;니로EV&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a><span class="w">        </span><span class="nt">&quot;tgt_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;비상레버&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a><span class="w">        </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a><span class="w">        </span><span class="nt">&quot;weight&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">1.0</span><span class="p">,</span>
+<a id="__codelineno-6-20" name="__codelineno-6-20" href="#__codelineno-6-20"></a><span class="w">        </span><span class="nt">&quot;source_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span>
+<a id="__codelineno-6-21" name="__codelineno-6-21" href="#__codelineno-6-21"></a><span class="w">      </span><span class="p">}</span>
+<a id="__codelineno-6-22" name="__codelineno-6-22" href="#__codelineno-6-22"></a><span class="w">    </span><span class="p">],</span>
+<a id="__codelineno-6-23" name="__codelineno-6-23" href="#__codelineno-6-23"></a><span class="w">    </span><span class="nt">&quot;chunks&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-6-24" name="__codelineno-6-24" href="#__codelineno-6-24"></a><span class="w">      </span><span class="p">{</span>
+<a id="__codelineno-6-25" name="__codelineno-6-25" href="#__codelineno-6-25"></a><span class="w">        </span><span class="nt">&quot;reference_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-26" name="__codelineno-6-26" href="#__codelineno-6-26"></a><span class="w">        </span><span class="nt">&quot;file_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;긴급출동 메뉴얼.pdf&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-27" name="__codelineno-6-27" href="#__codelineno-6-27"></a><span class="w">        </span><span class="nt">&quot;chunk_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;chunk-abc123&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-28" name="__codelineno-6-28" href="#__codelineno-6-28"></a><span class="w">        </span><span class="nt">&quot;content&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-29" name="__codelineno-6-29" href="#__codelineno-6-29"></a><span class="w">        </span><span class="nt">&quot;structured_content&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="err">...</span><span class="p">},</span>
+<a id="__codelineno-6-30" name="__codelineno-6-30" href="#__codelineno-6-30"></a><span class="w">        </span><span class="nt">&quot;score&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.4719</span>
+<a id="__codelineno-6-31" name="__codelineno-6-31" href="#__codelineno-6-31"></a><span class="w">      </span><span class="p">}</span>
+<a id="__codelineno-6-32" name="__codelineno-6-32" href="#__codelineno-6-32"></a><span class="w">    </span><span class="p">],</span>
+<a id="__codelineno-6-33" name="__codelineno-6-33" href="#__codelineno-6-33"></a><span class="w">    </span><span class="nt">&quot;references&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-6-34" name="__codelineno-6-34" href="#__codelineno-6-34"></a><span class="w">      </span><span class="p">{</span>
+<a id="__codelineno-6-35" name="__codelineno-6-35" href="#__codelineno-6-35"></a><span class="w">        </span><span class="nt">&quot;reference_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-36" name="__codelineno-6-36" href="#__codelineno-6-36"></a><span class="w">        </span><span class="nt">&quot;file_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;긴급출동 메뉴얼.pdf&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-37" name="__codelineno-6-37" href="#__codelineno-6-37"></a><span class="w">        </span><span class="nt">&quot;doc_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;doc-276a9...&quot;</span>
+<a id="__codelineno-6-38" name="__codelineno-6-38" href="#__codelineno-6-38"></a><span class="w">      </span><span class="p">}</span>
+<a id="__codelineno-6-39" name="__codelineno-6-39" href="#__codelineno-6-39"></a><span class="w">    </span><span class="p">]</span>
+<a id="__codelineno-6-40" name="__codelineno-6-40" href="#__codelineno-6-40"></a><span class="w">  </span><span class="p">},</span>
+<a id="__codelineno-6-41" name="__codelineno-6-41" href="#__codelineno-6-41"></a><span class="w">  </span><span class="nt">&quot;metadata&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-6-42" name="__codelineno-6-42" href="#__codelineno-6-42"></a><span class="w">    </span><span class="nt">&quot;query_mode&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;mix&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-43" name="__codelineno-6-43" href="#__codelineno-6-43"></a><span class="w">    </span><span class="nt">&quot;keywords&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-6-44" name="__codelineno-6-44" href="#__codelineno-6-44"></a><span class="w">      </span><span class="nt">&quot;high_level&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;전기차 비상 조작&quot;</span><span class="p">],</span>
+<a id="__codelineno-6-45" name="__codelineno-6-45" href="#__codelineno-6-45"></a><span class="w">      </span><span class="nt">&quot;low_level&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;니로EV&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;비상레버&quot;</span><span class="p">]</span>
+<a id="__codelineno-6-46" name="__codelineno-6-46" href="#__codelineno-6-46"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-6-47" name="__codelineno-6-47" href="#__codelineno-6-47"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-6-48" name="__codelineno-6-48" href="#__codelineno-6-48"></a><span class="p">}</span>
+</code></pre></div>
+<hr />
+<h2 id="3-references">3. References 생성 기준<a class="headerlink" href="#3-references" title="Permanent link">&para;</a></h2>
+<h3 id="31">3.1 생성 위치<a class="headerlink" href="#31" title="Permanent link">&para;</a></h3>
+<p><code>generate_reference_list_from_chunks()</code> — <code>utils.py:3267</code></p>
+<h3 id="32">3.2 생성 시점<a class="headerlink" href="#32" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>검색 (vector/entity/relation)
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>  ↓
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>_merge_all_chunks()          라운드로빈 병합 + chunk_id 중복 제거
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>  ↓
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>process_chunks_unified()     리랭킹 → chunk_top_k → 토큰 자르기
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>  ↓
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>generate_reference_list_from_chunks()   ← 여기서 reference 생성
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>  ↓
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>convert_to_user_format()     최종 응답 포맷
+</code></pre></div>
+<h3 id="33">3.3 그룹핑 기준<a class="headerlink" href="#33" title="Permanent link">&para;</a></h3>
+<p><strong><code>file_path</code>가 동일한 chunk들 → 하나의 reference로 그룹핑</strong></p>
+<table>
+<thead>
+<tr>
+<th>단계</th>
+<th>처리 내용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1. 빈도 집계</td>
+<td>각 <code>file_path</code>의 등장 횟수 카운트</td>
+</tr>
+<tr>
+<td>2. 정렬</td>
+<td>빈도 높은 순 → 동률 시 먼저 등장한 순</td>
+</tr>
+<tr>
+<td>3. ID 부여</td>
+<td>정렬 순서대로 <code>"1"</code>, <code>"2"</code>, <code>"3"</code> ... (1-based)</td>
+</tr>
+<tr>
+<td>4. chunk 연결</td>
+<td>각 chunk에 <code>reference_id</code> 필드 추가</td>
+</tr>
+<tr>
+<td>5. doc_id 매핑</td>
+<td><code>full_doc_id</code> → <code>doc_id</code>로 S3 URL 조회용</td>
+</tr>
+</tbody>
+</table>
+<h3 id="34">3.4 예시<a class="headerlink" href="#34" title="Permanent link">&para;</a></h3>
+<p>chunk 20개 중 15개가 <code>A.pdf</code>, 5개가 <code>B.pdf</code>에서 나온 경우:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Reference &quot;1&quot; = A.pdf (15회 출현, 우선순위 높음)
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>Reference &quot;2&quot; = B.pdf (5회 출현)
+</code></pre></div>
+<h3 id="35-s3-url-enrichment">3.5 S3 URL Enrichment<a class="headerlink" href="#35-s3-url-enrichment" title="Permanent link">&para;</a></h3>
+<p><code>_enrich_references_with_s3_url()</code> — <code>query_routes.py:253</code></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">doc_data</span> <span class="o">=</span> <span class="k">await</span> <span class="n">rag</span><span class="o">.</span><span class="n">doc_status</span><span class="o">.</span><span class="n">get_by_id</span><span class="p">(</span><span class="n">doc_id</span><span class="p">)</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="k">if</span> <span class="n">doc_data</span> <span class="ow">and</span> <span class="n">doc_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;s3_url&quot;</span><span class="p">):</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>    <span class="n">ref_copy</span><span class="p">[</span><span class="s2">&quot;download_url&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">doc_data</span><span class="p">[</span><span class="s2">&quot;s3_url&quot;</span><span class="p">]</span>
+</code></pre></div>
+<ul>
+<li><code>doc_id</code>로 <code>lightrag_doc_status</code> 테이블 조회</li>
+<li><code>s3_url</code> 값이 있으면 <code>download_url</code>로 추가</li>
+</ul>
+<hr />
+<h2 id="4-chunk-content-enrichment">4. Chunk Content Enrichment 흐름<a class="headerlink" href="#4-chunk-content-enrichment" title="Permanent link">&para;</a></h2>
+<h3 id="41">4.1 조건<a class="headerlink" href="#41" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="k">if</span> <span class="n">request</span><span class="o">.</span><span class="n">include_references</span> <span class="ow">and</span> <span class="n">request</span><span class="o">.</span><span class="n">include_chunk_content</span><span class="p">:</span>
+</code></pre></div>
+<p><code>include_references=True</code> <strong>AND</strong> <code>include_chunk_content=True</code>일 때만 실행.</p>
+<h3 id="42-query_routespy504-538">4.2 처리 과정 (<code>query_routes.py:504-538</code>)<a class="headerlink" href="#42-query_routespy504-538" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>data.chunks (개별 chunk, reference_id 포함)
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>  ↓
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>reference_id로 그룹핑 → ref_id_to_chunks 맵 생성
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>  ↓
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>각 reference에 병렬 배열로 병합:
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>  ├─ content[]              텍스트 배열
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>  ├─ structured_content[]   구조화 데이터 배열
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>  ├─ scores[]               개별 chunk 점수 배열
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>  └─ score                  최대 점수
+</code></pre></div>
+<h3 id="43">4.3 병렬 배열 구조<a class="headerlink" href="#43" title="Permanent link">&para;</a></h3>
+<p><code>content</code>, <code>structured_content</code>, <code>scores</code> 배열은 <strong>같은 인덱스가 같은 chunk</strong>를 가리킵니다:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>scores[0]              = 0.4719  ← chunk #0의 유사도
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>content[0]             = &quot;&quot;      ← chunk #0의 텍스트 (structured_content 있으므로 비움)
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>structured_content[0]  = {...}   ← chunk #0의 구조화 데이터
+</code></pre></div>
+<p>배열 순서는 <strong>유사도 내림차순</strong> (라운드로빈 병합 + 리랭킹 결과 순서 유지).</p>
+<hr />
+<h2 id="5-score">5. Score 파이프라인<a class="headerlink" href="#5-score" title="Permanent link">&para;</a></h2>
+<h3 id="51">5.1 스코어 종류<a class="headerlink" href="#51" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>스코어</th>
+<th>소스</th>
+<th>범위</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>코사인 유사도</td>
+<td>PostgreSQL VDB 청크 검색</td>
+<td>0.0 ~ 1.0</td>
+<td><code>1 - cosine_distance</code></td>
+</tr>
+<tr>
+<td>rerank_score</td>
+<td><code>apply_rerank_if_enabled()</code></td>
+<td>모델 의존</td>
+<td>리랭킹 모델이 부여한 관련도</td>
+</tr>
+</tbody>
+</table>
+<h3 id="52">5.2 전파 경로<a class="headerlink" href="#52" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>[1] PostgreSQL SQL
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>    SELECT ... (content_vector &lt;=&gt; query_vector) AS distance
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>                                                      │
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>[2] _get_vector_context()                             ▼
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>    score = round(1.0 - float(distance), 4)     코사인 유사도로 변환
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>                                                      │
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>[3] _merge_all_chunks()                               ▼
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>    chunk_data[&quot;score&quot;] = chunk[&quot;score&quot;]          병합 시 score 전파
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a>                                                      │
+<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a>[4] process_chunks_unified()                          ▼
+<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a>    if rerank_score is not None:                  리랭킹 사용 시 덮어쓰기
+<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a>        chunk[&quot;score&quot;] = round(rerank_score, 4)
+<a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a>                                                      │
+<a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a>[5] convert_to_user_format()                          ▼
+<a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a>    chunk_data[&quot;score&quot;] = chunk[&quot;score&quot;]          응답 포맷에 포함
+<a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a>                                                      │
+<a id="__codelineno-13-17" name="__codelineno-13-17" href="#__codelineno-13-17"></a>[6] query_routes.py (enrichment)                      ▼
+<a id="__codelineno-13-18" name="__codelineno-13-18" href="#__codelineno-13-18"></a>    ref_copy[&quot;scores&quot;] = per_scores               개별 chunk 점수 배열
+<a id="__codelineno-13-19" name="__codelineno-13-19" href="#__codelineno-13-19"></a>    ref_copy[&quot;score&quot;] = max(per_scores)           문서 대표 점수 (최대값)
+</code></pre></div>
+<h3 id="53">5.3 스코어 우선순위<a class="headerlink" href="#53" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>rerank_score (있으면) &gt; cosine_similarity (기본)
+</code></pre></div>
+<ul>
+<li><strong>리랭킹 활성화</strong> (<code>enable_rerank=true</code>): 모든 chunk에 <code>rerank_score</code> 부여 → <code>score</code>로 사용</li>
+<li><strong>리랭킹 비활성화</strong>: vector 검색 chunk만 코사인 유사도 보유, KG 경유 chunk는 <code>null</code></li>
+</ul>
+<h3 id="54-scores-null">5.4 scores 배열의 null 값<a class="headerlink" href="#54-scores-null" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="nt">&quot;scores&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="mf">0.4719</span><span class="p">,</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="mf">0.4593</span><span class="p">,</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="mf">0.4278</span><span class="p">]</span>
+</code></pre></div>
+<ul>
+<li>숫자 값: vector 검색으로 직접 가져온 chunk (코사인 유사도)</li>
+<li><code>null</code>: entity/relation 경유로 가져온 chunk (KV store 조회, 벡터 검색 아님)</li>
+<li>리랭킹 활성화 시 모든 값이 숫자 (null 없음)</li>
+</ul>
+<hr />
+<h2 id="6-content">6. Content 경량화 규칙<a class="headerlink" href="#6-content" title="Permanent link">&para;</a></h2>
+<h3 id="61-convert_to_user_format-utilspy3234">6.1 규칙 (<code>convert_to_user_format()</code> — <code>utils.py:3234</code>)<a class="headerlink" href="#61-convert_to_user_format-utilspy3234" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="k">if</span> <span class="n">chunk</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;structured_content&quot;</span><span class="p">):</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>    <span class="n">chunk_data</span><span class="p">[</span><span class="s2">&quot;content&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>         <span class="c1"># 텍스트 비움</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>    <span class="n">chunk_data</span><span class="p">[</span><span class="s2">&quot;structured_content&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">chunk</span><span class="p">[</span><span class="s2">&quot;structured_content&quot;</span><span class="p">]</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="k">else</span><span class="p">:</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a>    <span class="n">chunk_data</span><span class="p">[</span><span class="s2">&quot;content&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">chunk</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;content&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>  <span class="c1"># 텍스트 유지</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>조건</th>
+<th>content</th>
+<th>structured_content</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>structured_content 있음</td>
+<td><code>""</code> (비움)</td>
+<td>구조화 데이터 포함</td>
+</tr>
+<tr>
+<td>structured_content 없음</td>
+<td>원본 텍스트 유지</td>
+<td>없음</td>
+</tr>
+</tbody>
+</table>
+<h3 id="62-reference-query_routespy">6.2 Reference 레벨 경량화 (<code>query_routes.py</code>)<a class="headerlink" href="#62-reference-query_routespy" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="n">contents</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;content&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">chunk_list</span><span class="p">]</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="n">ref_copy</span><span class="p">[</span><span class="s2">&quot;content&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span> <span class="k">if</span> <span class="nb">all</span><span class="p">(</span><span class="ow">not</span> <span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">contents</span><span class="p">)</span> <span class="k">else</span> <span class="n">contents</span>
+</code></pre></div>
+<ul>
+<li>모든 chunk의 content가 빈 문자열이면 → <code>content: []</code> (빈 배열)</li>
+<li>하나라도 텍스트가 있으면 → 전체 배열 유지</li>
+</ul>
+<h3 id="63">6.3 경량화 효과<a class="headerlink" href="#63" title="Permanent link">&para;</a></h3>
+<p>멀티모달 처리된 문서(이미지/테이블/수식 → structured_content 보유)의 경우:
+- 기존: <code>content</code>에 동일 텍스트 중복 포함 → 응답 크기 2배
+- 개선: <code>content: []</code> + <code>structured_content</code>만 포함 → 응답 크기 ~50% 감소</p>
+<p>일반 텍스트 문서(structured_content 미보유)는 기존과 동일하게 <code>content</code>에 텍스트 포함.</p>
+<hr />
+<h2 id="7">7. 전체 데이터 흐름 다이어그램<a class="headerlink" href="#7" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>클라이언트 요청
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>  │  query, mode, include_references, include_chunk_content
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>  ▼
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a>┌─────────────────────────────────┐
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a>│  query_routes.py                │
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a>│  QueryRequest → QueryParam     │
+<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a>│  (include_chunk_content 제외)   │
+<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a>└──────────┬──────────────────────┘
+<a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a>           │
+<a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a>           ▼
+<a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a>┌─────────────────────────────────┐
+<a id="__codelineno-18-12" name="__codelineno-18-12" href="#__codelineno-18-12"></a>│  lightrag.py                    │
+<a id="__codelineno-18-13" name="__codelineno-18-13" href="#__codelineno-18-13"></a>│  aquery_llm() / aquery_data()  │
+<a id="__codelineno-18-14" name="__codelineno-18-14" href="#__codelineno-18-14"></a>└──────────┬──────────────────────┘
+<a id="__codelineno-18-15" name="__codelineno-18-15" href="#__codelineno-18-15"></a>           │
+<a id="__codelineno-18-16" name="__codelineno-18-16" href="#__codelineno-18-16"></a>           ▼
+<a id="__codelineno-18-17" name="__codelineno-18-17" href="#__codelineno-18-17"></a>┌─────────────────────────────────────────────────────┐
+<a id="__codelineno-18-18" name="__codelineno-18-18" href="#__codelineno-18-18"></a>│  operate.py — kg_query() / naive_query()            │
+<a id="__codelineno-18-19" name="__codelineno-18-19" href="#__codelineno-18-19"></a>│                                                     │
+<a id="__codelineno-18-20" name="__codelineno-18-20" href="#__codelineno-18-20"></a>│  [검색] _perform_kg_search()                        │
+<a id="__codelineno-18-21" name="__codelineno-18-21" href="#__codelineno-18-21"></a>│    ├─ vector 검색 → chunks (with distance/score)    │
+<a id="__codelineno-18-22" name="__codelineno-18-22" href="#__codelineno-18-22"></a>│    ├─ entity 검색 → entity chunks                   │
+<a id="__codelineno-18-23" name="__codelineno-18-23" href="#__codelineno-18-23"></a>│    └─ relation 검색 → relation chunks               │
+<a id="__codelineno-18-24" name="__codelineno-18-24" href="#__codelineno-18-24"></a>│                                                     │
+<a id="__codelineno-18-25" name="__codelineno-18-25" href="#__codelineno-18-25"></a>│  [병합] _merge_all_chunks()                         │
+<a id="__codelineno-18-26" name="__codelineno-18-26" href="#__codelineno-18-26"></a>│    └─ 라운드로빈 + 중복제거, score 전파             │
+<a id="__codelineno-18-27" name="__codelineno-18-27" href="#__codelineno-18-27"></a>│                                                     │
+<a id="__codelineno-18-28" name="__codelineno-18-28" href="#__codelineno-18-28"></a>│  [컨텍스트] _build_context_str()                    │
+<a id="__codelineno-18-29" name="__codelineno-18-29" href="#__codelineno-18-29"></a>│    ├─ process_chunks_unified()                      │
+<a id="__codelineno-18-30" name="__codelineno-18-30" href="#__codelineno-18-30"></a>│    │   └─ 리랭킹, top_k, 토큰 자르기, score 통합   │
+<a id="__codelineno-18-31" name="__codelineno-18-31" href="#__codelineno-18-31"></a>│    ├─ generate_reference_list_from_chunks()          │
+<a id="__codelineno-18-32" name="__codelineno-18-32" href="#__codelineno-18-32"></a>│    │   └─ file_path 그룹핑 → reference_id 부여     │
+<a id="__codelineno-18-33" name="__codelineno-18-33" href="#__codelineno-18-33"></a>│    ├─ _build_context_str() → LLM 프롬프트 구성     │
+<a id="__codelineno-18-34" name="__codelineno-18-34" href="#__codelineno-18-34"></a>│    └─ convert_to_user_format()                      │
+<a id="__codelineno-18-35" name="__codelineno-18-35" href="#__codelineno-18-35"></a>│        └─ chunks/entities/relations/references 포맷 │
+<a id="__codelineno-18-36" name="__codelineno-18-36" href="#__codelineno-18-36"></a>│        └─ score 노출, content 경량화                │
+<a id="__codelineno-18-37" name="__codelineno-18-37" href="#__codelineno-18-37"></a>└──────────┬──────────────────────────────────────────┘
+<a id="__codelineno-18-38" name="__codelineno-18-38" href="#__codelineno-18-38"></a>           │
+<a id="__codelineno-18-39" name="__codelineno-18-39" href="#__codelineno-18-39"></a>           │  result = {data: {references, chunks, ...}, llm_response: {...}}
+<a id="__codelineno-18-40" name="__codelineno-18-40" href="#__codelineno-18-40"></a>           ▼
+<a id="__codelineno-18-41" name="__codelineno-18-41" href="#__codelineno-18-41"></a>┌─────────────────────────────────────────────────────┐
+<a id="__codelineno-18-42" name="__codelineno-18-42" href="#__codelineno-18-42"></a>│  query_routes.py — 후처리                           │
+<a id="__codelineno-18-43" name="__codelineno-18-43" href="#__codelineno-18-43"></a>│                                                     │
+<a id="__codelineno-18-44" name="__codelineno-18-44" href="#__codelineno-18-44"></a>│  if include_references AND include_chunk_content:   │
+<a id="__codelineno-18-45" name="__codelineno-18-45" href="#__codelineno-18-45"></a>│    ├─ chunks를 reference_id로 그룹핑               │
+<a id="__codelineno-18-46" name="__codelineno-18-46" href="#__codelineno-18-46"></a>│    ├─ content[], structured_content[] 병합          │
+<a id="__codelineno-18-47" name="__codelineno-18-47" href="#__codelineno-18-47"></a>│    ├─ scores[] 병렬 배열 구성                       │
+<a id="__codelineno-18-48" name="__codelineno-18-48" href="#__codelineno-18-48"></a>│    ├─ score = max(scores)                           │
+<a id="__codelineno-18-49" name="__codelineno-18-49" href="#__codelineno-18-49"></a>│    └─ 빈 content → [] 변환                         │
+<a id="__codelineno-18-50" name="__codelineno-18-50" href="#__codelineno-18-50"></a>│                                                     │
+<a id="__codelineno-18-51" name="__codelineno-18-51" href="#__codelineno-18-51"></a>│  if include_references:                             │
+<a id="__codelineno-18-52" name="__codelineno-18-52" href="#__codelineno-18-52"></a>│    └─ S3 download_url 추가                          │
+<a id="__codelineno-18-53" name="__codelineno-18-53" href="#__codelineno-18-53"></a>│                                                     │
+<a id="__codelineno-18-54" name="__codelineno-18-54" href="#__codelineno-18-54"></a>│  else:                                              │
+<a id="__codelineno-18-55" name="__codelineno-18-55" href="#__codelineno-18-55"></a>│    └─ references = null                             │
+<a id="__codelineno-18-56" name="__codelineno-18-56" href="#__codelineno-18-56"></a>└──────────┬──────────────────────────────────────────┘
+<a id="__codelineno-18-57" name="__codelineno-18-57" href="#__codelineno-18-57"></a>           │
+<a id="__codelineno-18-58" name="__codelineno-18-58" href="#__codelineno-18-58"></a>           ▼
+<a id="__codelineno-18-59" name="__codelineno-18-59" href="#__codelineno-18-59"></a>        클라이언트 응답
+</code></pre></div>
+<hr />
+<h2 id="8-pydantic">8. Pydantic 모델 정의<a class="headerlink" href="#8-pydantic" title="Permanent link">&para;</a></h2>
+<h3 id="referenceitem-query_routespy184">ReferenceItem (<code>query_routes.py:184</code>)<a class="headerlink" href="#referenceitem-query_routespy184" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">ReferenceItem</span><span class="p">(</span><span class="n">BaseModel</span><span class="p">):</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>    <span class="n">reference_id</span><span class="p">:</span> <span class="nb">str</span>                                    <span class="c1"># &quot;1&quot;, &quot;2&quot;, ...</span>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>    <span class="n">doc_id</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>                                <span class="c1"># 문서 ID (S3 URL 조회용)</span>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a>    <span class="n">file_path</span><span class="p">:</span> <span class="nb">str</span>                                       <span class="c1"># 원본 파일 경로</span>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a>    <span class="n">download_url</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>                          <span class="c1"># S3 다운로드 URL</span>
+<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a>    <span class="n">content</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span>                         <span class="c1"># 텍스트 배열 ([] or [&quot;chunk1&quot;, ...])</span>
+<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a>    <span class="n">structured_content</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]]</span>   <span class="c1"># 구조화 데이터 배열</span>
+<a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a>    <span class="n">score</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span>                               <span class="c1"># 최대 유사도 점수</span>
+<a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a>    <span class="n">scores</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]]]</span>              <span class="c1"># 개별 chunk 점수 (병렬 배열)</span>
+</code></pre></div>
+<h3 id="queryresponse-query_routespy210">QueryResponse (<code>query_routes.py:210</code>)<a class="headerlink" href="#queryresponse-query_routespy210" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">QueryResponse</span><span class="p">(</span><span class="n">BaseModel</span><span class="p">):</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>    <span class="n">response</span><span class="p">:</span> <span class="nb">str</span>                                        <span class="c1"># LLM 응답 텍스트</span>
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>    <span class="n">references</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="n">ReferenceItem</span><span class="p">]]</span>            <span class="c1"># null or 참조 목록</span>
+</code></pre></div>
+<h3 id="_2">파라미터 요약<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>파라미터</th>
+<th>기본값</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>include_references</code></td>
+<td><code>true</code></td>
+<td>참조 문서 목록 포함 여부</td>
+</tr>
+<tr>
+<td><code>include_chunk_content</code></td>
+<td><code>false</code></td>
+<td>실제 chunk 내용/점수 포함 여부 (<code>include_references=true</code> 필수)</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  맨위로
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\ud074\ub9bd\ubcf4\ub4dc\uc5d0 \ubcf5\uc0ac\ub428", "clipboard.copy": "\ud074\ub9bd\ubcf4\ub4dc\ub85c \ubcf5\uc0ac", "search.result.more.one": "\uc774 \ubb38\uc11c\uc5d0\uc11c 1\uac1c\uc758 \uac80\uc0c9 \uacb0\uacfc \ub354 \ubcf4\uae30", "search.result.more.other": "\uc774 \ubb38\uc11c\uc5d0\uc11c #\uac1c\uc758 \uac80\uc0c9 \uacb0\uacfc \ub354 \ubcf4\uae30", "search.result.none": "\uac80\uc0c9\uc5b4\uc640 \uc77c\uce58\ud558\ub294 \ubb38\uc11c\uac00 \uc5c6\uc2b5\ub2c8\ub2e4", "search.result.one": "1\uac1c\uc758 \uc77c\uce58\ud558\ub294 \ubb38\uc11c", "search.result.other": "#\uac1c\uc758 \uc77c\uce58\ud558\ub294 \ubb38\uc11c", "search.result.placeholder": "\uac80\uc0c9\uc5b4\ub97c \uc785\ub825\ud558\uc138\uc694", "search.result.term.missing": "\ud3ec\ud568\ub418\uc9c0 \uc54a\uc740 \uac80\uc0c9\uc5b4", "select.version": "\ubc84\uc804 \uc120\ud0dd"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

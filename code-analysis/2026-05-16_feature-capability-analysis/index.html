@@ -1,0 +1,2339 @@
+
+<!doctype html>
+<html lang="ko" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="LightRAG 프로젝트 기술 분석 및 설계 문서">
+      
+      
+      
+      
+        <link rel="prev" href="../..">
+      
+      
+        <link rel="next" href="../2026-02-13_board-api-ingestion-guide/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>2026-05-16_feature-capability-analysis - LightRAG 기술 문서</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Noto+Sans+KR:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Noto Sans KR";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#lightrag" class="md-skip">
+          콘텐츠로 이동
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="상단/헤더">
+    <a href="../.." title="LightRAG 기술 문서" class="md-header__button md-logo" aria-label="LightRAG 기술 문서" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            LightRAG 기술 문서
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              2026-05-16_feature-capability-analysis
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="다크 모드로 전환"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="다크 모드로 전환" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="라이트 모드로 전환"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="라이트 모드로 전환" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="검색" placeholder="검색" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="검색">
+        
+        <button type="reset" class="md-search__icon md-icon" title="지우기" aria-label="지우기" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            검색 초기화
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="네비게이션" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="LightRAG 기술 문서" class="md-nav__button md-logo" aria-label="LightRAG 기술 문서" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    LightRAG 기술 문서
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    홈
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    코드분석
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    코드분석
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-05-16_feature-capability-analysis
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-05-16_feature-capability-analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="목차">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      목차
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. 요약
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-webui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. WebUI 기능 맵
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. 멀티 워크스페이스 기능
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. 멀티 워크스페이스 기능">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        구조
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        동작
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        주의점
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. 다양한 데이터 소스를 통한 지식화
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. 다양한 데이터 소스를 통한 지식화">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        문서 업로드/스캔
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#url" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        URL 지식화
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#board-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Board API 지식화
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        멀티모달 지식화
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. 지식 그래프 확인
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. 지식 그래프 확인">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. 엔티티-관계 탐색 기능
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. 엔티티-관계 탐색 기능">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#api_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ui_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. 지식화를 위한 도메인 스키마 생성 기능
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. 지식화를 위한 도메인 스키마 생성 기능">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#api_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ui_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        주의점
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. API를 통한 검색 기능
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. API를 통한 검색 기능">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#api_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ui_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. 내부 프롬프트 조회/수정 기능
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. 내부 프롬프트 조회/수정 기능">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#api_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ui_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        주의점
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. 워크스페이스 관리 기능
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. 워크스페이스 관리 기능">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#api_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ui_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        주의점
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. 생성한 개별 스킬
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. 우선 점검 과제
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-13_board-api-ingestion-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-13_board-api-ingestion-guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-11_url-ingestion-pipeline-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-11_url-ingestion-pipeline-analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-10_query-response-structure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-response-structure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-10_query-pipeline-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-pipeline-analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-10_query-mode-behavior-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-mode-behavior-analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-10_query-api-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-api-reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-10_image-analysis-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_image-analysis-pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="목차">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      목차
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. 요약
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-webui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. WebUI 기능 맵
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. 멀티 워크스페이스 기능
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. 멀티 워크스페이스 기능">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        구조
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        동작
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        주의점
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. 다양한 데이터 소스를 통한 지식화
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. 다양한 데이터 소스를 통한 지식화">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        문서 업로드/스캔
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#url" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        URL 지식화
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#board-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Board API 지식화
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        멀티모달 지식화
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. 지식 그래프 확인
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. 지식 그래프 확인">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. 엔티티-관계 탐색 기능
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. 엔티티-관계 탐색 기능">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#api_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ui_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. 지식화를 위한 도메인 스키마 생성 기능
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. 지식화를 위한 도메인 스키마 생성 기능">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#api_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ui_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        주의점
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. API를 통한 검색 기능
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. API를 통한 검색 기능">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#api_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ui_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. 내부 프롬프트 조회/수정 기능
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. 내부 프롬프트 조회/수정 기능">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#api_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ui_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        주의점
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. 워크스페이스 관리 기능
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. 워크스페이스 관리 기능">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#api_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ui_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        주의점
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. 생성한 개별 스킬
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. 우선 점검 과제
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="lightrag">LightRAG 기능 카테고리 분석 리포트<a class="headerlink" href="#lightrag" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>작성일: 2026-05-16
+분석 대상: 로컬 실행 서버 <code>http://127.0.0.1:9422/webui/#/</code>, 개발 DB 연동 환경
+분석 범위: WebUI, FastAPI 라우터, TypeScript API 클라이언트, 현재 dev DB 조회 결과</p>
+</blockquote>
+<hr />
+<h2 id="1">1. 요약<a class="headerlink" href="#1" title="Permanent link">&para;</a></h2>
+<p>현재 fork는 단순 RAG 서버가 아니라, 워크스페이스 단위로 문서/게시판/URL/멀티모달 데이터를 지식화하고, 생성된 지식 그래프를 탐색하며, 도메인 스키마와 내부 프롬프트까지 WebUI에서 관리하는 운영형 LightRAG 콘솔이다.</p>
+<p>로컬 구동 상태는 정상이다.</p>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>상태</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>API 서버</td>
+<td><code>0.0.0.0:9422</code> 실행 중</td>
+</tr>
+<tr>
+<td>WebUI</td>
+<td><code>/webui/</code> 서빙 정상</td>
+</tr>
+<tr>
+<td>Health</td>
+<td><code>status=healthy</code>, <code>webui_available=true</code></td>
+</tr>
+<tr>
+<td>인증</td>
+<td>disabled / guest mode</td>
+</tr>
+<tr>
+<td>기본 워크스페이스</td>
+<td><code>base</code></td>
+</tr>
+<tr>
+<td>주요 저장소</td>
+<td>PostgreSQL + Neo4j + PGVector</td>
+</tr>
+<tr>
+<td>LLM/Embedding/Rerank</td>
+<td>개발 서버 엔드포인트 사용</td>
+</tr>
+</tbody>
+</table>
+<p>현재 개발 DB에는 6개 워크스페이스가 있다.</p>
+<table>
+<thead>
+<tr>
+<th>workspace</th>
+<th>name</th>
+<th style="text-align: right;">documents</th>
+<th style="text-align: right;">entities</th>
+<th style="text-align: right;">relations</th>
+<th style="text-align: center;">default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>base</code></td>
+<td>Base</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: center;">O</td>
+</tr>
+<tr>
+<td><code>kevcs</code></td>
+<td>전기차충전 고객센터</td>
+<td style="text-align: right;">145</td>
+<td style="text-align: right;">4345</td>
+<td style="text-align: right;">7982</td>
+<td style="text-align: center;"></td>
+</tr>
+<tr>
+<td><code>gsnw</code></td>
+<td>GS네트웍스 고객센터</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">674</td>
+<td style="text-align: right;">1434</td>
+<td style="text-align: center;"></td>
+</tr>
+<tr>
+<td><code>default</code></td>
+<td>default</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: center;"></td>
+</tr>
+<tr>
+<td><code>gfgf</code></td>
+<td>경기도미래세대재단</td>
+<td style="text-align: right;">3</td>
+<td style="text-align: right;">913</td>
+<td style="text-align: right;">1115</td>
+<td style="text-align: center;"></td>
+</tr>
+<tr>
+<td><code>sugar</code></td>
+<td>슈가모바일</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">689</td>
+<td style="text-align: right;">1105</td>
+<td style="text-align: center;"></td>
+</tr>
+</tbody>
+</table>
+<p><code>base</code>는 비어 있으므로 실제 기능 검증은 <code>kevcs</code> 등 데이터가 있는 워크스페이스로 전환해야 의미가 있다.</p>
+<hr />
+<h2 id="2-webui">2. WebUI 기능 맵<a class="headerlink" href="#2-webui" title="Permanent link">&para;</a></h2>
+<p>상단 탭은 <code>SiteHeader.tsx</code> 기준으로 다음 8개다.</p>
+<table>
+<thead>
+<tr>
+<th>탭</th>
+<th>주요 컴포넌트</th>
+<th>역할</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Documents</td>
+<td><code>DocumentManager.tsx</code></td>
+<td>문서 업로드, 스캔, URL/Board/멀티모달/Quick 지식화, 문서 상태 관리</td>
+</tr>
+<tr>
+<td>Knowledge Graph</td>
+<td><code>GraphViewer.tsx</code></td>
+<td>Sigma 기반 지식 그래프 시각화, 라벨 검색, 레이아웃/줌/속성 패널</td>
+</tr>
+<tr>
+<td>Entity-Relation Explorer</td>
+<td><code>EntityManagement.tsx</code></td>
+<td>엔티티/관계 목록, 필터, 상세, 부분 그래프 탐색</td>
+</tr>
+<tr>
+<td>Schema</td>
+<td><code>SchemaManager.tsx</code></td>
+<td>도메인 스키마 발견, 템플릿, 현재 적용 스키마, 시드 엔티티</td>
+</tr>
+<tr>
+<td>Retrieval</td>
+<td><code>RetrievalTesting.tsx</code></td>
+<td>검색/질의 테스트, 스트리밍 응답, 레퍼런스, 쿼리 파라미터</td>
+</tr>
+<tr>
+<td>API</td>
+<td><code>ApiSite.tsx</code></td>
+<td>Swagger/OpenAPI 문서 표시</td>
+</tr>
+<tr>
+<td>Prompts</td>
+<td><code>PromptSettings.tsx</code></td>
+<td>내부 프롬프트 조회/수정/초기화</td>
+</tr>
+<tr>
+<td>Workspaces</td>
+<td><code>WorkspaceManagement.tsx</code></td>
+<td>워크스페이스 CRUD, 통계, 복사/이동</td>
+</tr>
+</tbody>
+</table>
+<p>모든 일반 API 요청은 <code>lightrag_webui/src/api/lightrag.ts</code>의 axios interceptor를 통해 <code>LIGHTRAG-WORKSPACE</code> 헤더를 붙인다. Schema API는 별도 <code>schemaApi</code> interceptor가 같은 헤더를 붙인다.</p>
+<hr />
+<h2 id="3">3. 멀티 워크스페이스 기능<a class="headerlink" href="#3" title="Permanent link">&para;</a></h2>
+<h3 id="_1">구조<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h3>
+<p>워크스페이스는 <code>LIGHTRAG-WORKSPACE</code> 헤더를 중심으로 라우팅된다. Query API는 요청 body의 <code>workspace</code> 필드가 있으면 헤더보다 우선한다.</p>
+<table>
+<thead>
+<tr>
+<th>계층</th>
+<th>구현 위치</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>UI 선택기</td>
+<td><code>lightrag_webui/src/components/workspace/WorkspaceSelector.tsx</code></td>
+</tr>
+<tr>
+<td>상태 저장</td>
+<td><code>lightrag_webui/src/stores/workspace.ts</code></td>
+</tr>
+<tr>
+<td>API 헤더 주입</td>
+<td><code>lightrag_webui/src/api/lightrag.ts</code>, <code>lightrag_webui/src/api/schema.ts</code></td>
+</tr>
+<tr>
+<td>Backend 라우팅</td>
+<td>각 router의 <code>_get_workspace_from_request()</code></td>
+</tr>
+<tr>
+<td>RAG 인스턴스 획득</td>
+<td><code>set_rag_workspace_getter()</code> 패턴</td>
+</tr>
+</tbody>
+</table>
+<h3 id="_2">동작<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>상단 우측 워크스페이스 선택기에서 현재 워크스페이스를 바꾼다.</li>
+<li>선택값은 Zustand persist로 유지된다.</li>
+<li>탭 전환 없이도 Graph, Entity, Schema 등은 workspace 변경 시 내부 상태를 초기화하고 새 데이터를 다시 가져온다.</li>
+<li>기본 fallback은 <code>base</code> 또는 서버 default workspace다.</li>
+</ul>
+<h3 id="_3">주의점<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>url_routes.py</code>, <code>multimodal_routes.py</code>는 헤더가 없으면 빈 문자열을 반환한다. 실제 getter 쪽 fallback이 어떻게 동작하는지 운영 환경에서 확인해야 한다.</li>
+<li><code>prompt_routes.py</code>는 DB 저장은 workspace별이지만, 수정 시 프로세스 전역 <code>PROMPTS</code> dict도 즉시 바꾼다. 다중 워크스페이스에서 프롬프트 적용 범위를 검증해야 한다.</li>
+</ul>
+<hr />
+<h2 id="4">4. 다양한 데이터 소스를 통한 지식화<a class="headerlink" href="#4" title="Permanent link">&para;</a></h2>
+<h3 id="_4">문서 업로드/스캔<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>기능</th>
+<th>API</th>
+<th>UI</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>input dir 스캔</td>
+<td><code>POST /documents/scan</code></td>
+<td>Scan/Retry</td>
+</tr>
+<tr>
+<td>단일 파일 업로드</td>
+<td><code>POST /documents/upload</code></td>
+<td>Upload</td>
+</tr>
+<tr>
+<td>텍스트 삽입</td>
+<td><code>POST /documents/text</code>, <code>/documents/texts</code></td>
+<td>API 중심</td>
+</tr>
+<tr>
+<td>Quick 이미지</td>
+<td><code>POST /documents/quick-image</code></td>
+<td>Quick</td>
+</tr>
+<tr>
+<td>문서 목록</td>
+<td><code>POST /documents/paginated</code></td>
+<td>Uploaded Documents</td>
+</tr>
+<tr>
+<td>상태 추적</td>
+<td><code>GET /documents/track_status/{track_id}</code></td>
+<td>진행 패널</td>
+</tr>
+<tr>
+<td>재처리</td>
+<td><code>POST /documents/reprocess_failed</code></td>
+<td>Scan/Retry</td>
+</tr>
+<tr>
+<td>취소</td>
+<td><code>POST /documents/cancel_pipeline</code></td>
+<td>Pipeline</td>
+</tr>
+<tr>
+<td>삭제/초기화</td>
+<td>delete/clear 계열</td>
+<td>Clear, Delete</td>
+</tr>
+</tbody>
+</table>
+<p>문서 상태는 <code>pending</code>, <code>preprocessed</code>, <code>processing</code>, <code>processed</code>, <code>failed</code>로 관리된다. 파일 중복은 <code>file_path</code>와 content hash 기준으로 방어한다.</p>
+<h3 id="url">URL 지식화<a class="headerlink" href="#url" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>기능</th>
+<th>API</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>URL 검증</td>
+<td><code>POST /api/url/validate</code></td>
+</tr>
+<tr>
+<td>텍스트에서 URL 추출</td>
+<td><code>POST /api/url/extract</code></td>
+</tr>
+<tr>
+<td>단일 URL 지식화</td>
+<td><code>POST /api/url/ingest</code></td>
+</tr>
+<tr>
+<td>다중 URL 지식화</td>
+<td><code>POST /api/url/ingest-batch</code></td>
+</tr>
+<tr>
+<td>진행률</td>
+<td><code>GET /api/tasks/{task_id}/stream</code></td>
+</tr>
+</tbody>
+</table>
+<p>URL은 비동기 task로 처리된다. 옵션으로 이미지/테이블 처리, 중복 스킵, 강제 재색인, 링크 따라가기, depth 제한, 사용자 지정 프롬프트가 있다.</p>
+<h3 id="board-api">Board API 지식화<a class="headerlink" href="#board-api" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>기능</th>
+<th>API</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>구조 탐색</td>
+<td><code>POST /api/board/explore</code></td>
+<td>외부 API 응답에서 배열/필드 매핑 감지</td>
+</tr>
+<tr>
+<td>게시판 지식화</td>
+<td><code>POST /api/board/ingest</code></td>
+<td>page/cursor/none 방식, 첨부파일, detail URL 처리</td>
+</tr>
+<tr>
+<td>게시물 보기</td>
+<td><code>POST /api/board/view</code></td>
+<td>저장된 board 문서 원문 확인</td>
+</tr>
+<tr>
+<td>삭제</td>
+<td><code>POST /api/board/delete</code></td>
+<td>board 수집 데이터 삭제</td>
+</tr>
+</tbody>
+</table>
+<p><code>kevcs</code> 기준 task 이력에는 board ingestion 성공/취소/실패 기록이 다수 있다. 다만 task metadata에 외부 API 호출 header가 저장될 수 있으므로, 인증 토큰이 들어간 header는 로그/응답/공유 자료에서 반드시 마스킹해야 한다.</p>
+<h3 id="_5">멀티모달 지식화<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>기능</th>
+<th>API</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>상태 확인</td>
+<td><code>GET /api/multimodal/status</code></td>
+</tr>
+<tr>
+<td>문서 파싱만</td>
+<td><code>POST /api/multimodal/parse</code></td>
+</tr>
+<tr>
+<td>파싱 + VLM/LLM 처리</td>
+<td><code>POST /api/multimodal/process</code></td>
+</tr>
+</tbody>
+</table>
+<p>현재 로컬 상태:</p>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>값</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>multimodal status</td>
+<td><code>ready</code></td>
+</tr>
+<tr>
+<td>VLM available</td>
+<td>true</td>
+</tr>
+<tr>
+<td>processors</td>
+<td>image, table, equation, generic</td>
+</tr>
+<tr>
+<td>parsers</td>
+<td><code>docling=false</code>, <code>pymupdf=false</code></td>
+</tr>
+</tbody>
+</table>
+<p>VLM은 설정되어 있으나 파서 설치 상태가 false로 보인다. PDF/DOCX 멀티모달 처리 검증 전에 <code>pymupdf</code>/<code>docling</code> 의존성 설치 여부를 확인해야 한다.</p>
+<hr />
+<h2 id="5">5. 지식 그래프 확인<a class="headerlink" href="#5" title="Permanent link">&para;</a></h2>
+<h3 id="api">API<a class="headerlink" href="#api" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>기능</th>
+<th>API</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>전체 라벨 목록</td>
+<td><code>GET /graph/label/list</code></td>
+</tr>
+<tr>
+<td>연결도 높은 라벨</td>
+<td><code>GET /graph/label/popular?limit=300</code></td>
+</tr>
+<tr>
+<td>라벨 검색</td>
+<td><code>GET /graph/label/search?q=...</code></td>
+</tr>
+<tr>
+<td>서브그래프 조회</td>
+<td><code>GET /graphs?label=*&amp;max_depth=3&amp;max_nodes=1000</code></td>
+</tr>
+<tr>
+<td>엔티티 존재 확인</td>
+<td><code>GET /graph/entity/exists?name=...</code></td>
+</tr>
+<tr>
+<td>엔티티/관계 편집</td>
+<td><code>/graph/entity/edit</code>, <code>/graph/relation/edit</code></td>
+</tr>
+<tr>
+<td>엔티티/관계 생성</td>
+<td><code>/graph/entity/create</code>, <code>/graph/relation/create</code></td>
+</tr>
+<tr>
+<td>엔티티 병합</td>
+<td><code>POST /graph/entities/merge</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="ui">UI<a class="headerlink" href="#ui" title="Permanent link">&para;</a></h3>
+<p><code>GraphViewer.tsx</code>는 Sigma 기반이다.</p>
+<ul>
+<li>라벨 선택/검색: <code>GraphLabels.tsx</code></li>
+<li>페이지 내 노드 검색: <code>GraphSearch.tsx</code></li>
+<li>속성 패널: <code>PropertiesView.tsx</code></li>
+<li>레이아웃/줌/전체화면/범례: <code>LayoutsControl</code>, <code>ZoomControl</code>, <code>FullScreenControl</code>, <code>Legend</code></li>
+<li>workspace 변경 시 graph store와 검색 이력 초기화</li>
+</ul>
+<p><code>kevcs</code>에서 popular label 조회 결과 예시는 <code>E-pit</code>, <code>해피차저 앱</code>, image/table/document 기반 엔티티 등이다.</p>
+<hr />
+<h2 id="6-">6. 엔티티-관계 탐색 기능<a class="headerlink" href="#6-" title="Permanent link">&para;</a></h2>
+<h3 id="api_1">API<a class="headerlink" href="#api_1" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>기능</th>
+<th>API</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>엔티티 페이지 조회</td>
+<td><code>POST /entities</code></td>
+</tr>
+<tr>
+<td>엔티티 타입 집계</td>
+<td><code>GET /entity-types</code></td>
+</tr>
+<tr>
+<td>관계 페이지 조회</td>
+<td><code>POST /relations</code></td>
+</tr>
+<tr>
+<td>유사/관련 엔티티</td>
+<td><code>GET /entities/{entity_id}/related</code></td>
+</tr>
+<tr>
+<td>엔티티 삭제</td>
+<td><code>DELETE /entities/{entity_id}?cascade=true</code></td>
+</tr>
+<tr>
+<td>다중 엔티티 삭제</td>
+<td><code>POST /entities/batch-delete</code></td>
+</tr>
+<tr>
+<td>관계 삭제</td>
+<td><code>DELETE /relations?cascade=true</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="ui_1">UI<a class="headerlink" href="#ui_1" title="Permanent link">&para;</a></h3>
+<p><code>EntityManagement.tsx</code>는 좌측 탐색 패널과 우측 그래프, 하단 상세 패널로 구성된다.</p>
+<ul>
+<li>엔티티 탭: <code>EntityExplorer.tsx</code></li>
+<li>관계 탭: <code>RelationExplorer.tsx</code></li>
+<li>선택 엔티티 중심 그래프: <code>EntityGraphView.tsx</code></li>
+<li>상세/이웃/속성: <code>EntityDetailPanel.tsx</code></li>
+</ul>
+<p><code>kevcs</code> 기준 엔티티 타입은 100개 이상이며 <code>product</code>, <code>servicefeature</code>, <code>document</code>, <code>category</code>, <code>organization</code>, <code>policy</code>, <code>image</code>, <code>table</code> 등이 많이 나타난다. 대소문자 혼재(<code>Product</code>/<code>product</code>)와 <code>UNKNOWN</code> 타입이 보이므로 스키마 정규화/재지식화 시 점검 포인트다.</p>
+<hr />
+<h2 id="7">7. 지식화를 위한 도메인 스키마 생성 기능<a class="headerlink" href="#7" title="Permanent link">&para;</a></h2>
+<h3 id="api_2">API<a class="headerlink" href="#api_2" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>영역</th>
+<th>API</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>파일 기반 발견</td>
+<td><code>POST /api/schema/discover/from-files</code></td>
+</tr>
+<tr>
+<td>문서 텍스트 기반 발견</td>
+<td><code>POST /api/schema/discover/from-document</code></td>
+</tr>
+<tr>
+<td>도메인 키워드 기반 발견</td>
+<td><code>POST /api/schema/discover/from-domain</code></td>
+</tr>
+<tr>
+<td>하이브리드 발견</td>
+<td><code>POST /api/schema/discover/hybrid</code></td>
+</tr>
+<tr>
+<td>템플릿 목록/상세</td>
+<td><code>GET /api/schema/templates</code>, <code>GET /api/schema/templates/{domain}</code></td>
+</tr>
+<tr>
+<td>템플릿 CRUD</td>
+<td><code>POST/PUT/DELETE /api/schema/templates...</code></td>
+</tr>
+<tr>
+<td>현재 스키마</td>
+<td><code>GET /api/schema/current</code></td>
+</tr>
+<tr>
+<td>스키마 적용/초기화</td>
+<td><code>POST /api/schema/apply</code>, <code>POST /api/schema/reset</code></td>
+</tr>
+<tr>
+<td>병합 미리보기/적용</td>
+<td><code>POST /api/schema/merge/preview</code>, <code>/merge/apply</code></td>
+</tr>
+<tr>
+<td>시드 엔티티</td>
+<td><code>GET/POST/DELETE /api/schema/seed-entities</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="ui_2">UI<a class="headerlink" href="#ui_2" title="Permanent link">&para;</a></h3>
+<p><code>SchemaManager.tsx</code>는 세 탭으로 구성된다.</p>
+<ul>
+<li>Discovery: 파일/텍스트/도메인 힌트로 스키마 발견</li>
+<li>Templates: 도메인 템플릿 라이브러리</li>
+<li>Current: 현재 적용 스키마, 시드 엔티티, apply/reset</li>
+</ul>
+<p><code>kevcs</code>는 <code>template:kevcs-t-1</code>이 적용되어 있으며 50개 이상의 도메인 엔티티 타입과 시드 엔티티가 있다. <code>base</code>는 기본 타입만 사용하는 상태다.</p>
+<h3 id="_6">주의점<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h3>
+<ul>
+<li>스키마 적용은 이후 문서 처리의 엔티티 추출에 영향을 주는 설정이다. 이미 지식화된 데이터의 엔티티 타입을 자동으로 재분류하지 않는다.</li>
+<li>relation type은 API 모델에 존재하지만 현재 <code>kevcs</code> 응답에서는 빈 배열이다.</li>
+</ul>
+<hr />
+<h2 id="8-api">8. API를 통한 검색 기능<a class="headerlink" href="#8-api" title="Permanent link">&para;</a></h2>
+<h3 id="api_3">API<a class="headerlink" href="#api_3" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>API</th>
+<th>용도</th>
+<th>응답</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST /query</code></td>
+<td>비스트리밍 검색/답변</td>
+<td>JSON</td>
+</tr>
+<tr>
+<td><code>POST /query/stream</code></td>
+<td>채팅 UI용 스트리밍</td>
+<td>NDJSON</td>
+</tr>
+<tr>
+<td><code>POST /query/data</code></td>
+<td>LLM 답변 없이 검색 데이터만 확인</td>
+<td>JSON</td>
+</tr>
+</tbody>
+</table>
+<p>공통 query mode는 <code>naive</code>, <code>local</code>, <code>global</code>, <code>hybrid</code>, <code>mix</code>, <code>bypass</code>다. WebUI Retrieval 탭은 <code>/mix 질문</code> 같은 prefix로 모드를 override할 수 있다.</p>
+<p>주요 파라미터:</p>
+<ul>
+<li><code>top_k</code>, <code>chunk_top_k</code></li>
+<li><code>max_entity_tokens</code>, <code>max_relation_tokens</code>, <code>max_total_tokens</code></li>
+<li><code>hl_keywords</code>, <code>ll_keywords</code></li>
+<li><code>conversation_history</code></li>
+<li><code>user_prompt</code></li>
+<li><code>enable_rerank</code></li>
+<li><code>include_references</code>, <code>include_chunk_content</code></li>
+<li><code>highlight_entities</code></li>
+<li><code>workspace</code></li>
+</ul>
+<h3 id="ui_3">UI<a class="headerlink" href="#ui_3" title="Permanent link">&para;</a></h3>
+<p><code>RetrievalTesting.tsx</code>는 채팅형 테스트 콘솔이다.</p>
+<ul>
+<li>스트리밍 응답 처리</li>
+<li>레퍼런스/증거 스니펫 표시</li>
+<li><code>&lt;think&gt;</code> 블록 분리 표시</li>
+<li>Mermaid/LaTeX 렌더링 보정</li>
+<li>QuerySettings 패널에서 모드/응답형식/top-k/토큰/리랭크/프롬프트 설정</li>
+</ul>
+<hr />
+<h2 id="9">9. 내부 프롬프트 조회/수정 기능<a class="headerlink" href="#9" title="Permanent link">&para;</a></h2>
+<h3 id="api_4">API<a class="headerlink" href="#api_4" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>기능</th>
+<th>API</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>전체 조회</td>
+<td><code>GET /prompts</code></td>
+</tr>
+<tr>
+<td>단건 조회</td>
+<td><code>GET /prompts/{prompt_key}</code></td>
+</tr>
+<tr>
+<td>수정</td>
+<td><code>PUT /prompts/{prompt_key}</code></td>
+</tr>
+<tr>
+<td>단건 기본값 초기화</td>
+<td><code>DELETE /prompts/{prompt_key}</code></td>
+</tr>
+<tr>
+<td>전체 초기화</td>
+<td><code>POST /prompts/reset-all</code></td>
+</tr>
+</tbody>
+</table>
+<p>수정 가능한 프롬프트는 12개다.</p>
+<ul>
+<li><code>entity_extraction_system_prompt</code></li>
+<li><code>entity_extraction_user_prompt</code></li>
+<li><code>entity_continue_extraction_user_prompt</code></li>
+<li><code>entity_extraction_examples</code></li>
+<li><code>summarize_entity_descriptions</code></li>
+<li><code>fail_response</code></li>
+<li><code>rag_response</code></li>
+<li><code>naive_rag_response</code></li>
+<li><code>kg_query_context</code></li>
+<li><code>naive_query_context</code></li>
+<li><code>keywords_extraction</code></li>
+<li><code>keywords_extraction_examples</code></li>
+</ul>
+<h3 id="ui_4">UI<a class="headerlink" href="#ui_4" title="Permanent link">&para;</a></h3>
+<p><code>PromptSettings.tsx</code>는 accordion 형태로 프롬프트를 열고 수정한다. JSON 타입은 저장 전 JSON parse 검증을 한다.</p>
+<h3 id="_7">주의점<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h3>
+<ul>
+<li>DB 테이블은 workspace별 prompt row를 저장한다.</li>
+<li>수정 시 서버 메모리의 <code>PROMPTS[prompt_key]</code>도 즉시 변경한다.</li>
+<li>이 인메모리 변경이 워크스페이스별로 완전히 격리되는지 별도 회귀 테스트가 필요하다.</li>
+<li>서버 startup 로그에서 <code>LIGHTRAG_PROMPTS(id)</code> 인덱스 생성 실패가 보인다. 실제 테이블은 <code>prompt_key</code> 기반으로 쓰이는 것으로 보이며, 마이그레이션/인덱스 정의 정리가 필요하다.</li>
+</ul>
+<hr />
+<h2 id="10">10. 워크스페이스 관리 기능<a class="headerlink" href="#10" title="Permanent link">&para;</a></h2>
+<h3 id="api_5">API<a class="headerlink" href="#api_5" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>기능</th>
+<th>API</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>생성</td>
+<td><code>POST /workspaces</code></td>
+</tr>
+<tr>
+<td>목록</td>
+<td><code>GET /workspaces?page=1&amp;page_size=20</code></td>
+</tr>
+<tr>
+<td>상세</td>
+<td><code>GET /workspaces/{workspace_id}</code></td>
+</tr>
+<tr>
+<td>수정</td>
+<td><code>PATCH /workspaces/{workspace_id}</code></td>
+</tr>
+<tr>
+<td>삭제</td>
+<td><code>DELETE /workspaces/{workspace_id}?delete_data=true</code></td>
+</tr>
+<tr>
+<td>통계</td>
+<td><code>GET /workspaces/{workspace_id}/stats</code></td>
+</tr>
+<tr>
+<td>통계 동기화</td>
+<td><code>POST /workspaces/{workspace_id}/sync-stats</code></td>
+</tr>
+<tr>
+<td>기본 워크스페이스 설정</td>
+<td><code>POST /workspaces/{workspace_id}/set-default</code></td>
+</tr>
+<tr>
+<td>기본 워크스페이스 조회</td>
+<td><code>GET /workspaces/default</code></td>
+</tr>
+<tr>
+<td>설정 복사</td>
+<td><code>POST /workspaces/{workspace_id}/copy-settings</code></td>
+</tr>
+<tr>
+<td>데이터 복사</td>
+<td><code>POST /workspaces/{workspace_id}/copy-data</code></td>
+</tr>
+<tr>
+<td>데이터 이동</td>
+<td><code>POST /workspaces/{workspace_id}/move-data</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="ui_5">UI<a class="headerlink" href="#ui_5" title="Permanent link">&para;</a></h3>
+<p><code>WorkspaceManagement.tsx</code>는 카드형 관리 화면이다.</p>
+<ul>
+<li>전체 워크스페이스/문서/엔티티/관계 합계</li>
+<li>현재 워크스페이스 강조</li>
+<li>기본 워크스페이스 별표 표시</li>
+<li>워크스페이스 전환</li>
+<li>수정, 복사, 기본값 설정, 통계 새로고침, 삭제</li>
+</ul>
+<h3 id="_8">주의점<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h3>
+<ul>
+<li>기본 워크스페이스는 삭제할 수 없다.</li>
+<li>busy workspace는 삭제/전환 일부가 제한된다.</li>
+<li><code>copy-data</code> 코드는 PostgreSQL 문서/벡터/매핑 테이블 중심으로 복사한다. Neo4j graph node/edge 자체 복사까지 보장되는지는 별도 확인이 필요하다.</li>
+</ul>
+<hr />
+<h2 id="11">11. 생성한 개별 스킬<a class="headerlink" href="#11" title="Permanent link">&para;</a></h2>
+<p>이번 분석 기준으로 다음 스킬을 추가했다.</p>
+<table>
+<thead>
+<tr>
+<th>스킬</th>
+<th>목적</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>.agents/skills/multi-workspace-routing</code></td>
+<td>헤더/body/default 기반 workspace 라우팅과 격리 점검</td>
+</tr>
+<tr>
+<td><code>.agents/skills/knowledge-ingestion-ops</code></td>
+<td>문서/URL/Board/멀티모달 지식화 파이프라인 점검</td>
+</tr>
+<tr>
+<td><code>.agents/skills/knowledge-graph-review</code></td>
+<td>그래프 라벨/서브그래프/API/UI 점검</td>
+</tr>
+<tr>
+<td><code>.agents/skills/entity-relation-explorer</code></td>
+<td>엔티티/관계 목록, 상세, 삭제/편집 리스크 점검</td>
+</tr>
+<tr>
+<td><code>.agents/skills/domain-schema-ops</code></td>
+<td>스키마 발견/템플릿/적용/병합/시드 엔티티 점검</td>
+</tr>
+<tr>
+<td><code>.agents/skills/retrieval-api-tester</code></td>
+<td><code>/query</code> 계열 API와 Retrieval UI 테스트</td>
+</tr>
+<tr>
+<td><code>.agents/skills/prompt-admin-ops</code></td>
+<td>프롬프트 조회/수정/초기화와 workspace 적용 범위 점검</td>
+</tr>
+<tr>
+<td><code>.agents/skills/workspace-admin-ops</code></td>
+<td>워크스페이스 CRUD/복사/이동/통계 동기화 점검</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="12">12. 우선 점검 과제<a class="headerlink" href="#12" title="Permanent link">&para;</a></h2>
+<ol>
+<li><code>LIGHTRAG_PROMPTS</code>, <code>LIGHTRAG_USER_PROMPT_TEMPLATES</code> 인덱스 생성 코드가 실제 컬럼명과 맞지 않는다. startup 에러를 정리해야 한다.</li>
+<li>task metadata에 외부 API header가 저장될 수 있다. 인증 토큰 마스킹 또는 저장 제외가 필요하다.</li>
+<li>로컬 멀티모달 parser 상태가 false다. <code>pymupdf</code>/<code>docling</code> 설치 및 status API 재확인이 필요하다.</li>
+<li>워크스페이스 데이터 복사/이동이 Neo4j 그래프까지 완전히 이전하는지 검증해야 한다.</li>
+<li>프롬프트 수정 시 workspace DB row와 process-global <code>PROMPTS</code> 변경의 격리성을 테스트해야 한다.</li>
+<li><code>base</code>는 비어 있으므로 UI 기능 검증 시 반드시 데이터가 있는 워크스페이스로 전환해야 한다.</li>
+</ol>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  맨위로
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\ud074\ub9bd\ubcf4\ub4dc\uc5d0 \ubcf5\uc0ac\ub428", "clipboard.copy": "\ud074\ub9bd\ubcf4\ub4dc\ub85c \ubcf5\uc0ac", "search.result.more.one": "\uc774 \ubb38\uc11c\uc5d0\uc11c 1\uac1c\uc758 \uac80\uc0c9 \uacb0\uacfc \ub354 \ubcf4\uae30", "search.result.more.other": "\uc774 \ubb38\uc11c\uc5d0\uc11c #\uac1c\uc758 \uac80\uc0c9 \uacb0\uacfc \ub354 \ubcf4\uae30", "search.result.none": "\uac80\uc0c9\uc5b4\uc640 \uc77c\uce58\ud558\ub294 \ubb38\uc11c\uac00 \uc5c6\uc2b5\ub2c8\ub2e4", "search.result.one": "1\uac1c\uc758 \uc77c\uce58\ud558\ub294 \ubb38\uc11c", "search.result.other": "#\uac1c\uc758 \uc77c\uce58\ud558\ub294 \ubb38\uc11c", "search.result.placeholder": "\uac80\uc0c9\uc5b4\ub97c \uc785\ub825\ud558\uc138\uc694", "search.result.term.missing": "\ud3ec\ud568\ub418\uc9c0 \uc54a\uc740 \uac80\uc0c9\uc5b4", "select.version": "\ubc84\uc804 \uc120\ud0dd"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

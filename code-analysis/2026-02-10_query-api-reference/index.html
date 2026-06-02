@@ -1,0 +1,4054 @@
+
+<!doctype html>
+<html lang="ko" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="LightRAG 프로젝트 기술 분석 및 설계 문서">
+      
+      
+      
+      
+        <link rel="prev" href="../2026-02-10_query-mode-behavior-analysis/">
+      
+      
+        <link rel="next" href="../2026-02-10_image-analysis-pipeline/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>2026-02-10_query-api-reference - LightRAG 기술 문서</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Noto+Sans+KR:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Noto Sans KR";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#lightrag-query-api" class="md-skip">
+          콘텐츠로 이동
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="상단/헤더">
+    <a href="../.." title="LightRAG 기술 문서" class="md-header__button md-logo" aria-label="LightRAG 기술 문서" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            LightRAG 기술 문서
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              2026-02-10_query-api-reference
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="다크 모드로 전환"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="다크 모드로 전환" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="라이트 모드로 전환"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="라이트 모드로 전환" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="검색" placeholder="검색" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="검색">
+        
+        <button type="reset" class="md-search__icon md-icon" title="지우기" aria-label="지우기" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            검색 초기화
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="네비게이션" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="LightRAG 기술 문서" class="md-nav__button md-logo" aria-label="LightRAG 기술 문서" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    LightRAG 기술 문서
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    홈
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    코드분석
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    코드분석
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-05-16_feature-capability-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-05-16_feature-capability-analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-13_board-api-ingestion-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-13_board-api-ingestion-guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-11_url-ingestion-pipeline-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-11_url-ingestion-pipeline-analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-10_query-response-structure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-response-structure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-10_query-pipeline-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-pipeline-analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-10_query-mode-behavior-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-mode-behavior-analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-api-reference
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-api-reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="목차">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      목차
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        목차
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. API 개요 및 비교
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. API 개요 및 비교">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11-3-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.1 3개 API 한눈에 보기
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.2 핵심 차이 요약
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. 공통 요청 파라미터
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. 공통 요청 파라미터">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-queryrequest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 QueryRequest 전체 필드
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 파라미터별 상세 설명 및 유의사항
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2.2 파라미터별 상세 설명 및 유의사항">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#query" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        query (필수)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mode
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#top_k" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        top_k
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#chunk_top_k" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        chunk_top_k
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hl_keywords-ll_keywords" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        hl_keywords / ll_keywords
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#conversation_history" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        conversation_history
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#response_type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        response_type
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#user_prompt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        user_prompt
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#enable_rerank" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        enable_rerank
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#include_references" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        include_references
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#include_chunk_content" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        include_chunk_content
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#workspace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        workspace
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#only_need_context-only_need_prompt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        only_need_context / only_need_prompt
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-post-apiquery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. POST /api/query — 비스트리밍 응답
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. POST /api/query — 비스트리밍 응답">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 개요
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 요청 예시
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 응답 형식
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-queryresponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 응답 모델 (QueryResponse)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.5 특징
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#36" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.6 적합한 상황
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-post-apiquerystream" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. POST /api/query/stream — 스트리밍 응답
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. POST /api/query/stream — 스트리밍 응답">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 개요
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 요청 예시
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-streamtrue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 응답 형식 (스트리밍, stream=true)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44-streamfalse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 응답 형식 (비스트리밍, stream=false 또는 캐시 히트)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#45" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.5 응답 라인 타입
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#46-http" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.6 HTTP 응답 헤더
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#47-stream" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.7 stream 파라미터 동작
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#48" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.8 적합한 상황
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-post-apiquerydata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. POST /api/query/data — 데이터 전용 응답
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. POST /api/query/data — 데이터 전용 응답">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 개요
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 요청 예시
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 응답 형식
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-querydataresponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 응답 모델 (QueryDataResponse)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#55" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.5 모드별 데이터 반환 차이
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#56" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.6 내부 동작
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#57" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.7 적합한 상황
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. 응답 스키마 상세
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. 응답 스키마 상세">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-referenceitem" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 ReferenceItem 스키마
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-include_chunk_contenttrue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 include_chunk_content=true 시 레퍼런스 구조
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-entity-querydata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 Entity 스키마 (query/data)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-relationship-querydata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 Relationship 스키마 (query/data)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. 워크스페이스 결정 규칙
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. 사용 시나리오별 추천 API
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. 사용 시나리오별 추천 API">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#81" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.1 시나리오 결정 트리
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#82" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.2 구체적 시나리오별 추천
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. 클라이언트 구현 가이드
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. 클라이언트 구현 가이드">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#91-javascripttypescript-apiquery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.1 JavaScript/TypeScript — /api/query
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#92-javascripttypescript-apiquerystream" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.2 JavaScript/TypeScript — /api/query/stream
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#93-javascripttypescript-apiquerydata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.3 JavaScript/TypeScript — /api/query/data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#94-python-apiquerystream" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.4 Python — /api/query/stream
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#95-curl" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.5 cURL 예시
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. 파라미터 조합별 동작 매트릭스
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. 파라미터 조합별 동작 매트릭스">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#101-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.1 API별 파라미터 유효성
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#102" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.2 모드별 유효 파라미터
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. 에러 처리
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11. 에러 처리">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#111-http" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.1 HTTP 에러 코드
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#112" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.2 스트리밍 에러 처리
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#113" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.3 빈 결과 처리
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. 성능 고려사항
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="12. 성능 고려사항">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#121" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.1 응답 시간 요인
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#122-llm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.2 LLM 호출 횟수
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#123" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.3 캐싱 동작
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#124" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.4 추천 기본 설정
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        부록: 관련 소스 파일 참조
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-10_image-analysis-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_image-analysis-pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="목차">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      목차
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        목차
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. API 개요 및 비교
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. API 개요 및 비교">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11-3-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.1 3개 API 한눈에 보기
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.2 핵심 차이 요약
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. 공통 요청 파라미터
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. 공통 요청 파라미터">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-queryrequest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 QueryRequest 전체 필드
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 파라미터별 상세 설명 및 유의사항
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2.2 파라미터별 상세 설명 및 유의사항">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#query" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        query (필수)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mode
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#top_k" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        top_k
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#chunk_top_k" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        chunk_top_k
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hl_keywords-ll_keywords" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        hl_keywords / ll_keywords
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#conversation_history" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        conversation_history
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#response_type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        response_type
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#user_prompt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        user_prompt
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#enable_rerank" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        enable_rerank
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#include_references" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        include_references
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#include_chunk_content" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        include_chunk_content
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#workspace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        workspace
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#only_need_context-only_need_prompt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        only_need_context / only_need_prompt
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-post-apiquery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. POST /api/query — 비스트리밍 응답
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. POST /api/query — 비스트리밍 응답">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 개요
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 요청 예시
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 응답 형식
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-queryresponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 응답 모델 (QueryResponse)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.5 특징
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#36" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.6 적합한 상황
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-post-apiquerystream" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. POST /api/query/stream — 스트리밍 응답
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. POST /api/query/stream — 스트리밍 응답">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 개요
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 요청 예시
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-streamtrue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 응답 형식 (스트리밍, stream=true)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44-streamfalse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 응답 형식 (비스트리밍, stream=false 또는 캐시 히트)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#45" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.5 응답 라인 타입
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#46-http" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.6 HTTP 응답 헤더
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#47-stream" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.7 stream 파라미터 동작
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#48" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.8 적합한 상황
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-post-apiquerydata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. POST /api/query/data — 데이터 전용 응답
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. POST /api/query/data — 데이터 전용 응답">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 개요
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 요청 예시
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 응답 형식
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-querydataresponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 응답 모델 (QueryDataResponse)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#55" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.5 모드별 데이터 반환 차이
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#56" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.6 내부 동작
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#57" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.7 적합한 상황
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. 응답 스키마 상세
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. 응답 스키마 상세">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-referenceitem" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 ReferenceItem 스키마
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-include_chunk_contenttrue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 include_chunk_content=true 시 레퍼런스 구조
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-entity-querydata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 Entity 스키마 (query/data)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-relationship-querydata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 Relationship 스키마 (query/data)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. 워크스페이스 결정 규칙
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. 사용 시나리오별 추천 API
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. 사용 시나리오별 추천 API">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#81" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.1 시나리오 결정 트리
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#82" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.2 구체적 시나리오별 추천
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. 클라이언트 구현 가이드
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. 클라이언트 구현 가이드">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#91-javascripttypescript-apiquery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.1 JavaScript/TypeScript — /api/query
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#92-javascripttypescript-apiquerystream" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.2 JavaScript/TypeScript — /api/query/stream
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#93-javascripttypescript-apiquerydata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.3 JavaScript/TypeScript — /api/query/data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#94-python-apiquerystream" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.4 Python — /api/query/stream
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#95-curl" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.5 cURL 예시
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. 파라미터 조합별 동작 매트릭스
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. 파라미터 조합별 동작 매트릭스">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#101-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.1 API별 파라미터 유효성
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#102" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.2 모드별 유효 파라미터
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. 에러 처리
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11. 에러 처리">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#111-http" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.1 HTTP 에러 코드
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#112" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.2 스트리밍 에러 처리
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#113" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.3 빈 결과 처리
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. 성능 고려사항
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="12. 성능 고려사항">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#121" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.1 응답 시간 요인
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#122-llm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.2 LLM 호출 횟수
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#123" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.3 캐싱 동작
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#124" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.4 추천 기본 설정
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        부록: 관련 소스 파일 참조
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="lightrag-query-api">LightRAG Query API 상세 분석<a class="headerlink" href="#lightrag-query-api" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>분석일: 2026-02-10
+대상: <code>/api/query</code>, <code>/api/query/stream</code>, <code>/api/query/data</code>
+분석 범위: <code>query_routes.py</code>, <code>lightrag.py</code>, <code>base.py</code></p>
+</blockquote>
+<hr />
+<h2 id="_1">목차<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<ol>
+<li><a href="#1-api-개요-및-비교">API 개요 및 비교</a></li>
+<li><a href="#2-공통-요청-파라미터">공통 요청 파라미터 (QueryRequest)</a></li>
+<li><a href="#3-post-apiquery--비스트리밍-응답">POST /api/query — 비스트리밍 응답</a></li>
+<li><a href="#4-post-apiquerystream--스트리밍-응답">POST /api/query/stream — 스트리밍 응답</a></li>
+<li><a href="#5-post-apiquerydata--데이터-전용-응답">POST /api/query/data — 데이터 전용 응답</a></li>
+<li><a href="#6-응답-스키마-상세">응답 스키마 상세</a></li>
+<li><a href="#7-워크스페이스-결정-규칙">워크스페이스 결정 규칙</a></li>
+<li><a href="#8-사용-시나리오별-추천-api">사용 시나리오별 추천 API</a></li>
+<li><a href="#9-클라이언트-구현-가이드">클라이언트 구현 가이드</a></li>
+<li><a href="#10-파라미터-조합별-동작-매트릭스">파라미터 조합별 동작 매트릭스</a></li>
+<li><a href="#11-에러-처리">에러 처리</a></li>
+<li><a href="#12-성능-고려사항">성능 고려사항</a></li>
+</ol>
+<hr />
+<h2 id="1-api">1. API 개요 및 비교<a class="headerlink" href="#1-api" title="Permanent link">&para;</a></h2>
+<h3 id="11-3-api">1.1 3개 API 한눈에 보기<a class="headerlink" href="#11-3-api" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>관점</th>
+<th style="text-align: center;"><code>/api/query</code></th>
+<th style="text-align: center;"><code>/api/query/stream</code></th>
+<th style="text-align: center;"><code>/api/query/data</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>LLM 생성</strong></td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td><strong>응답 형식</strong></td>
+<td style="text-align: center;">JSON</td>
+<td style="text-align: center;">NDJSON 스트림</td>
+<td style="text-align: center;">JSON</td>
+</tr>
+<tr>
+<td><strong>Content-Type</strong></td>
+<td style="text-align: center;"><code>application/json</code></td>
+<td style="text-align: center;"><code>application/x-ndjson</code></td>
+<td style="text-align: center;"><code>application/json</code></td>
+</tr>
+<tr>
+<td><strong>실시간 출력</strong></td>
+<td style="text-align: center;">❌ (완성 후 반환)</td>
+<td style="text-align: center;">✅ (청크 단위)</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td><strong>레퍼런스 포함</strong></td>
+<td style="text-align: center;">선택적</td>
+<td style="text-align: center;">선택적</td>
+<td style="text-align: center;">항상 포함</td>
+</tr>
+<tr>
+<td><strong>청크 내용 포함</strong></td>
+<td style="text-align: center;">선택적</td>
+<td style="text-align: center;">선택적</td>
+<td style="text-align: center;">항상 포함</td>
+</tr>
+<tr>
+<td><strong>엔티티/관계 데이터</strong></td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">✅</td>
+</tr>
+<tr>
+<td><strong>메타데이터</strong></td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">✅</td>
+</tr>
+<tr>
+<td><strong>stream 파라미터</strong></td>
+<td style="text-align: center;">무시됨</td>
+<td style="text-align: center;">유효</td>
+<td style="text-align: center;">무시됨</td>
+</tr>
+<tr>
+<td><strong>내부 호출</strong></td>
+<td style="text-align: center;"><code>aquery_llm(stream=False)</code></td>
+<td style="text-align: center;"><code>aquery_llm(stream=*)</code></td>
+<td style="text-align: center;"><code>aquery_data()</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="12">1.2 핵심 차이 요약<a class="headerlink" href="#12" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><code>/api/query</code></strong>: 완성된 LLM 답변을 한 번에 받고 싶을 때</li>
+<li><strong><code>/api/query/stream</code></strong>: LLM 답변을 실시간으로 스트리밍 받고 싶을 때 (챗 UI)</li>
+<li><strong><code>/api/query/data</code></strong>: LLM 답변 없이 검색된 원본 데이터(엔티티, 관계, 청크)만 받고 싶을 때</li>
+</ul>
+<hr />
+<h2 id="2">2. 공통 요청 파라미터<a class="headerlink" href="#2" title="Permanent link">&para;</a></h2>
+<h3 id="21-queryrequest">2.1 QueryRequest 전체 필드<a class="headerlink" href="#21-queryrequest" title="Permanent link">&para;</a></h3>
+<p>세 API 모두 동일한 <code>QueryRequest</code> 모델을 사용합니다.</p>
+<table>
+<thead>
+<tr>
+<th>파라미터</th>
+<th>타입</th>
+<th>기본값</th>
+<th style="text-align: center;">필수</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>query</code></td>
+<td>string</td>
+<td>-</td>
+<td style="text-align: center;">✅</td>
+<td>쿼리 텍스트 (최소 3자)</td>
+</tr>
+<tr>
+<td><code>mode</code></td>
+<td>string</td>
+<td><code>"mix"</code></td>
+<td style="text-align: center;">-</td>
+<td>쿼리 모드 (<code>local</code>/<code>global</code>/<code>hybrid</code>/<code>naive</code>/<code>mix</code>/<code>bypass</code>)</td>
+</tr>
+<tr>
+<td><code>stream</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td style="text-align: center;">-</td>
+<td>스트리밍 여부 (<code>/query/stream</code>만 유효)</td>
+</tr>
+<tr>
+<td><code>top_k</code></td>
+<td>integer</td>
+<td><code>40</code></td>
+<td style="text-align: center;">-</td>
+<td>엔티티/관계 VDB 검색 수 (≥ 1)</td>
+</tr>
+<tr>
+<td><code>chunk_top_k</code></td>
+<td>integer</td>
+<td><code>20</code></td>
+<td style="text-align: center;">-</td>
+<td>청크 VDB 검색 수 + 리랭킹 후 상한 (≥ 1)</td>
+</tr>
+<tr>
+<td><code>max_entity_tokens</code></td>
+<td>integer</td>
+<td><code>6000</code></td>
+<td style="text-align: center;">-</td>
+<td>엔티티 컨텍스트 토큰 한도 (≥ 1)</td>
+</tr>
+<tr>
+<td><code>max_relation_tokens</code></td>
+<td>integer</td>
+<td><code>8000</code></td>
+<td style="text-align: center;">-</td>
+<td>관계 컨텍스트 토큰 한도 (≥ 1)</td>
+</tr>
+<tr>
+<td><code>max_total_tokens</code></td>
+<td>integer</td>
+<td><code>30000</code></td>
+<td style="text-align: center;">-</td>
+<td>전체 컨텍스트 토큰 한도 (≥ 1)</td>
+</tr>
+<tr>
+<td><code>hl_keywords</code></td>
+<td>string[]</td>
+<td><code>[]</code></td>
+<td style="text-align: center;">-</td>
+<td>고수준 키워드 (빈 배열 = LLM 자동 추출)</td>
+</tr>
+<tr>
+<td><code>ll_keywords</code></td>
+<td>string[]</td>
+<td><code>[]</code></td>
+<td style="text-align: center;">-</td>
+<td>저수준 키워드 (빈 배열 = LLM 자동 추출)</td>
+</tr>
+<tr>
+<td><code>conversation_history</code></td>
+<td>object[]</td>
+<td><code>null</code></td>
+<td style="text-align: center;">-</td>
+<td>대화 이력 (<code>[{"role": "user/assistant", "content": "..."}]</code>)</td>
+</tr>
+<tr>
+<td><code>response_type</code></td>
+<td>string</td>
+<td><code>"Multiple Paragraphs"</code></td>
+<td style="text-align: center;">-</td>
+<td>응답 형식 지시 (≥ 1자)</td>
+</tr>
+<tr>
+<td><code>user_prompt</code></td>
+<td>string</td>
+<td><code>null</code></td>
+<td style="text-align: center;">-</td>
+<td>커스텀 시스템 프롬프트</td>
+</tr>
+<tr>
+<td><code>enable_rerank</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td style="text-align: center;">-</td>
+<td>리랭킹 활성화 여부</td>
+</tr>
+<tr>
+<td><code>include_references</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td style="text-align: center;">-</td>
+<td>레퍼런스 포함 여부 (<code>/query/data</code>는 항상 포함)</td>
+</tr>
+<tr>
+<td><code>include_chunk_content</code></td>
+<td>boolean</td>
+<td><code>false</code></td>
+<td style="text-align: center;">-</td>
+<td>레퍼런스에 청크 텍스트 포함 여부</td>
+</tr>
+<tr>
+<td><code>workspace</code></td>
+<td>string</td>
+<td><code>null</code></td>
+<td style="text-align: center;">-</td>
+<td>대상 워크스페이스 (헤더/기본값보다 우선)</td>
+</tr>
+<tr>
+<td><code>only_need_context</code></td>
+<td>boolean</td>
+<td><code>null</code></td>
+<td style="text-align: center;">-</td>
+<td>컨텍스트만 반환 (LLM 생략)</td>
+</tr>
+<tr>
+<td><code>only_need_prompt</code></td>
+<td>boolean</td>
+<td><code>null</code></td>
+<td style="text-align: center;">-</td>
+<td>프롬프트만 반환 (LLM 생략)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="22">2.2 파라미터별 상세 설명 및 유의사항<a class="headerlink" href="#22" title="Permanent link">&para;</a></h3>
+<h4 id="query"><code>query</code> (필수)<a class="headerlink" href="#query" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="p">{</span><span class="nt">&quot;query&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;머신러닝의 핵심 알고리즘은 무엇인가?&quot;</span><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li><strong>최소 3자</strong> 이상 필요 (3자 미만 시 400 에러)</li>
+<li>앞뒤 공백은 자동 제거 (strip)</li>
+<li>쿼리가 50자 미만이고 키워드 추출에 실패하면, 전체 쿼리를 저수준 키워드로 사용</li>
+<li>쿼리가 50자 이상이고 키워드 추출에 실패하면, 에러 응답 반환</li>
+</ul>
+<h4 id="mode"><code>mode</code><a class="headerlink" href="#mode" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span><span class="nt">&quot;mode&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;mix&quot;</span><span class="p">}</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>모드</th>
+<th>검색 범위</th>
+<th>추천 상황</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>local</code></td>
+<td>엔티티 중심</td>
+<td>특정 개체 정보 질문</td>
+</tr>
+<tr>
+<td><code>global</code></td>
+<td>관계 중심</td>
+<td>넓은 주제/관계 질문</td>
+</tr>
+<tr>
+<td><code>hybrid</code></td>
+<td>엔티티 + 관계</td>
+<td>복합 질문</td>
+</tr>
+<tr>
+<td><code>mix</code></td>
+<td>엔티티 + 관계 + 벡터 청크</td>
+<td><strong>기본값, 대부분의 상황에 추천</strong></td>
+</tr>
+<tr>
+<td><code>naive</code></td>
+<td>벡터 청크만</td>
+<td>KG 미사용 단순 검색</td>
+</tr>
+<tr>
+<td><code>bypass</code></td>
+<td>검색 없음</td>
+<td>LLM 직접 대화</td>
+</tr>
+</tbody>
+</table>
+<h4 id="top_k"><code>top_k</code><a class="headerlink" href="#top_k" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">{</span><span class="nt">&quot;top_k&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">20</span><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li><strong>local 모드</strong>: 검색할 엔티티 수를 결정</li>
+<li><strong>global 모드</strong>: 검색할 관계 수를 결정</li>
+<li><strong>hybrid/mix 모드</strong>: 엔티티와 관계 각각에 적용</li>
+<li><strong>naive/bypass 모드</strong>: 사용되지 않음</li>
+<li>값이 클수록 더 많은 데이터를 검색하지만, 처리 시간 증가</li>
+<li><strong>유의</strong>: 실제 반환 수는 토큰 한도에 의해 추가로 제한될 수 있음</li>
+</ul>
+<h4 id="chunk_top_k"><code>chunk_top_k</code><a class="headerlink" href="#chunk_top_k" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="p">{</span><span class="nt">&quot;chunk_top_k&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">10</span><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li>벡터 청크 검색 시 초기 검색 수</li>
+<li>리랭킹 후 최종 유지할 청크 수의 상한</li>
+<li><strong>naive/mix 모드</strong>에서 특히 중요 (직접 벡터 검색)</li>
+<li><strong>유의</strong>: <code>top_k</code>보다 크게 설정하면 의미 없음 (대부분의 경우)</li>
+</ul>
+<h4 id="hl_keywords-ll_keywords"><code>hl_keywords</code> / <code>ll_keywords</code><a class="headerlink" href="#hl_keywords-ll_keywords" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="p">{</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">&quot;hl_keywords&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;인공지능&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;머신러닝&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;딥러닝&quot;</span><span class="p">],</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span><span class="nt">&quot;ll_keywords&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;신경망&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;CNN&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;트랜스포머&quot;</span><span class="p">]</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li>빈 배열(<code>[]</code>): LLM이 쿼리에서 자동 추출 (추가 LLM 호출 1회)</li>
+<li>직접 지정: LLM 키워드 추출 호출 생략 → <strong>응답 속도 향상</strong></li>
+<li><code>hl_keywords</code>: global 모드에서 관계 VDB 검색에 사용</li>
+<li><code>ll_keywords</code>: local 모드에서 엔티티 VDB 검색에 사용</li>
+<li><strong>유의</strong>: naive/bypass 모드에서는 무시됨</li>
+</ul>
+<h4 id="conversation_history"><code>conversation_history</code><a class="headerlink" href="#conversation_history" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="p">{</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">&quot;conversation_history&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="p">{</span><span class="nt">&quot;role&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;user&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;content&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;AI란 무엇인가?&quot;</span><span class="p">},</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">    </span><span class="p">{</span><span class="nt">&quot;role&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;assistant&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;content&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;AI는 인공지능으로...&quot;</span><span class="p">}</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">  </span><span class="p">]</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li><strong>LLM 생성에만 사용</strong> — 검색(retrieval) 결과에 영향 없음</li>
+<li><strong>캐시 키에 포함되지 않음</strong> — 같은 쿼리는 대화 이력이 달라도 동일 캐시 결과 반환</li>
+<li>각 메시지에 <code>role</code> 키가 반드시 있어야 함 (없으면 400 에러)</li>
+<li><code>/query/data</code>에서는 무의미 (LLM 호출 없음)</li>
+</ul>
+<h4 id="response_type"><code>response_type</code><a class="headerlink" href="#response_type" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="p">{</span><span class="nt">&quot;response_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Bullet Points&quot;</span><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li>LLM에게 응답 형식을 지시하는 문자열</li>
+<li>예시: <code>"Multiple Paragraphs"</code>, <code>"Single Paragraph"</code>, <code>"Bullet Points"</code>, <code>"Table"</code>, <code>"Summary"</code></li>
+<li><code>/query/data</code>에서는 무의미</li>
+</ul>
+<h4 id="user_prompt"><code>user_prompt</code><a class="headerlink" href="#user_prompt" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="p">{</span><span class="nt">&quot;user_prompt&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;당신은 보험 전문가입니다. 질문에 대해 전문적으로 답변하세요.&quot;</span><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li>기본 시스템 프롬프트를 대체하는 커스텀 프롬프트</li>
+<li><strong>유의</strong>: 전체 시스템 프롬프트가 교체되므로, 필요한 지시사항을 모두 포함해야 함</li>
+</ul>
+<h4 id="enable_rerank"><code>enable_rerank</code><a class="headerlink" href="#enable_rerank" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="p">{</span><span class="nt">&quot;enable_rerank&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li><code>true</code> (기본값): 리랭크 모델로 청크를 재정렬</li>
+<li><code>false</code>: 초기 벡터 검색 순서 유지</li>
+<li><strong>유의</strong>: 리랭크 모델이 서버에 설정되어 있지 않으면, <code>true</code>여도 원본 순서 유지 (경고 로그만 출력)</li>
+</ul>
+<h4 id="include_references"><code>include_references</code><a class="headerlink" href="#include_references" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="p">{</span><span class="nt">&quot;include_references&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li><code>/query</code>, <code>/query/stream</code>: 이 값에 따라 레퍼런스 포함/제외</li>
+<li><code>/query/data</code>: <strong>항상 레퍼런스 포함</strong> (이 파라미터 무시)</li>
+</ul>
+<h4 id="include_chunk_content"><code>include_chunk_content</code><a class="headerlink" href="#include_chunk_content" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="p">{</span><span class="nt">&quot;include_chunk_content&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li><code>true</code>: 레퍼런스에 원본 청크 텍스트와 <code>structured_content</code>, 관련도 <code>score</code>/<code>scores</code> 포함</li>
+<li><code>false</code> (기본값): 레퍼런스에 <code>reference_id</code>와 <code>file_path</code>만 포함</li>
+<li><code>include_references=true</code>일 때만 유효</li>
+<li><strong>유의</strong>: 청크 내용이 포함되면 응답 크기가 크게 증가할 수 있음</li>
+</ul>
+<h4 id="workspace"><code>workspace</code><a class="headerlink" href="#workspace" title="Permanent link">&para;</a></h4>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="p">{</span><span class="nt">&quot;workspace&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;my-project&quot;</span><span class="p">}</span>
+</code></pre></div>
+워크스페이스 결정 우선순위:
+1. 요청 body의 <code>workspace</code> 필드 (최우선)
+2. HTTP 헤더 <code>LIGHTRAG-WORKSPACE</code>
+3. 서버 기본 워크스페이스 (없으면 <code>"base"</code>)</p>
+<h4 id="only_need_context-only_need_prompt"><code>only_need_context</code> / <code>only_need_prompt</code><a class="headerlink" href="#only_need_context-only_need_prompt" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="p">{</span><span class="nt">&quot;only_need_context&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li>디버깅/분석 용도의 고급 파라미터</li>
+<li><code>only_need_context=true</code>: 검색된 컨텍스트 문자열만 반환 (LLM 미호출)</li>
+<li><code>only_need_prompt=true</code>: LLM에 보낼 전체 프롬프트 반환 (LLM 미호출)</li>
+<li>둘 다 true: <code>only_need_context</code> 우선</li>
+<li><strong>유의</strong>: 일반 클라이언트에서는 사용할 필요 없음. <code>/query/data</code>를 대신 사용 추천</li>
+</ul>
+<hr />
+<h2 id="3-post-apiquery">3. POST /api/query — 비스트리밍 응답<a class="headerlink" href="#3-post-apiquery" title="Permanent link">&para;</a></h2>
+<h3 id="31">3.1 개요<a class="headerlink" href="#31" title="Permanent link">&para;</a></h3>
+<p>LLM 답변이 완전히 생성된 후 한 번에 JSON으로 반환합니다.</p>
+<h3 id="32">3.2 요청 예시<a class="headerlink" href="#32" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="err">POST /api/query</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="err">Content-Type: application/json</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="err">LIGHTRAG-WORKSPACE: my-workspace</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="err">{</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="err">  &quot;query&quot;: &quot;긴급출동 서비스의 처리 절차를 알려줘&quot;,</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="err">  &quot;mode&quot;: &quot;mix&quot;,</span>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="err">  &quot;include_references&quot;: true,</span>
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="err">  &quot;top_k&quot;: 20,</span>
+<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="err">  &quot;chunk_top_k&quot;: 10</span>
+<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="err">}</span>
+</code></pre></div>
+<h3 id="33">3.3 응답 형식<a class="headerlink" href="#33" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="p">{</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">  </span><span class="nt">&quot;response&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;긴급출동 서비스의 처리 절차는 다음과 같습니다...&quot;</span><span class="p">,</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="w">  </span><span class="nt">&quot;references&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="w">    </span><span class="p">{</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="w">      </span><span class="nt">&quot;reference_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1&quot;</span><span class="p">,</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="w">      </span><span class="nt">&quot;doc_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;doc-abc123&quot;</span><span class="p">,</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="w">      </span><span class="nt">&quot;file_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;긴급출동_메뉴얼.pdf&quot;</span><span class="p">,</span>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="w">      </span><span class="nt">&quot;download_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://s3.example.com/...&quot;</span>
+<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="w">    </span><span class="p">},</span>
+<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a><span class="w">    </span><span class="p">{</span>
+<a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a><span class="w">      </span><span class="nt">&quot;reference_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2&quot;</span><span class="p">,</span>
+<a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a><span class="w">      </span><span class="nt">&quot;doc_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;doc-def456&quot;</span><span class="p">,</span>
+<a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a><span class="w">      </span><span class="nt">&quot;file_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;서비스_가이드.pdf&quot;</span>
+<a id="__codelineno-14-14" name="__codelineno-14-14" href="#__codelineno-14-14"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-14-15" name="__codelineno-14-15" href="#__codelineno-14-15"></a><span class="w">  </span><span class="p">]</span>
+<a id="__codelineno-14-16" name="__codelineno-14-16" href="#__codelineno-14-16"></a><span class="p">}</span>
+</code></pre></div>
+<h3 id="34-queryresponse">3.4 응답 모델 (QueryResponse)<a class="headerlink" href="#34-queryresponse" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>필드</th>
+<th>타입</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>response</code></td>
+<td>string</td>
+<td>LLM이 생성한 답변 텍스트</td>
+</tr>
+<tr>
+<td><code>references</code></td>
+<td>ReferenceItem[] | null</td>
+<td>레퍼런스 목록 (<code>include_references=false</code>면 null)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="35">3.5 특징<a class="headerlink" href="#35" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>stream</code> 파라미터가 무시됨 — 항상 <code>stream=False</code>로 강제</li>
+<li>응답이 완성될 때까지 클라이언트가 대기해야 함</li>
+<li>LLM 캐시 히트 시 빠르게 반환</li>
+<li>빈 결과 시 <code>response</code>가 <code>"No relevant context found for the query."</code></li>
+</ul>
+<h3 id="36">3.6 적합한 상황<a class="headerlink" href="#36" title="Permanent link">&para;</a></h3>
+<ul>
+<li>백엔드 간 API 통신 (서버 to 서버)</li>
+<li>배치 처리</li>
+<li>응답 전체가 필요한 후처리 로직</li>
+<li>모바일 앱에서 로딩 인디케이터 표시 후 전체 결과 표시</li>
+</ul>
+<hr />
+<h2 id="4-post-apiquerystream">4. POST /api/query/stream — 스트리밍 응답<a class="headerlink" href="#4-post-apiquerystream" title="Permanent link">&para;</a></h2>
+<h3 id="41">4.1 개요<a class="headerlink" href="#41" title="Permanent link">&para;</a></h3>
+<p>LLM 답변을 실시간으로 NDJSON(Newline-Delimited JSON) 형식으로 스트리밍합니다.</p>
+<h3 id="42">4.2 요청 예시<a class="headerlink" href="#42" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="err">POST /api/query/stream</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="err">Content-Type: application/json</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="err">LIGHTRAG-WORKSPACE: my-workspace</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="err">{</span>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="err">  &quot;query&quot;: &quot;긴급출동 서비스의 처리 절차를 알려줘&quot;,</span>
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="err">  &quot;mode&quot;: &quot;mix&quot;,</span>
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="err">  &quot;stream&quot;: true,</span>
+<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a><span class="err">  &quot;include_references&quot;: true</span>
+<a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a><span class="err">}</span>
+</code></pre></div>
+<h3 id="43-streamtrue">4.3 응답 형식 (스트리밍, stream=true)<a class="headerlink" href="#43-streamtrue" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>Content-Type: application/x-ndjson
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>{&quot;references&quot;: [{&quot;reference_id&quot;: &quot;1&quot;, &quot;file_path&quot;: &quot;긴급출동_메뉴얼.pdf&quot;}, ...]}
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>{&quot;response&quot;: &quot;긴급출동 서비스의&quot;}
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a>{&quot;response&quot;: &quot; 처리 절차는 다음과&quot;}
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a>{&quot;response&quot;: &quot; 같습니다. 첫째,&quot;}
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a>{&quot;response&quot;: &quot; 고객으로부터 긴급출동&quot;}
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a>{&quot;response&quot;: &quot; 요청을 접수합니다...&quot;}
+</code></pre></div>
+<h3 id="44-streamfalse">4.4 응답 형식 (비스트리밍, stream=false 또는 캐시 히트)<a class="headerlink" href="#44-streamfalse" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>Content-Type: application/x-ndjson
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>{&quot;references&quot;: [...], &quot;response&quot;: &quot;긴급출동 서비스의 처리 절차는 다음과 같습니다...&quot;}
+</code></pre></div>
+<p>단일 라인에 레퍼런스와 전체 응답이 함께 포함됩니다.</p>
+<h3 id="45">4.5 응답 라인 타입<a class="headerlink" href="#45" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>라인 종류</th>
+<th>구조</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>레퍼런스</td>
+<td><code>{"references": [...]}</code></td>
+<td>첫 번째 라인 (include_references=true일 때)</td>
+</tr>
+<tr>
+<td>응답 청크</td>
+<td><code>{"response": "텍스트..."}</code></td>
+<td>LLM 생성 텍스트 조각</td>
+</tr>
+<tr>
+<td>에러</td>
+<td><code>{"error": "에러 메시지"}</code></td>
+<td>스트리밍 중 오류 발생 시</td>
+</tr>
+</tbody>
+</table>
+<h3 id="46-http">4.6 HTTP 응답 헤더<a class="headerlink" href="#46-http" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>Cache-Control: no-cache
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>Connection: keep-alive
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>Content-Type: application/x-ndjson
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a>X-Accel-Buffering: no
+</code></pre></div>
+<ul>
+<li><code>X-Accel-Buffering: no</code>: Nginx 프록시 환경에서 버퍼링 방지</li>
+</ul>
+<h3 id="47-stream">4.7 stream 파라미터 동작<a class="headerlink" href="#47-stream" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>stream 값</th>
+<th>실제 동작</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>true</code> (기본값)</td>
+<td>NDJSON 다중 라인 스트리밍</td>
+</tr>
+<tr>
+<td><code>false</code></td>
+<td>NDJSON 단일 라인 (완성 후 반환)</td>
+</tr>
+<tr>
+<td>(캐시 히트 시)</td>
+<td><code>true</code>여도 NDJSON 단일 라인</td>
+</tr>
+</tbody>
+</table>
+<p><strong>주의</strong>: <code>stream=false</code>로 설정해도 Content-Type은 <code>application/x-ndjson</code>이며, 단지 단일 라인으로 전체 응답이 반환됩니다.</p>
+<h3 id="48">4.8 적합한 상황<a class="headerlink" href="#48" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>챗봇 UI</strong>: 실시간 타이핑 효과</li>
+<li><strong>웹 프론트엔드</strong>: 사용자에게 즉시 응답 표시</li>
+<li><strong>장시간 쿼리</strong>: 응답 생성이 오래 걸릴 때 진행 상황 표시</li>
+<li><strong>대화형 인터페이스</strong>: 레퍼런스를 먼저 표시하고 답변을 점진적으로 표시</li>
+</ul>
+<hr />
+<h2 id="5-post-apiquerydata">5. POST /api/query/data — 데이터 전용 응답<a class="headerlink" href="#5-post-apiquerydata" title="Permanent link">&para;</a></h2>
+<h3 id="51">5.1 개요<a class="headerlink" href="#51" title="Permanent link">&para;</a></h3>
+<p><strong>LLM 호출 없이</strong> 검색된 원본 데이터(엔티티, 관계, 청크, 레퍼런스)를 구조화된 JSON으로 반환합니다.</p>
+<h3 id="52">5.2 요청 예시<a class="headerlink" href="#52" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="err">POST /api/query/data</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="err">Content-Type: application/json</span>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="err">LIGHTRAG-WORKSPACE: my-workspace</span>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="err">{</span>
+<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a><span class="err">  &quot;query&quot;: &quot;긴급출동 서비스&quot;,</span>
+<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a><span class="err">  &quot;mode&quot;: &quot;local&quot;,</span>
+<a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a><span class="err">  &quot;top_k&quot;: 10,</span>
+<a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a><span class="err">  &quot;chunk_top_k&quot;: 5</span>
+<a id="__codelineno-19-10" name="__codelineno-19-10" href="#__codelineno-19-10"></a><span class="err">}</span>
+</code></pre></div>
+<h3 id="53">5.3 응답 형식<a class="headerlink" href="#53" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="p">{</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="w">  </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;success&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="w">  </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Query executed successfully&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="w">  </span><span class="nt">&quot;data&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="w">    </span><span class="nt">&quot;entities&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="w">      </span><span class="p">{</span>
+<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a><span class="w">        </span><span class="nt">&quot;entity_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;긴급출동서비스&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a><span class="w">        </span><span class="nt">&quot;entity_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;SERVICE&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a><span class="w">        </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;고객에게 긴급 상황 시 출동 서비스를 제공하는...&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-10" name="__codelineno-20-10" href="#__codelineno-20-10"></a><span class="w">        </span><span class="nt">&quot;source_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;chunk-001&lt;SEP&gt;chunk-002&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-11" name="__codelineno-20-11" href="#__codelineno-20-11"></a><span class="w">        </span><span class="nt">&quot;file_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;긴급출동_메뉴얼.pdf&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-12" name="__codelineno-20-12" href="#__codelineno-20-12"></a><span class="w">        </span><span class="nt">&quot;reference_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1&quot;</span>
+<a id="__codelineno-20-13" name="__codelineno-20-13" href="#__codelineno-20-13"></a><span class="w">      </span><span class="p">}</span>
+<a id="__codelineno-20-14" name="__codelineno-20-14" href="#__codelineno-20-14"></a><span class="w">    </span><span class="p">],</span>
+<a id="__codelineno-20-15" name="__codelineno-20-15" href="#__codelineno-20-15"></a><span class="w">    </span><span class="nt">&quot;relationships&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-20-16" name="__codelineno-20-16" href="#__codelineno-20-16"></a><span class="w">      </span><span class="p">{</span>
+<a id="__codelineno-20-17" name="__codelineno-20-17" href="#__codelineno-20-17"></a><span class="w">        </span><span class="nt">&quot;src_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;긴급출동서비스&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-18" name="__codelineno-20-18" href="#__codelineno-20-18"></a><span class="w">        </span><span class="nt">&quot;tgt_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;고객&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-19" name="__codelineno-20-19" href="#__codelineno-20-19"></a><span class="w">        </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;긴급출동서비스는 고객의 요청에 의해 시작된다&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-20" name="__codelineno-20-20" href="#__codelineno-20-20"></a><span class="w">        </span><span class="nt">&quot;keywords&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;요청, 서비스, 시작&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-21" name="__codelineno-20-21" href="#__codelineno-20-21"></a><span class="w">        </span><span class="nt">&quot;weight&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.85</span><span class="p">,</span>
+<a id="__codelineno-20-22" name="__codelineno-20-22" href="#__codelineno-20-22"></a><span class="w">        </span><span class="nt">&quot;source_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;chunk-001&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-23" name="__codelineno-20-23" href="#__codelineno-20-23"></a><span class="w">        </span><span class="nt">&quot;file_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;긴급출동_메뉴얼.pdf&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-24" name="__codelineno-20-24" href="#__codelineno-20-24"></a><span class="w">        </span><span class="nt">&quot;reference_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1&quot;</span>
+<a id="__codelineno-20-25" name="__codelineno-20-25" href="#__codelineno-20-25"></a><span class="w">      </span><span class="p">}</span>
+<a id="__codelineno-20-26" name="__codelineno-20-26" href="#__codelineno-20-26"></a><span class="w">    </span><span class="p">],</span>
+<a id="__codelineno-20-27" name="__codelineno-20-27" href="#__codelineno-20-27"></a><span class="w">    </span><span class="nt">&quot;chunks&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-20-28" name="__codelineno-20-28" href="#__codelineno-20-28"></a><span class="w">      </span><span class="p">{</span>
+<a id="__codelineno-20-29" name="__codelineno-20-29" href="#__codelineno-20-29"></a><span class="w">        </span><span class="nt">&quot;content&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;긴급출동 서비스는 고객이 차량 고장 등의...&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-30" name="__codelineno-20-30" href="#__codelineno-20-30"></a><span class="w">        </span><span class="nt">&quot;file_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;긴급출동_메뉴얼.pdf&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-31" name="__codelineno-20-31" href="#__codelineno-20-31"></a><span class="w">        </span><span class="nt">&quot;chunk_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;chunk-001&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-32" name="__codelineno-20-32" href="#__codelineno-20-32"></a><span class="w">        </span><span class="nt">&quot;reference_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1&quot;</span>
+<a id="__codelineno-20-33" name="__codelineno-20-33" href="#__codelineno-20-33"></a><span class="w">      </span><span class="p">}</span>
+<a id="__codelineno-20-34" name="__codelineno-20-34" href="#__codelineno-20-34"></a><span class="w">    </span><span class="p">],</span>
+<a id="__codelineno-20-35" name="__codelineno-20-35" href="#__codelineno-20-35"></a><span class="w">    </span><span class="nt">&quot;references&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-20-36" name="__codelineno-20-36" href="#__codelineno-20-36"></a><span class="w">      </span><span class="p">{</span>
+<a id="__codelineno-20-37" name="__codelineno-20-37" href="#__codelineno-20-37"></a><span class="w">        </span><span class="nt">&quot;reference_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-38" name="__codelineno-20-38" href="#__codelineno-20-38"></a><span class="w">        </span><span class="nt">&quot;file_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;긴급출동_메뉴얼.pdf&quot;</span>
+<a id="__codelineno-20-39" name="__codelineno-20-39" href="#__codelineno-20-39"></a><span class="w">      </span><span class="p">}</span>
+<a id="__codelineno-20-40" name="__codelineno-20-40" href="#__codelineno-20-40"></a><span class="w">    </span><span class="p">]</span>
+<a id="__codelineno-20-41" name="__codelineno-20-41" href="#__codelineno-20-41"></a><span class="w">  </span><span class="p">},</span>
+<a id="__codelineno-20-42" name="__codelineno-20-42" href="#__codelineno-20-42"></a><span class="w">  </span><span class="nt">&quot;metadata&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-20-43" name="__codelineno-20-43" href="#__codelineno-20-43"></a><span class="w">    </span><span class="nt">&quot;query_mode&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;local&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-44" name="__codelineno-20-44" href="#__codelineno-20-44"></a><span class="w">    </span><span class="nt">&quot;keywords&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-20-45" name="__codelineno-20-45" href="#__codelineno-20-45"></a><span class="w">      </span><span class="nt">&quot;high_level&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;서비스&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;긴급&quot;</span><span class="p">],</span>
+<a id="__codelineno-20-46" name="__codelineno-20-46" href="#__codelineno-20-46"></a><span class="w">      </span><span class="nt">&quot;low_level&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;긴급출동&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;출동서비스&quot;</span><span class="p">]</span>
+<a id="__codelineno-20-47" name="__codelineno-20-47" href="#__codelineno-20-47"></a><span class="w">    </span><span class="p">},</span>
+<a id="__codelineno-20-48" name="__codelineno-20-48" href="#__codelineno-20-48"></a><span class="w">    </span><span class="nt">&quot;processing_info&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-20-49" name="__codelineno-20-49" href="#__codelineno-20-49"></a><span class="w">      </span><span class="nt">&quot;total_entities_found&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">15</span><span class="p">,</span>
+<a id="__codelineno-20-50" name="__codelineno-20-50" href="#__codelineno-20-50"></a><span class="w">      </span><span class="nt">&quot;total_relations_found&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span>
+<a id="__codelineno-20-51" name="__codelineno-20-51" href="#__codelineno-20-51"></a><span class="w">      </span><span class="nt">&quot;entities_after_truncation&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">5</span><span class="p">,</span>
+<a id="__codelineno-20-52" name="__codelineno-20-52" href="#__codelineno-20-52"></a><span class="w">      </span><span class="nt">&quot;relations_after_truncation&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span>
+<a id="__codelineno-20-53" name="__codelineno-20-53" href="#__codelineno-20-53"></a><span class="w">      </span><span class="nt">&quot;final_chunks_count&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">5</span>
+<a id="__codelineno-20-54" name="__codelineno-20-54" href="#__codelineno-20-54"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-20-55" name="__codelineno-20-55" href="#__codelineno-20-55"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-20-56" name="__codelineno-20-56" href="#__codelineno-20-56"></a><span class="p">}</span>
+</code></pre></div>
+<h3 id="54-querydataresponse">5.4 응답 모델 (QueryDataResponse)<a class="headerlink" href="#54-querydataresponse" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>필드</th>
+<th>타입</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>status</code></td>
+<td>string</td>
+<td><code>"success"</code> 또는 <code>"failure"</code></td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td>string</td>
+<td>상태 메시지</td>
+</tr>
+<tr>
+<td><code>data</code></td>
+<td>object</td>
+<td>검색 결과 데이터</td>
+</tr>
+<tr>
+<td><code>data.entities</code></td>
+<td>object[]</td>
+<td>엔티티 목록</td>
+</tr>
+<tr>
+<td><code>data.relationships</code></td>
+<td>object[]</td>
+<td>관계 목록</td>
+</tr>
+<tr>
+<td><code>data.chunks</code></td>
+<td>object[]</td>
+<td>텍스트 청크 목록</td>
+</tr>
+<tr>
+<td><code>data.references</code></td>
+<td>object[]</td>
+<td>레퍼런스 목록</td>
+</tr>
+<tr>
+<td><code>metadata</code></td>
+<td>object</td>
+<td>쿼리 메타데이터</td>
+</tr>
+<tr>
+<td><code>metadata.query_mode</code></td>
+<td>string</td>
+<td>사용된 쿼리 모드</td>
+</tr>
+<tr>
+<td><code>metadata.keywords</code></td>
+<td>object</td>
+<td>추출된 키워드 (high_level, low_level)</td>
+</tr>
+<tr>
+<td><code>metadata.processing_info</code></td>
+<td>object</td>
+<td>처리 통계</td>
+</tr>
+</tbody>
+</table>
+<h3 id="55">5.5 모드별 데이터 반환 차이<a class="headerlink" href="#55" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>모드</th>
+<th style="text-align: center;">entities</th>
+<th style="text-align: center;">relationships</th>
+<th style="text-align: center;">chunks</th>
+<th style="text-align: center;">references</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>local</td>
+<td style="text-align: center;">✅ 있음</td>
+<td style="text-align: center;">✅ 있음</td>
+<td style="text-align: center;">✅ 있음</td>
+<td style="text-align: center;">✅</td>
+</tr>
+<tr>
+<td>global</td>
+<td style="text-align: center;">✅ 있음</td>
+<td style="text-align: center;">✅ 있음</td>
+<td style="text-align: center;">✅ 있음</td>
+<td style="text-align: center;">✅</td>
+</tr>
+<tr>
+<td>hybrid</td>
+<td style="text-align: center;">✅ 있음</td>
+<td style="text-align: center;">✅ 있음</td>
+<td style="text-align: center;">✅ 있음</td>
+<td style="text-align: center;">✅</td>
+</tr>
+<tr>
+<td>mix</td>
+<td style="text-align: center;">✅ 있음</td>
+<td style="text-align: center;">✅ 있음</td>
+<td style="text-align: center;">✅ 있음</td>
+<td style="text-align: center;">✅</td>
+</tr>
+<tr>
+<td>naive</td>
+<td style="text-align: center;">❌ 빈 배열</td>
+<td style="text-align: center;">❌ 빈 배열</td>
+<td style="text-align: center;">✅ 있음</td>
+<td style="text-align: center;">✅</td>
+</tr>
+<tr>
+<td>bypass</td>
+<td style="text-align: center;">❌ 빈 배열</td>
+<td style="text-align: center;">❌ 빈 배열</td>
+<td style="text-align: center;">❌ 빈 배열</td>
+<td style="text-align: center;">❌ 빈 배열</td>
+</tr>
+</tbody>
+</table>
+<h3 id="56">5.6 내부 동작<a class="headerlink" href="#56" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="c1"># query_routes.py</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="n">param</span> <span class="o">=</span> <span class="n">request</span><span class="o">.</span><span class="n">to_query_params</span><span class="p">(</span><span class="kc">False</span><span class="p">)</span>  <span class="c1"># stream=False 강제</span>
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="n">response</span> <span class="o">=</span> <span class="k">await</span> <span class="n">workspace_rag</span><span class="o">.</span><span class="n">aquery_data</span><span class="p">(</span><span class="n">request</span><span class="o">.</span><span class="n">query</span><span class="p">,</span> <span class="n">param</span><span class="o">=</span><span class="n">param</span><span class="p">)</span>
+</code></pre></div>
+<p><code>aquery_data()</code>는 내부적으로:
+1. <code>only_need_context=True</code>와 <code>stream=False</code>를 강제 설정
+2. <code>kg_query()</code> 또는 <code>naive_query()</code>를 호출하되 LLM 생성 단계를 건너뜀
+3. 검색된 엔티티, 관계, 청크, 레퍼런스를 구조화하여 반환</p>
+<h3 id="57">5.7 적합한 상황<a class="headerlink" href="#57" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>커스텀 RAG 파이프라인</strong>: 검색 결과를 받아 자체 LLM으로 처리</li>
+<li><strong>검색 품질 분석</strong>: 어떤 엔티티/관계가 검색되는지 확인</li>
+<li><strong>디버깅</strong>: 검색 파이프라인 동작 검증</li>
+<li><strong>시각화</strong>: 지식 그래프 탐색 UI</li>
+<li><strong>데이터 내보내기</strong>: 검색 결과를 외부 시스템에 전달</li>
+<li><strong>키워드 확인</strong>: LLM이 어떤 키워드를 추출했는지 확인</li>
+<li><strong>처리 통계 확인</strong>: 토큰 절삭 전후 엔티티/관계 수 비교</li>
+</ul>
+<hr />
+<h2 id="6">6. 응답 스키마 상세<a class="headerlink" href="#6" title="Permanent link">&para;</a></h2>
+<h3 id="61-referenceitem">6.1 ReferenceItem 스키마<a class="headerlink" href="#61-referenceitem" title="Permanent link">&para;</a></h3>
+<p><code>/api/query</code>와 <code>/api/query/stream</code>의 레퍼런스 항목:</p>
+<table>
+<thead>
+<tr>
+<th>필드</th>
+<th>타입</th>
+<th>조건</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>reference_id</code></td>
+<td>string</td>
+<td>항상</td>
+<td>고유 레퍼런스 ID (숫자 문자열)</td>
+</tr>
+<tr>
+<td><code>doc_id</code></td>
+<td>string | null</td>
+<td>있으면</td>
+<td>시스템 문서 ID</td>
+</tr>
+<tr>
+<td><code>file_path</code></td>
+<td>string</td>
+<td>항상</td>
+<td>소스 파일 경로</td>
+</tr>
+<tr>
+<td><code>download_url</code></td>
+<td>string | null</td>
+<td>S3 활성화 시</td>
+<td>S3 다운로드 URL</td>
+</tr>
+<tr>
+<td><code>content</code></td>
+<td>string[] | null</td>
+<td><code>include_chunk_content=true</code></td>
+<td>청크 텍스트 목록</td>
+</tr>
+<tr>
+<td><code>structured_content</code></td>
+<td>object[] | null</td>
+<td><code>include_chunk_content=true</code></td>
+<td>구조화된 청크 콘텐츠</td>
+</tr>
+<tr>
+<td><code>score</code></td>
+<td>float | null</td>
+<td><code>include_chunk_content=true</code></td>
+<td>최고 관련도 점수</td>
+</tr>
+<tr>
+<td><code>scores</code></td>
+<td>float[] | null</td>
+<td><code>include_chunk_content=true</code></td>
+<td>청크별 관련도 점수</td>
+</tr>
+</tbody>
+</table>
+<h3 id="62-include_chunk_contenttrue">6.2 include_chunk_content=true 시 레퍼런스 구조<a class="headerlink" href="#62-include_chunk_contenttrue" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="p">{</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="w">  </span><span class="nt">&quot;reference_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1&quot;</span><span class="p">,</span>
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="w">  </span><span class="nt">&quot;doc_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;doc-abc123&quot;</span><span class="p">,</span>
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="w">  </span><span class="nt">&quot;file_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;문서.pdf&quot;</span><span class="p">,</span>
+<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="w">  </span><span class="nt">&quot;download_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://s3.example.com/...&quot;</span><span class="p">,</span>
+<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="w">  </span><span class="nt">&quot;content&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="w">    </span><span class="s2">&quot;첫 번째 청크 텍스트...&quot;</span><span class="p">,</span>
+<a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a><span class="w">    </span><span class="s2">&quot;두 번째 청크 텍스트...&quot;</span>
+<a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a><span class="w">  </span><span class="p">],</span>
+<a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a><span class="w">  </span><span class="nt">&quot;structured_content&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-22-11" name="__codelineno-22-11" href="#__codelineno-22-11"></a><span class="w">    </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;table&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;표 분석 결과...&quot;</span><span class="p">}</span>
+<a id="__codelineno-22-12" name="__codelineno-22-12" href="#__codelineno-22-12"></a><span class="w">  </span><span class="p">],</span>
+<a id="__codelineno-22-13" name="__codelineno-22-13" href="#__codelineno-22-13"></a><span class="w">  </span><span class="nt">&quot;score&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.92</span><span class="p">,</span>
+<a id="__codelineno-22-14" name="__codelineno-22-14" href="#__codelineno-22-14"></a><span class="w">  </span><span class="nt">&quot;scores&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="mf">0.92</span><span class="p">,</span><span class="w"> </span><span class="mf">0.85</span><span class="p">]</span>
+<a id="__codelineno-22-15" name="__codelineno-22-15" href="#__codelineno-22-15"></a><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li><code>content</code>: 같은 파일에서 검색된 모든 청크의 텍스트 (관련도 내림차순)</li>
+<li><code>structured_content</code>: 멀티모달 처리된 구조화 콘텐츠 (이미지/테이블 분석 결과 등)</li>
+<li><code>score</code>: 해당 파일의 최고 관련도 점수</li>
+<li><code>scores</code>: <code>content</code>/<code>structured_content</code> 배열과 병렬인 청크별 점수</li>
+</ul>
+<h3 id="63-entity-querydata">6.3 Entity 스키마 (query/data)<a class="headerlink" href="#63-entity-querydata" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>필드</th>
+<th>타입</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>entity_name</code></td>
+<td>string</td>
+<td>엔티티 이름</td>
+</tr>
+<tr>
+<td><code>entity_type</code></td>
+<td>string</td>
+<td>엔티티 타입 (CONCEPT, PERSON, ORG 등)</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>string</td>
+<td>엔티티 설명</td>
+</tr>
+<tr>
+<td><code>source_id</code></td>
+<td>string</td>
+<td>원본 청크 ID(들) (<code>&lt;SEP&gt;</code> 구분)</td>
+</tr>
+<tr>
+<td><code>file_path</code></td>
+<td>string</td>
+<td>소스 파일 경로</td>
+</tr>
+<tr>
+<td><code>reference_id</code></td>
+<td>string</td>
+<td>레퍼런스 ID</td>
+</tr>
+</tbody>
+</table>
+<h3 id="64-relationship-querydata">6.4 Relationship 스키마 (query/data)<a class="headerlink" href="#64-relationship-querydata" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>필드</th>
+<th>타입</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>src_id</code></td>
+<td>string</td>
+<td>소스 엔티티 이름</td>
+</tr>
+<tr>
+<td><code>tgt_id</code></td>
+<td>string</td>
+<td>타겟 엔티티 이름</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>string</td>
+<td>관계 설명</td>
+</tr>
+<tr>
+<td><code>keywords</code></td>
+<td>string</td>
+<td>관련 키워드</td>
+</tr>
+<tr>
+<td><code>weight</code></td>
+<td>number</td>
+<td>관계 가중치</td>
+</tr>
+<tr>
+<td><code>source_id</code></td>
+<td>string</td>
+<td>원본 청크 ID(들)</td>
+</tr>
+<tr>
+<td><code>file_path</code></td>
+<td>string</td>
+<td>소스 파일 경로</td>
+</tr>
+<tr>
+<td><code>reference_id</code></td>
+<td>string</td>
+<td>레퍼런스 ID</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="7">7. 워크스페이스 결정 규칙<a class="headerlink" href="#7" title="Permanent link">&para;</a></h2>
+<p>3개 API 모두 동일한 워크스페이스 결정 로직을 사용합니다:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>우선순위 1: 요청 body의 &quot;workspace&quot; 필드
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>    │ (비어있으면)
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a>    ▼
+<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a>우선순위 2: HTTP 헤더 &quot;LIGHTRAG-WORKSPACE&quot;
+<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a>    │ (비어있으면)
+<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a>    ▼
+<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a>우선순위 3: 서버 기본 워크스페이스
+<a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a>    │ (미설정이면)
+<a id="__codelineno-23-9" name="__codelineno-23-9" href="#__codelineno-23-9"></a>    ▼
+<a id="__codelineno-23-10" name="__codelineno-23-10" href="#__codelineno-23-10"></a>폴백: &quot;base&quot;
+</code></pre></div>
+<p><strong>프론트엔드 구현 시 참고:</strong>
+- <code>axiosInstance</code> 인터셉터가 자동으로 <code>LIGHTRAG-WORKSPACE</code> 헤더를 추가
+- <code>fetch()</code> 직접 사용 시 헤더를 수동으로 추가해야 함</p>
+<hr />
+<h2 id="8-api">8. 사용 시나리오별 추천 API<a class="headerlink" href="#8-api" title="Permanent link">&para;</a></h2>
+<h3 id="81">8.1 시나리오 결정 트리<a class="headerlink" href="#81" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>질문: 사용자에게 LLM 답변을 보여줘야 하는가?
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>    │
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a>    ├── Yes → 실시간 표시가 필요한가?
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a>    │         │
+<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a>    │         ├── Yes → /api/query/stream (stream=true)
+<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a>    │         │
+<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a>    │         └── No → /api/query
+<a id="__codelineno-24-8" name="__codelineno-24-8" href="#__codelineno-24-8"></a>    │
+<a id="__codelineno-24-9" name="__codelineno-24-9" href="#__codelineno-24-9"></a>    └── No → 검색 데이터(엔티티/관계/청크)가 필요한가?
+<a id="__codelineno-24-10" name="__codelineno-24-10" href="#__codelineno-24-10"></a>              │
+<a id="__codelineno-24-11" name="__codelineno-24-11" href="#__codelineno-24-11"></a>              ├── Yes → /api/query/data
+<a id="__codelineno-24-12" name="__codelineno-24-12" href="#__codelineno-24-12"></a>              │
+<a id="__codelineno-24-13" name="__codelineno-24-13" href="#__codelineno-24-13"></a>              └── No → API 호출 불필요
+</code></pre></div>
+<h3 id="82">8.2 구체적 시나리오별 추천<a class="headerlink" href="#82" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>시나리오</th>
+<th>추천 API</th>
+<th>추천 모드</th>
+<th>핵심 파라미터</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>챗봇 UI</strong></td>
+<td><code>/query/stream</code></td>
+<td><code>mix</code></td>
+<td><code>stream=true</code>, <code>include_references=true</code></td>
+</tr>
+<tr>
+<td><strong>검색 결과 미리보기</strong></td>
+<td><code>/query/data</code></td>
+<td><code>mix</code></td>
+<td><code>chunk_top_k=5</code></td>
+</tr>
+<tr>
+<td><strong>배치 질의응답</strong></td>
+<td><code>/query</code></td>
+<td><code>mix</code></td>
+<td><code>include_references=true</code></td>
+</tr>
+<tr>
+<td><strong>지식그래프 탐색</strong></td>
+<td><code>/query/data</code></td>
+<td><code>local</code></td>
+<td><code>top_k=20</code></td>
+</tr>
+<tr>
+<td><strong>관계 분석</strong></td>
+<td><code>/query/data</code></td>
+<td><code>global</code></td>
+<td><code>top_k=30</code></td>
+</tr>
+<tr>
+<td><strong>문서 검색</strong></td>
+<td><code>/query/data</code></td>
+<td><code>naive</code></td>
+<td><code>chunk_top_k=10</code></td>
+</tr>
+<tr>
+<td><strong>LLM 직접 대화</strong></td>
+<td><code>/query/stream</code></td>
+<td><code>bypass</code></td>
+<td><code>stream=true</code></td>
+</tr>
+<tr>
+<td><strong>검색 품질 평가</strong></td>
+<td><code>/query/data</code></td>
+<td>모든 모드</td>
+<td><code>enable_rerank=true</code></td>
+</tr>
+<tr>
+<td><strong>출처 표시 필요</strong></td>
+<td><code>/query</code></td>
+<td><code>mix</code></td>
+<td><code>include_references=true</code>, <code>include_chunk_content=true</code></td>
+</tr>
+<tr>
+<td><strong>다국어 응답</strong></td>
+<td><code>/query</code></td>
+<td><code>mix</code></td>
+<td><code>response_type="한국어로 3문장"</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="9">9. 클라이언트 구현 가이드<a class="headerlink" href="#9" title="Permanent link">&para;</a></h2>
+<h3 id="91-javascripttypescript-apiquery">9.1 JavaScript/TypeScript — /api/query<a class="headerlink" href="#91-javascripttypescript-apiquery" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="kd">const</span><span class="w"> </span><span class="nx">response</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">fetch</span><span class="p">(</span><span class="s1">&#39;/api/query&#39;</span><span class="p">,</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="w">  </span><span class="nx">method</span><span class="o">:</span><span class="w"> </span><span class="s1">&#39;POST&#39;</span><span class="p">,</span>
+<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="w">  </span><span class="nx">headers</span><span class="o">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a><span class="w">    </span><span class="s1">&#39;Content-Type&#39;</span><span class="o">:</span><span class="w"> </span><span class="s1">&#39;application/json&#39;</span><span class="p">,</span>
+<a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a><span class="w">    </span><span class="s1">&#39;LIGHTRAG-WORKSPACE&#39;</span><span class="o">:</span><span class="w"> </span><span class="s1">&#39;my-workspace&#39;</span><span class="p">,</span>
+<a id="__codelineno-25-6" name="__codelineno-25-6" href="#__codelineno-25-6"></a><span class="w">  </span><span class="p">},</span>
+<a id="__codelineno-25-7" name="__codelineno-25-7" href="#__codelineno-25-7"></a><span class="w">  </span><span class="nx">body</span><span class="o">:</span><span class="w"> </span><span class="kt">JSON.stringify</span><span class="p">({</span>
+<a id="__codelineno-25-8" name="__codelineno-25-8" href="#__codelineno-25-8"></a><span class="w">    </span><span class="nx">query</span><span class="o">:</span><span class="w"> </span><span class="s1">&#39;긴급출동 서비스 절차는?&#39;</span><span class="p">,</span>
+<a id="__codelineno-25-9" name="__codelineno-25-9" href="#__codelineno-25-9"></a><span class="w">    </span><span class="nx">mode</span><span class="o">:</span><span class="w"> </span><span class="s1">&#39;mix&#39;</span><span class="p">,</span>
+<a id="__codelineno-25-10" name="__codelineno-25-10" href="#__codelineno-25-10"></a><span class="w">    </span><span class="nx">include_references</span><span class="o">:</span><span class="w"> </span><span class="kt">true</span><span class="p">,</span>
+<a id="__codelineno-25-11" name="__codelineno-25-11" href="#__codelineno-25-11"></a><span class="w">  </span><span class="p">}),</span>
+<a id="__codelineno-25-12" name="__codelineno-25-12" href="#__codelineno-25-12"></a><span class="p">});</span>
+<a id="__codelineno-25-13" name="__codelineno-25-13" href="#__codelineno-25-13"></a>
+<a id="__codelineno-25-14" name="__codelineno-25-14" href="#__codelineno-25-14"></a><span class="kd">const</span><span class="w"> </span><span class="nx">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">response</span><span class="p">.</span><span class="nx">json</span><span class="p">();</span>
+<a id="__codelineno-25-15" name="__codelineno-25-15" href="#__codelineno-25-15"></a><span class="nx">console</span><span class="p">.</span><span class="nx">log</span><span class="p">(</span><span class="nx">data</span><span class="p">.</span><span class="nx">response</span><span class="p">);</span><span class="w">       </span><span class="c1">// LLM 답변</span>
+<a id="__codelineno-25-16" name="__codelineno-25-16" href="#__codelineno-25-16"></a><span class="nx">console</span><span class="p">.</span><span class="nx">log</span><span class="p">(</span><span class="nx">data</span><span class="p">.</span><span class="nx">references</span><span class="p">);</span><span class="w">     </span><span class="c1">// 레퍼런스 목록</span>
+</code></pre></div>
+<h3 id="92-javascripttypescript-apiquerystream">9.2 JavaScript/TypeScript — /api/query/stream<a class="headerlink" href="#92-javascripttypescript-apiquerystream" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="kd">const</span><span class="w"> </span><span class="nx">response</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">fetch</span><span class="p">(</span><span class="s1">&#39;/api/query/stream&#39;</span><span class="p">,</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="w">  </span><span class="nx">method</span><span class="o">:</span><span class="w"> </span><span class="s1">&#39;POST&#39;</span><span class="p">,</span>
+<a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a><span class="w">  </span><span class="nx">headers</span><span class="o">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a><span class="w">    </span><span class="s1">&#39;Content-Type&#39;</span><span class="o">:</span><span class="w"> </span><span class="s1">&#39;application/json&#39;</span><span class="p">,</span>
+<a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a><span class="w">    </span><span class="s1">&#39;LIGHTRAG-WORKSPACE&#39;</span><span class="o">:</span><span class="w"> </span><span class="s1">&#39;my-workspace&#39;</span><span class="p">,</span>
+<a id="__codelineno-26-6" name="__codelineno-26-6" href="#__codelineno-26-6"></a><span class="w">  </span><span class="p">},</span>
+<a id="__codelineno-26-7" name="__codelineno-26-7" href="#__codelineno-26-7"></a><span class="w">  </span><span class="nx">body</span><span class="o">:</span><span class="w"> </span><span class="kt">JSON.stringify</span><span class="p">({</span>
+<a id="__codelineno-26-8" name="__codelineno-26-8" href="#__codelineno-26-8"></a><span class="w">    </span><span class="nx">query</span><span class="o">:</span><span class="w"> </span><span class="s1">&#39;긴급출동 서비스 절차는?&#39;</span><span class="p">,</span>
+<a id="__codelineno-26-9" name="__codelineno-26-9" href="#__codelineno-26-9"></a><span class="w">    </span><span class="nx">mode</span><span class="o">:</span><span class="w"> </span><span class="s1">&#39;mix&#39;</span><span class="p">,</span>
+<a id="__codelineno-26-10" name="__codelineno-26-10" href="#__codelineno-26-10"></a><span class="w">    </span><span class="nx">stream</span><span class="o">:</span><span class="w"> </span><span class="kt">true</span><span class="p">,</span>
+<a id="__codelineno-26-11" name="__codelineno-26-11" href="#__codelineno-26-11"></a><span class="w">    </span><span class="nx">include_references</span><span class="o">:</span><span class="w"> </span><span class="kt">true</span><span class="p">,</span>
+<a id="__codelineno-26-12" name="__codelineno-26-12" href="#__codelineno-26-12"></a><span class="w">  </span><span class="p">}),</span>
+<a id="__codelineno-26-13" name="__codelineno-26-13" href="#__codelineno-26-13"></a><span class="p">});</span>
+<a id="__codelineno-26-14" name="__codelineno-26-14" href="#__codelineno-26-14"></a>
+<a id="__codelineno-26-15" name="__codelineno-26-15" href="#__codelineno-26-15"></a><span class="kd">const</span><span class="w"> </span><span class="nx">reader</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">response</span><span class="p">.</span><span class="nx">body</span><span class="o">?</span><span class="p">.</span><span class="nx">getReader</span><span class="p">();</span>
+<a id="__codelineno-26-16" name="__codelineno-26-16" href="#__codelineno-26-16"></a><span class="kd">const</span><span class="w"> </span><span class="nx">decoder</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="ow">new</span><span class="w"> </span><span class="nx">TextDecoder</span><span class="p">();</span>
+<a id="__codelineno-26-17" name="__codelineno-26-17" href="#__codelineno-26-17"></a><span class="kd">let</span><span class="w"> </span><span class="nx">references</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">null</span><span class="p">;</span>
+<a id="__codelineno-26-18" name="__codelineno-26-18" href="#__codelineno-26-18"></a><span class="kd">let</span><span class="w"> </span><span class="nx">fullResponse</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;&#39;</span><span class="p">;</span>
+<a id="__codelineno-26-19" name="__codelineno-26-19" href="#__codelineno-26-19"></a>
+<a id="__codelineno-26-20" name="__codelineno-26-20" href="#__codelineno-26-20"></a><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="kc">true</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-26-21" name="__codelineno-26-21" href="#__codelineno-26-21"></a><span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">done</span><span class="p">,</span><span class="w"> </span><span class="nx">value</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">reader</span><span class="o">!</span><span class="p">.</span><span class="nx">read</span><span class="p">();</span>
+<a id="__codelineno-26-22" name="__codelineno-26-22" href="#__codelineno-26-22"></a><span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">done</span><span class="p">)</span><span class="w"> </span><span class="k">break</span><span class="p">;</span>
+<a id="__codelineno-26-23" name="__codelineno-26-23" href="#__codelineno-26-23"></a>
+<a id="__codelineno-26-24" name="__codelineno-26-24" href="#__codelineno-26-24"></a><span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">lines</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">decoder</span><span class="p">.</span><span class="nx">decode</span><span class="p">(</span><span class="nx">value</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">stream</span><span class="o">:</span><span class="w"> </span><span class="kt">true</span><span class="w"> </span><span class="p">}).</span><span class="nx">split</span><span class="p">(</span><span class="s1">&#39;\n&#39;</span><span class="p">);</span>
+<a id="__codelineno-26-25" name="__codelineno-26-25" href="#__codelineno-26-25"></a><span class="w">  </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kd">const</span><span class="w"> </span><span class="nx">line</span><span class="w"> </span><span class="k">of</span><span class="w"> </span><span class="nx">lines</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-26-26" name="__codelineno-26-26" href="#__codelineno-26-26"></a><span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="nx">line</span><span class="p">.</span><span class="nx">trim</span><span class="p">())</span><span class="w"> </span><span class="k">continue</span><span class="p">;</span>
+<a id="__codelineno-26-27" name="__codelineno-26-27" href="#__codelineno-26-27"></a><span class="w">    </span><span class="kd">const</span><span class="w"> </span><span class="nx">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">JSON</span><span class="p">.</span><span class="nx">parse</span><span class="p">(</span><span class="nx">line</span><span class="p">);</span>
+<a id="__codelineno-26-28" name="__codelineno-26-28" href="#__codelineno-26-28"></a>
+<a id="__codelineno-26-29" name="__codelineno-26-29" href="#__codelineno-26-29"></a><span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">data</span><span class="p">.</span><span class="nx">references</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-26-30" name="__codelineno-26-30" href="#__codelineno-26-30"></a><span class="w">      </span><span class="nx">references</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">data</span><span class="p">.</span><span class="nx">references</span><span class="p">;</span>
+<a id="__codelineno-26-31" name="__codelineno-26-31" href="#__codelineno-26-31"></a><span class="w">      </span><span class="c1">// 레퍼런스를 먼저 UI에 표시</span>
+<a id="__codelineno-26-32" name="__codelineno-26-32" href="#__codelineno-26-32"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-26-33" name="__codelineno-26-33" href="#__codelineno-26-33"></a><span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">data</span><span class="p">.</span><span class="nx">response</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-26-34" name="__codelineno-26-34" href="#__codelineno-26-34"></a><span class="w">      </span><span class="nx">fullResponse</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="nx">data</span><span class="p">.</span><span class="nx">response</span><span class="p">;</span>
+<a id="__codelineno-26-35" name="__codelineno-26-35" href="#__codelineno-26-35"></a><span class="w">      </span><span class="c1">// 청크를 실시간으로 UI에 추가</span>
+<a id="__codelineno-26-36" name="__codelineno-26-36" href="#__codelineno-26-36"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-26-37" name="__codelineno-26-37" href="#__codelineno-26-37"></a><span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">data</span><span class="p">.</span><span class="nx">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-26-38" name="__codelineno-26-38" href="#__codelineno-26-38"></a><span class="w">      </span><span class="nx">console</span><span class="p">.</span><span class="nx">error</span><span class="p">(</span><span class="s1">&#39;스트리밍 에러:&#39;</span><span class="p">,</span><span class="w"> </span><span class="nx">data</span><span class="p">.</span><span class="nx">error</span><span class="p">);</span>
+<a id="__codelineno-26-39" name="__codelineno-26-39" href="#__codelineno-26-39"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-26-40" name="__codelineno-26-40" href="#__codelineno-26-40"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-26-41" name="__codelineno-26-41" href="#__codelineno-26-41"></a><span class="p">}</span>
+</code></pre></div>
+<h3 id="93-javascripttypescript-apiquerydata">9.3 JavaScript/TypeScript — /api/query/data<a class="headerlink" href="#93-javascripttypescript-apiquerydata" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="kd">const</span><span class="w"> </span><span class="nx">response</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">fetch</span><span class="p">(</span><span class="s1">&#39;/api/query/data&#39;</span><span class="p">,</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="w">  </span><span class="nx">method</span><span class="o">:</span><span class="w"> </span><span class="s1">&#39;POST&#39;</span><span class="p">,</span>
+<a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a><span class="w">  </span><span class="nx">headers</span><span class="o">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a><span class="w">    </span><span class="s1">&#39;Content-Type&#39;</span><span class="o">:</span><span class="w"> </span><span class="s1">&#39;application/json&#39;</span><span class="p">,</span>
+<a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a><span class="w">    </span><span class="s1">&#39;LIGHTRAG-WORKSPACE&#39;</span><span class="o">:</span><span class="w"> </span><span class="s1">&#39;my-workspace&#39;</span><span class="p">,</span>
+<a id="__codelineno-27-6" name="__codelineno-27-6" href="#__codelineno-27-6"></a><span class="w">  </span><span class="p">},</span>
+<a id="__codelineno-27-7" name="__codelineno-27-7" href="#__codelineno-27-7"></a><span class="w">  </span><span class="nx">body</span><span class="o">:</span><span class="w"> </span><span class="kt">JSON.stringify</span><span class="p">({</span>
+<a id="__codelineno-27-8" name="__codelineno-27-8" href="#__codelineno-27-8"></a><span class="w">    </span><span class="nx">query</span><span class="o">:</span><span class="w"> </span><span class="s1">&#39;긴급출동 서비스&#39;</span><span class="p">,</span>
+<a id="__codelineno-27-9" name="__codelineno-27-9" href="#__codelineno-27-9"></a><span class="w">    </span><span class="nx">mode</span><span class="o">:</span><span class="w"> </span><span class="s1">&#39;local&#39;</span><span class="p">,</span>
+<a id="__codelineno-27-10" name="__codelineno-27-10" href="#__codelineno-27-10"></a><span class="w">    </span><span class="nx">top_k</span><span class="o">:</span><span class="w"> </span><span class="kt">10</span><span class="p">,</span>
+<a id="__codelineno-27-11" name="__codelineno-27-11" href="#__codelineno-27-11"></a><span class="w">  </span><span class="p">}),</span>
+<a id="__codelineno-27-12" name="__codelineno-27-12" href="#__codelineno-27-12"></a><span class="p">});</span>
+<a id="__codelineno-27-13" name="__codelineno-27-13" href="#__codelineno-27-13"></a>
+<a id="__codelineno-27-14" name="__codelineno-27-14" href="#__codelineno-27-14"></a><span class="kd">const</span><span class="w"> </span><span class="nx">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">response</span><span class="p">.</span><span class="nx">json</span><span class="p">();</span>
+<a id="__codelineno-27-15" name="__codelineno-27-15" href="#__codelineno-27-15"></a><span class="nx">console</span><span class="p">.</span><span class="nx">log</span><span class="p">(</span><span class="nx">data</span><span class="p">.</span><span class="nx">status</span><span class="p">);</span><span class="w">                    </span><span class="c1">// &quot;success&quot;</span>
+<a id="__codelineno-27-16" name="__codelineno-27-16" href="#__codelineno-27-16"></a><span class="nx">console</span><span class="p">.</span><span class="nx">log</span><span class="p">(</span><span class="nx">data</span><span class="p">.</span><span class="nx">data</span><span class="p">.</span><span class="nx">entities</span><span class="p">);</span><span class="w">             </span><span class="c1">// 엔티티 목록</span>
+<a id="__codelineno-27-17" name="__codelineno-27-17" href="#__codelineno-27-17"></a><span class="nx">console</span><span class="p">.</span><span class="nx">log</span><span class="p">(</span><span class="nx">data</span><span class="p">.</span><span class="nx">data</span><span class="p">.</span><span class="nx">relationships</span><span class="p">);</span><span class="w">        </span><span class="c1">// 관계 목록</span>
+<a id="__codelineno-27-18" name="__codelineno-27-18" href="#__codelineno-27-18"></a><span class="nx">console</span><span class="p">.</span><span class="nx">log</span><span class="p">(</span><span class="nx">data</span><span class="p">.</span><span class="nx">data</span><span class="p">.</span><span class="nx">chunks</span><span class="p">);</span><span class="w">               </span><span class="c1">// 청크 목록</span>
+<a id="__codelineno-27-19" name="__codelineno-27-19" href="#__codelineno-27-19"></a><span class="nx">console</span><span class="p">.</span><span class="nx">log</span><span class="p">(</span><span class="nx">data</span><span class="p">.</span><span class="nx">metadata</span><span class="p">.</span><span class="nx">keywords</span><span class="p">);</span><span class="w">         </span><span class="c1">// 추출된 키워드</span>
+<a id="__codelineno-27-20" name="__codelineno-27-20" href="#__codelineno-27-20"></a><span class="nx">console</span><span class="p">.</span><span class="nx">log</span><span class="p">(</span><span class="nx">data</span><span class="p">.</span><span class="nx">metadata</span><span class="p">.</span><span class="nx">processing_info</span><span class="p">);</span><span class="w">  </span><span class="c1">// 처리 통계</span>
+</code></pre></div>
+<h3 id="94-python-apiquerystream">9.4 Python — /api/query/stream<a class="headerlink" href="#94-python-apiquerystream" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">httpx</span>
+<a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a>
+<a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">stream_query</span><span class="p">(</span><span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">workspace</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;base&quot;</span><span class="p">):</span>
+<a id="__codelineno-28-5" name="__codelineno-28-5" href="#__codelineno-28-5"></a>    <span class="k">async</span> <span class="k">with</span> <span class="n">httpx</span><span class="o">.</span><span class="n">AsyncClient</span><span class="p">()</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
+<a id="__codelineno-28-6" name="__codelineno-28-6" href="#__codelineno-28-6"></a>        <span class="k">async</span> <span class="k">with</span> <span class="n">client</span><span class="o">.</span><span class="n">stream</span><span class="p">(</span>
+<a id="__codelineno-28-7" name="__codelineno-28-7" href="#__codelineno-28-7"></a>            <span class="s2">&quot;POST&quot;</span><span class="p">,</span>
+<a id="__codelineno-28-8" name="__codelineno-28-8" href="#__codelineno-28-8"></a>            <span class="s2">&quot;http://localhost:9422/api/query/stream&quot;</span><span class="p">,</span>
+<a id="__codelineno-28-9" name="__codelineno-28-9" href="#__codelineno-28-9"></a>            <span class="n">json</span><span class="o">=</span><span class="p">{</span>
+<a id="__codelineno-28-10" name="__codelineno-28-10" href="#__codelineno-28-10"></a>                <span class="s2">&quot;query&quot;</span><span class="p">:</span> <span class="n">query</span><span class="p">,</span>
+<a id="__codelineno-28-11" name="__codelineno-28-11" href="#__codelineno-28-11"></a>                <span class="s2">&quot;mode&quot;</span><span class="p">:</span> <span class="s2">&quot;mix&quot;</span><span class="p">,</span>
+<a id="__codelineno-28-12" name="__codelineno-28-12" href="#__codelineno-28-12"></a>                <span class="s2">&quot;stream&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-28-13" name="__codelineno-28-13" href="#__codelineno-28-13"></a>                <span class="s2">&quot;include_references&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-28-14" name="__codelineno-28-14" href="#__codelineno-28-14"></a>            <span class="p">},</span>
+<a id="__codelineno-28-15" name="__codelineno-28-15" href="#__codelineno-28-15"></a>            <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;LIGHTRAG-WORKSPACE&quot;</span><span class="p">:</span> <span class="n">workspace</span><span class="p">},</span>
+<a id="__codelineno-28-16" name="__codelineno-28-16" href="#__codelineno-28-16"></a>        <span class="p">)</span> <span class="k">as</span> <span class="n">response</span><span class="p">:</span>
+<a id="__codelineno-28-17" name="__codelineno-28-17" href="#__codelineno-28-17"></a>            <span class="k">async</span> <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">response</span><span class="o">.</span><span class="n">aiter_lines</span><span class="p">():</span>
+<a id="__codelineno-28-18" name="__codelineno-28-18" href="#__codelineno-28-18"></a>                <span class="k">if</span> <span class="ow">not</span> <span class="n">line</span><span class="o">.</span><span class="n">strip</span><span class="p">():</span>
+<a id="__codelineno-28-19" name="__codelineno-28-19" href="#__codelineno-28-19"></a>                    <span class="k">continue</span>
+<a id="__codelineno-28-20" name="__codelineno-28-20" href="#__codelineno-28-20"></a>                <span class="n">data</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">line</span><span class="p">)</span>
+<a id="__codelineno-28-21" name="__codelineno-28-21" href="#__codelineno-28-21"></a>
+<a id="__codelineno-28-22" name="__codelineno-28-22" href="#__codelineno-28-22"></a>                <span class="k">if</span> <span class="s2">&quot;references&quot;</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+<a id="__codelineno-28-23" name="__codelineno-28-23" href="#__codelineno-28-23"></a>                    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;References: </span><span class="si">{</span><span class="n">data</span><span class="p">[</span><span class="s1">&#39;references&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<a id="__codelineno-28-24" name="__codelineno-28-24" href="#__codelineno-28-24"></a>                <span class="k">if</span> <span class="s2">&quot;response&quot;</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+<a id="__codelineno-28-25" name="__codelineno-28-25" href="#__codelineno-28-25"></a>                    <span class="nb">print</span><span class="p">(</span><span class="n">data</span><span class="p">[</span><span class="s2">&quot;response&quot;</span><span class="p">],</span> <span class="n">end</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">flush</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<a id="__codelineno-28-26" name="__codelineno-28-26" href="#__codelineno-28-26"></a>                <span class="k">if</span> <span class="s2">&quot;error&quot;</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+<a id="__codelineno-28-27" name="__codelineno-28-27" href="#__codelineno-28-27"></a>                    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Error: </span><span class="si">{</span><span class="n">data</span><span class="p">[</span><span class="s1">&#39;error&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="95-curl">9.5 cURL 예시<a class="headerlink" href="#95-curl" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a><span class="c1"># /api/query</span>
+<a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:9422/api/query<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;LIGHTRAG-WORKSPACE: my-workspace&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-29-5" name="__codelineno-29-5" href="#__codelineno-29-5"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;query&quot;: &quot;긴급출동 서비스 절차는?&quot;, &quot;mode&quot;: &quot;mix&quot;}&#39;</span>
+<a id="__codelineno-29-6" name="__codelineno-29-6" href="#__codelineno-29-6"></a>
+<a id="__codelineno-29-7" name="__codelineno-29-7" href="#__codelineno-29-7"></a><span class="c1"># /api/query/stream</span>
+<a id="__codelineno-29-8" name="__codelineno-29-8" href="#__codelineno-29-8"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:9422/api/query/stream<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-29-9" name="__codelineno-29-9" href="#__codelineno-29-9"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-29-10" name="__codelineno-29-10" href="#__codelineno-29-10"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;LIGHTRAG-WORKSPACE: my-workspace&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-29-11" name="__codelineno-29-11" href="#__codelineno-29-11"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;query&quot;: &quot;긴급출동 서비스 절차는?&quot;, &quot;mode&quot;: &quot;mix&quot;, &quot;stream&quot;: true}&#39;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-29-12" name="__codelineno-29-12" href="#__codelineno-29-12"></a><span class="w">  </span>--no-buffer
+<a id="__codelineno-29-13" name="__codelineno-29-13" href="#__codelineno-29-13"></a>
+<a id="__codelineno-29-14" name="__codelineno-29-14" href="#__codelineno-29-14"></a><span class="c1"># /api/query/data</span>
+<a id="__codelineno-29-15" name="__codelineno-29-15" href="#__codelineno-29-15"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:9422/api/query/data<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-29-16" name="__codelineno-29-16" href="#__codelineno-29-16"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-29-17" name="__codelineno-29-17" href="#__codelineno-29-17"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;LIGHTRAG-WORKSPACE: my-workspace&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-29-18" name="__codelineno-29-18" href="#__codelineno-29-18"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;query&quot;: &quot;긴급출동 서비스&quot;, &quot;mode&quot;: &quot;local&quot;, &quot;top_k&quot;: 10}&#39;</span>
+</code></pre></div>
+<hr />
+<h2 id="10">10. 파라미터 조합별 동작 매트릭스<a class="headerlink" href="#10" title="Permanent link">&para;</a></h2>
+<h3 id="101-api">10.1 API별 파라미터 유효성<a class="headerlink" href="#101-api" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>파라미터</th>
+<th style="text-align: center;"><code>/query</code></th>
+<th style="text-align: center;"><code>/query/stream</code></th>
+<th style="text-align: center;"><code>/query/data</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>query</code></td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">✅ 유효</td>
+</tr>
+<tr>
+<td><code>mode</code></td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">✅ 유효</td>
+</tr>
+<tr>
+<td><code>stream</code></td>
+<td style="text-align: center;">❌ 무시 (항상 false)</td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">❌ 무시 (항상 false)</td>
+</tr>
+<tr>
+<td><code>top_k</code></td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">✅ 유효</td>
+</tr>
+<tr>
+<td><code>chunk_top_k</code></td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">✅ 유효</td>
+</tr>
+<tr>
+<td><code>max_entity_tokens</code></td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">✅ 유효</td>
+</tr>
+<tr>
+<td><code>max_relation_tokens</code></td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">✅ 유효</td>
+</tr>
+<tr>
+<td><code>max_total_tokens</code></td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">✅ 유효</td>
+</tr>
+<tr>
+<td><code>hl_keywords</code></td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">✅ 유효</td>
+</tr>
+<tr>
+<td><code>ll_keywords</code></td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">✅ 유효</td>
+</tr>
+<tr>
+<td><code>conversation_history</code></td>
+<td style="text-align: center;">✅ LLM에 전달</td>
+<td style="text-align: center;">✅ LLM에 전달</td>
+<td style="text-align: center;">❌ 무의미</td>
+</tr>
+<tr>
+<td><code>response_type</code></td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">❌ 무의미</td>
+</tr>
+<tr>
+<td><code>user_prompt</code></td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">❌ 무의미</td>
+</tr>
+<tr>
+<td><code>enable_rerank</code></td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">✅ 유효</td>
+</tr>
+<tr>
+<td><code>include_references</code></td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">❌ 무시 (항상 포함)</td>
+</tr>
+<tr>
+<td><code>include_chunk_content</code></td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">❌ 무시 (항상 포함)</td>
+</tr>
+<tr>
+<td><code>workspace</code></td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">✅ 유효</td>
+</tr>
+<tr>
+<td><code>only_need_context</code></td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">❌ 내부 강제 true</td>
+</tr>
+<tr>
+<td><code>only_need_prompt</code></td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">✅ 유효</td>
+<td style="text-align: center;">❌ 무의미</td>
+</tr>
+</tbody>
+</table>
+<h3 id="102">10.2 모드별 유효 파라미터<a class="headerlink" href="#102" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>파라미터</th>
+<th style="text-align: center;">local</th>
+<th style="text-align: center;">global</th>
+<th style="text-align: center;">hybrid</th>
+<th style="text-align: center;">mix</th>
+<th style="text-align: center;">naive</th>
+<th style="text-align: center;">bypass</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>top_k</code></td>
+<td style="text-align: center;">✅ 엔티티</td>
+<td style="text-align: center;">✅ 관계</td>
+<td style="text-align: center;">✅ 양쪽</td>
+<td style="text-align: center;">✅ 양쪽</td>
+<td style="text-align: center;">❌ 무시</td>
+<td style="text-align: center;">❌ 무시</td>
+</tr>
+<tr>
+<td><code>chunk_top_k</code></td>
+<td style="text-align: center;">⚠️ KG 청크만</td>
+<td style="text-align: center;">⚠️ KG 청크만</td>
+<td style="text-align: center;">⚠️ KG 청크만</td>
+<td style="text-align: center;">✅ 벡터+KG</td>
+<td style="text-align: center;">✅ 벡터</td>
+<td style="text-align: center;">❌ 무시</td>
+</tr>
+<tr>
+<td><code>max_entity_tokens</code></td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌ 무시</td>
+<td style="text-align: center;">❌ 무시</td>
+</tr>
+<tr>
+<td><code>max_relation_tokens</code></td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌ 무시</td>
+<td style="text-align: center;">❌ 무시</td>
+</tr>
+<tr>
+<td><code>hl_keywords</code></td>
+<td style="text-align: center;">❌ 무시</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌ 무시</td>
+<td style="text-align: center;">❌ 무시</td>
+</tr>
+<tr>
+<td><code>ll_keywords</code></td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌ 무시</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌ 무시</td>
+<td style="text-align: center;">❌ 무시</td>
+</tr>
+<tr>
+<td><code>enable_rerank</code></td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌ 무시</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="11">11. 에러 처리<a class="headerlink" href="#11" title="Permanent link">&para;</a></h2>
+<h3 id="111-http">11.1 HTTP 에러 코드<a class="headerlink" href="#111-http" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>코드</th>
+<th>원인</th>
+<th>예시</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>400</td>
+<td>잘못된 파라미터</td>
+<td>쿼리 3자 미만, 잘못된 mode 값</td>
+</tr>
+<tr>
+<td>401</td>
+<td>인증 실패</td>
+<td>API 키 누락/불일치</td>
+</tr>
+<tr>
+<td>500</td>
+<td>서버 내부 에러</td>
+<td>LLM 서비스 불가, DB 연결 실패</td>
+</tr>
+</tbody>
+</table>
+<h3 id="112">11.2 스트리밍 에러 처리<a class="headerlink" href="#112" title="Permanent link">&para;</a></h3>
+<p><code>/api/query/stream</code>에서는 스트리밍 도중 에러가 발생할 수 있습니다:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a>{&quot;references&quot;: [...]}
+<a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a>{&quot;response&quot;: &quot;답변 시작...&quot;}
+<a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a>{&quot;response&quot;: &quot; 계속 진행 중에&quot;}
+<a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a>{&quot;error&quot;: &quot;LLM service temporarily unavailable&quot;}
+</code></pre></div>
+<ul>
+<li>부분 응답이 이미 전달된 후 에러 발생 가능</li>
+<li>클라이언트는 반드시 <code>error</code> 필드를 확인해야 함</li>
+<li>HTTP 상태 코드는 이미 200으로 전송된 상태</li>
+</ul>
+<h3 id="113">11.3 빈 결과 처리<a class="headerlink" href="#113" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>API</th>
+<th>빈 결과 시 동작</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/query</code></td>
+<td><code>response: "No relevant context found for the query."</code></td>
+</tr>
+<tr>
+<td><code>/query/stream</code></td>
+<td><code>{"response": "No relevant context found for the query."}</code></td>
+</tr>
+<tr>
+<td><code>/query/data</code></td>
+<td><code>status: "success"</code>, <code>data: {entities: [], relationships: [], chunks: [], references: []}</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="12_1">12. 성능 고려사항<a class="headerlink" href="#12_1" title="Permanent link">&para;</a></h2>
+<h3 id="121">12.1 응답 시간 요인<a class="headerlink" href="#121" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>요인</th>
+<th>영향</th>
+<th>최적화 방법</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>키워드 추출</td>
+<td>LLM 1회 호출 추가</td>
+<td><code>hl_keywords</code>/<code>ll_keywords</code> 직접 지정</td>
+</tr>
+<tr>
+<td>top_k 크기</td>
+<td>검색·처리 시간 증가</td>
+<td>필요한 만큼만 설정 (20~40 추천)</td>
+</tr>
+<tr>
+<td>리랭킹</td>
+<td>추가 모델 호출</td>
+<td><code>enable_rerank=false</code>로 비활성화</td>
+</tr>
+<tr>
+<td>토큰 예산</td>
+<td>큰 예산 = 더 많은 데이터 처리</td>
+<td>기본값 사용 또는 줄이기</td>
+</tr>
+<tr>
+<td>LLM 캐시</td>
+<td>동일 쿼리 재호출 시 즉시 반환</td>
+<td>동일 파라미터 조합 활용</td>
+</tr>
+<tr>
+<td>모드 선택</td>
+<td>bypass &lt; naive &lt; local/global &lt; hybrid/mix</td>
+<td>필요한 최소 모드 선택</td>
+</tr>
+</tbody>
+</table>
+<h3 id="122-llm">12.2 LLM 호출 횟수<a class="headerlink" href="#122-llm" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>모드</th>
+<th style="text-align: center;">키워드 추출</th>
+<th style="text-align: center;">응답 생성</th>
+<th style="text-align: center;">합계</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>local~mix (키워드 미지정)</td>
+<td style="text-align: center;">1회</td>
+<td style="text-align: center;">1회</td>
+<td style="text-align: center;">2회</td>
+</tr>
+<tr>
+<td>local~mix (키워드 지정)</td>
+<td style="text-align: center;">0회</td>
+<td style="text-align: center;">1회</td>
+<td style="text-align: center;">1회</td>
+</tr>
+<tr>
+<td>naive</td>
+<td style="text-align: center;">0회</td>
+<td style="text-align: center;">1회</td>
+<td style="text-align: center;">1회</td>
+</tr>
+<tr>
+<td>bypass</td>
+<td style="text-align: center;">0회</td>
+<td style="text-align: center;">1회</td>
+<td style="text-align: center;">1회</td>
+</tr>
+<tr>
+<td><code>/query/data</code> (모든 모드)</td>
+<td style="text-align: center;">0~1회</td>
+<td style="text-align: center;">0회</td>
+<td style="text-align: center;">0~1회</td>
+</tr>
+</tbody>
+</table>
+<h3 id="123">12.3 캐싱 동작<a class="headerlink" href="#123" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>키워드 캐시</strong>: <code>(mode, query_text)</code> 해시 키 → 동일 쿼리의 키워드 추출 재사용</li>
+<li><strong>응답 캐시</strong>: <code>(mode, query, response_type, top_k, ...)</code> 해시 키 → 동일 조건의 LLM 응답 재사용</li>
+<li><strong>유의</strong>: <code>conversation_history</code>는 캐시 키에 포함되지 않음</li>
+</ul>
+<h3 id="124">12.4 추천 기본 설정<a class="headerlink" href="#124" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a><span class="p">{</span>
+<a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a><span class="w">  </span><span class="nt">&quot;mode&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;mix&quot;</span><span class="p">,</span>
+<a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a><span class="w">  </span><span class="nt">&quot;top_k&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">20</span><span class="p">,</span>
+<a id="__codelineno-31-4" name="__codelineno-31-4" href="#__codelineno-31-4"></a><span class="w">  </span><span class="nt">&quot;chunk_top_k&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">10</span><span class="p">,</span>
+<a id="__codelineno-31-5" name="__codelineno-31-5" href="#__codelineno-31-5"></a><span class="w">  </span><span class="nt">&quot;enable_rerank&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<a id="__codelineno-31-6" name="__codelineno-31-6" href="#__codelineno-31-6"></a><span class="w">  </span><span class="nt">&quot;include_references&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<a id="__codelineno-31-7" name="__codelineno-31-7" href="#__codelineno-31-7"></a><span class="w">  </span><span class="nt">&quot;include_chunk_content&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span>
+<a id="__codelineno-31-8" name="__codelineno-31-8" href="#__codelineno-31-8"></a><span class="p">}</span>
+</code></pre></div>
+<p>일반적인 사용에서 위 설정이 속도와 품질의 균형을 제공합니다. 성능이 중요한 경우 <code>top_k</code>와 <code>chunk_top_k</code>를 줄이고, 키워드를 직접 지정하세요.</p>
+<hr />
+<h2 id="_2">부록: 관련 소스 파일 참조<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>파일</th>
+<th>주요 내용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>lightrag/api/routers/query_routes.py</code></td>
+<td>API 엔드포인트 정의, QueryRequest/QueryResponse 모델, 레퍼런스 처리</td>
+</tr>
+<tr>
+<td><code>lightrag/lightrag.py</code></td>
+<td><code>aquery_llm()</code>, <code>aquery_data()</code> — 모드 디스패치</td>
+</tr>
+<tr>
+<td><code>lightrag/operate.py</code></td>
+<td><code>kg_query()</code>, <code>naive_query()</code> — 검색·생성 로직</td>
+</tr>
+<tr>
+<td><code>lightrag/base.py</code></td>
+<td><code>QueryParam</code>, <code>QueryResult</code> — 데이터 모델</td>
+</tr>
+<tr>
+<td><code>lightrag/prompt.py</code></td>
+<td><code>rag_response</code>, <code>naive_rag_response</code>, <code>kg_query_context</code> — 프롬프트 템플릿</td>
+</tr>
+<tr>
+<td><code>lightrag/utils.py</code></td>
+<td><code>process_chunks_unified()</code>, <code>apply_rerank_if_enabled()</code> — 리랭킹·청크 처리</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  맨위로
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\ud074\ub9bd\ubcf4\ub4dc\uc5d0 \ubcf5\uc0ac\ub428", "clipboard.copy": "\ud074\ub9bd\ubcf4\ub4dc\ub85c \ubcf5\uc0ac", "search.result.more.one": "\uc774 \ubb38\uc11c\uc5d0\uc11c 1\uac1c\uc758 \uac80\uc0c9 \uacb0\uacfc \ub354 \ubcf4\uae30", "search.result.more.other": "\uc774 \ubb38\uc11c\uc5d0\uc11c #\uac1c\uc758 \uac80\uc0c9 \uacb0\uacfc \ub354 \ubcf4\uae30", "search.result.none": "\uac80\uc0c9\uc5b4\uc640 \uc77c\uce58\ud558\ub294 \ubb38\uc11c\uac00 \uc5c6\uc2b5\ub2c8\ub2e4", "search.result.one": "1\uac1c\uc758 \uc77c\uce58\ud558\ub294 \ubb38\uc11c", "search.result.other": "#\uac1c\uc758 \uc77c\uce58\ud558\ub294 \ubb38\uc11c", "search.result.placeholder": "\uac80\uc0c9\uc5b4\ub97c \uc785\ub825\ud558\uc138\uc694", "search.result.term.missing": "\ud3ec\ud568\ub418\uc9c0 \uc54a\uc740 \uac80\uc0c9\uc5b4", "select.version": "\ubc84\uc804 \uc120\ud0dd"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

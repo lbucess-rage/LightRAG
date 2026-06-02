@@ -1,0 +1,2678 @@
+
+<!doctype html>
+<html lang="ko" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="LightRAG 프로젝트 기술 분석 및 설계 문서">
+      
+      
+      
+      
+        <link rel="prev" href="../2026-02-10_query-response-structure/">
+      
+      
+        <link rel="next" href="../2026-02-10_query-mode-behavior-analysis/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>2026-02-10_query-pipeline-analysis - LightRAG 기술 문서</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Noto+Sans+KR:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Noto Sans KR";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#lightrag" class="md-skip">
+          콘텐츠로 이동
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="상단/헤더">
+    <a href="../.." title="LightRAG 기술 문서" class="md-header__button md-logo" aria-label="LightRAG 기술 문서" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            LightRAG 기술 문서
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              2026-02-10_query-pipeline-analysis
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="다크 모드로 전환"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="다크 모드로 전환" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="라이트 모드로 전환"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="라이트 모드로 전환" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="검색" placeholder="검색" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="검색">
+        
+        <button type="reset" class="md-search__icon md-icon" title="지우기" aria-label="지우기" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            검색 초기화
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="네비게이션" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="LightRAG 기술 문서" class="md-nav__button md-logo" aria-label="LightRAG 기술 문서" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    LightRAG 기술 문서
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    홈
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    코드분석
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    코드분석
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-05-16_feature-capability-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-05-16_feature-capability-analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-13_board-api-ingestion-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-13_board-api-ingestion-guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-11_url-ingestion-pipeline-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-11_url-ingestion-pipeline-analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-10_query-response-structure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-response-structure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-pipeline-analysis
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-pipeline-analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="목차">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      목차
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        목차
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. 전체 처리 흐름
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-content" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Content 추출 단계
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Content 추출 단계">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-llm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 키워드 추출 (LLM 호출)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-cosine-similarity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 벡터 검색 (Cosine Similarity)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2.2 벡터 검색 (Cosine Similarity)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#sql" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        엔티티 검색 SQL
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sql_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        관계 검색 SQL
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sql-mixnaive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        벡터 청크 검색 SQL (mix/naive 모드)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 그래프 구조 보강
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#24" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.4 관련 텍스트 청크 선택
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2.4 관련 텍스트 청크 선택">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#vector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        VECTOR 방식 상세
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#weight" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WEIGHT 방식 상세
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#25-round-robin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.5 결과 병합 (Round-Robin)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-scoring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. 순위 결정 기준 (Scoring)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. 순위 결정 기준 (Scoring)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#local" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Local 관계의 특별한 정렬
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-reranking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. 리랭킹 (Reranking)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. 리랭킹 (Reranking)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 동작 조건
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 리랭킹 함수
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 리랭크 결과 처리
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 리랭킹 후 필터링
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#45" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.5 리랭킹 파이프라인 요약
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. 토큰 예산 관리
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. 토큰 예산 관리">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 고정 토큰 예산
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 동적 청크 토큰 예산
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 절삭 함수
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. 쿼리 모드별 차이
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. 쿼리 모드별 차이">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 모드 비교표
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 모드별 상세 설명
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6.2 모드별 상세 설명">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#local_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Local 모드
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#global" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Global 모드
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hybrid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hybrid 모드
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mix 모드 (기본값)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#naive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Naive 모드
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bypass" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bypass 모드
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. 핵심 파라미터 요약
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. 핵심 파라미터 요약">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71-queryparam" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 QueryParam 파라미터
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 시스템 설정 파라미터
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. 주요 관찰 사항 및 개선 포인트
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. 주요 관찰 사항 및 개선 포인트">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#81" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.1 리랭크 모델 미설정 시 주의
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#82-min_rerank_score" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.2 min_rerank_score 불일치
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#83-local-degree" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.3 Local 관계의 Degree 기반 정렬
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#84" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.4 토큰 예산의 동적 분배
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#85-mix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.5 Mix 모드의 청크 다양성
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#86-rerank_score" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.6 rerank_score 미존재 시 기본값
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-end-to-end" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. End-to-End 파이프라인 다이어그램
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. End-to-End 파이프라인 다이어그램">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mix_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mix 모드 전체 흐름
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        부록: 관련 소스 파일 참조
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-10_query-mode-behavior-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-mode-behavior-analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-10_query-api-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-api-reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-10_image-analysis-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_image-analysis-pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="목차">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      목차
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        목차
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. 전체 처리 흐름
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-content" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Content 추출 단계
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Content 추출 단계">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-llm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 키워드 추출 (LLM 호출)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-cosine-similarity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 벡터 검색 (Cosine Similarity)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2.2 벡터 검색 (Cosine Similarity)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#sql" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        엔티티 검색 SQL
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sql_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        관계 검색 SQL
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sql-mixnaive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        벡터 청크 검색 SQL (mix/naive 모드)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 그래프 구조 보강
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#24" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.4 관련 텍스트 청크 선택
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2.4 관련 텍스트 청크 선택">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#vector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        VECTOR 방식 상세
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#weight" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WEIGHT 방식 상세
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#25-round-robin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.5 결과 병합 (Round-Robin)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-scoring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. 순위 결정 기준 (Scoring)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. 순위 결정 기준 (Scoring)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#local" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Local 관계의 특별한 정렬
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-reranking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. 리랭킹 (Reranking)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. 리랭킹 (Reranking)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 동작 조건
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 리랭킹 함수
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 리랭크 결과 처리
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 리랭킹 후 필터링
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#45" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.5 리랭킹 파이프라인 요약
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. 토큰 예산 관리
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. 토큰 예산 관리">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 고정 토큰 예산
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 동적 청크 토큰 예산
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 절삭 함수
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. 쿼리 모드별 차이
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. 쿼리 모드별 차이">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 모드 비교표
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 모드별 상세 설명
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6.2 모드별 상세 설명">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#local_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Local 모드
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#global" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Global 모드
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hybrid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hybrid 모드
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mix 모드 (기본값)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#naive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Naive 모드
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bypass" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bypass 모드
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. 핵심 파라미터 요약
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. 핵심 파라미터 요약">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71-queryparam" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 QueryParam 파라미터
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 시스템 설정 파라미터
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. 주요 관찰 사항 및 개선 포인트
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. 주요 관찰 사항 및 개선 포인트">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#81" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.1 리랭크 모델 미설정 시 주의
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#82-min_rerank_score" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.2 min_rerank_score 불일치
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#83-local-degree" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.3 Local 관계의 Degree 기반 정렬
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#84" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.4 토큰 예산의 동적 분배
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#85-mix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.5 Mix 모드의 청크 다양성
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#86-rerank_score" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.6 rerank_score 미존재 시 기본값
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-end-to-end" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. End-to-End 파이프라인 다이어그램
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. End-to-End 파이프라인 다이어그램">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mix_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mix 모드 전체 흐름
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        부록: 관련 소스 파일 참조
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="lightrag">LightRAG 쿼리 파이프라인 분석<a class="headerlink" href="#lightrag" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>분석일: 2026-02-10
+대상: LightRAG Query Pipeline (content 추출, 리랭킹, 스코어 측정)
+분석 범위: <code>operate.py</code>, <code>utils.py</code>, <code>lightrag.py</code>, <code>prompt.py</code>, <code>constants.py</code>, <code>base.py</code>, <code>kg/postgres_impl.py</code></p>
+</blockquote>
+<hr />
+<h2 id="_1">목차<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<ol>
+<li><a href="#1-전체-처리-흐름">전체 처리 흐름</a></li>
+<li><a href="#2-content-추출-단계">Content 추출 단계</a></li>
+<li><a href="#3-순위-결정-기준-scoring">순위 결정 기준 (Scoring)</a></li>
+<li><a href="#4-리랭킹-reranking">리랭킹 (Reranking)</a></li>
+<li><a href="#5-토큰-예산-관리">토큰 예산 관리</a></li>
+<li><a href="#6-쿼리-모드별-차이">쿼리 모드별 차이</a></li>
+<li><a href="#7-핵심-파라미터-요약">핵심 파라미터 요약</a></li>
+<li><a href="#8-주요-관찰-사항-및-개선-포인트">주요 관찰 사항 및 개선 포인트</a></li>
+<li><a href="#9-end-to-end-파이프라인-다이어그램">End-to-End 파이프라인 다이어그램</a></li>
+</ol>
+<hr />
+<h2 id="1">1. 전체 처리 흐름<a class="headerlink" href="#1" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>쿼리 요청
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    │
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    ▼
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>[1] 키워드 추출 (LLM 호출)
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    ├── hl_keywords (고수준: 전역적/추상적 개념)
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    └── ll_keywords (저수준: 구체적 엔티티명)
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    │
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    ▼
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>[2] KG 검색 (Stage 1: Raw Search)
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    ├── 엔티티 VDB 검색 (ll_keywords, cosine similarity)
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    ├── 관계 VDB 검색 (hl_keywords, cosine similarity)
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    └── 벡터 청크 검색 (원본 쿼리, mix/naive 모드)
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    │
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    ▼
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>[3] 토큰 절삭 (Stage 2: Token Truncation)
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>    ├── 엔티티: max 6,000 토큰
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>    └── 관계: max 8,000 토큰
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>    │
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>    ▼
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>[4] 청크 수집·병합 (Stage 3: Chunk Merge)
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>    ├── 엔티티 관련 청크 (source_id → VECTOR/WEIGHT 선택)
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>    ├── 관계 관련 청크 (source_id → VECTOR/WEIGHT 선택)
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>    └── 라운드 로빈 병합 + 중복 제거
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>    │
+<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>    ▼
+<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>[5] 최종 컨텍스트 조립 (Stage 4: Context Assembly)
+<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>    ├── 리랭킹 (rerank_model_func)
+<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>    ├── min_rerank_score 필터링 (≥ 0.5)
+<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>    ├── chunk_top_k 제한 (기본 20)
+<a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a>    └── 동적 토큰 예산 절삭
+<a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a>    │
+<a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a>    ▼
+<a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a>[6] LLM 생성
+<a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a>    └── rag_response 프롬프트 + 컨텍스트 → 최종 응답
+</code></pre></div>
+<hr />
+<h2 id="2-content">2. Content 추출 단계<a class="headerlink" href="#2-content" title="Permanent link">&para;</a></h2>
+<h3 id="21-llm">2.1 키워드 추출 (LLM 호출)<a class="headerlink" href="#21-llm" title="Permanent link">&para;</a></h3>
+<p>사용자 쿼리에서 LLM을 통해 두 종류의 키워드를 추출합니다.</p>
+<ul>
+<li><strong>소스 파일</strong>: <code>operate.py</code> — <code>get_keywords_from_query()</code>, <code>extract_keywords_only()</code></li>
+<li><strong>프롬프트</strong>: <code>prompt.py</code> — <code>keywords_extraction</code> 템플릿</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">hl_keywords</span><span class="p">,</span> <span class="n">ll_keywords</span> <span class="o">=</span> <span class="k">await</span> <span class="n">get_keywords_from_query</span><span class="p">(</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="n">query</span><span class="p">,</span> <span class="n">query_param</span><span class="p">,</span> <span class="n">global_config</span><span class="p">,</span> <span class="n">hashing_kv</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="p">)</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>키워드 종류</th>
+<th>용도</th>
+<th>검색 대상</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>high_level_keywords</code></td>
+<td>전역적/추상적 개념</td>
+<td>관계(Relationship) VDB</td>
+</tr>
+<tr>
+<td><code>low_level_keywords</code></td>
+<td>구체적 엔티티명</td>
+<td>엔티티(Entity) VDB</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>사용자가 <code>hl_keywords</code>/<code>ll_keywords</code>를 직접 제공하면 LLM 호출 생략</li>
+<li>결과는 <code>(mode, query_text)</code> 해시 키로 캐싱</li>
+</ul>
+<h3 id="22-cosine-similarity">2.2 벡터 검색 (Cosine Similarity)<a class="headerlink" href="#22-cosine-similarity" title="Permanent link">&para;</a></h3>
+<p>PostgreSQL pgvector의 <code>&lt;=&gt;</code> 연산자로 <strong>코사인 거리</strong>를 계산합니다.</p>
+<table>
+<thead>
+<tr>
+<th>검색 대상</th>
+<th>기본 top_k</th>
+<th>유사도 임계값</th>
+<th>쿼리 키워드</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>엔티티 VDB (<code>lightrag_vdb_entity</code>)</td>
+<td>40</td>
+<td>cosine ≥ 0.2 (거리 &lt; 0.8)</td>
+<td>ll_keywords</td>
+</tr>
+<tr>
+<td>관계 VDB (<code>lightrag_vdb_relation</code>)</td>
+<td>40</td>
+<td>cosine ≥ 0.2 (거리 &lt; 0.8)</td>
+<td>hl_keywords</td>
+</tr>
+<tr>
+<td>청크 VDB (<code>lightrag_vdb_chunks</code>)</td>
+<td>20</td>
+<td>cosine ≥ 0.2 (거리 &lt; 0.8)</td>
+<td>원본 쿼리</td>
+</tr>
+</tbody>
+</table>
+<h4 id="sql">엔티티 검색 SQL<a class="headerlink" href="#sql" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">entity_name</span><span class="p">,</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">       </span><span class="k">EXTRACT</span><span class="p">(</span><span class="n">EPOCH</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">create_time</span><span class="p">)::</span><span class="nb">BIGINT</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">created_at</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="k">FROM</span><span class="w"> </span><span class="n">LIGHTRAG_VDB_ENTITY</span><span class="w"> </span><span class="n">e</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="k">WHERE</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">workspace</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="err">$</span><span class="mi">1</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="k">AND</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">content_vector</span><span class="w"> </span><span class="o">&lt;=&gt;</span><span class="w"> </span><span class="s1">&#39;[{embedding_string}]&#39;</span><span class="p">::</span><span class="n">vector</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="err">$</span><span class="mi">2</span><span class="w">   </span><span class="c1">-- 1 - cosine_threshold</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">content_vector</span><span class="w"> </span><span class="o">&lt;=&gt;</span><span class="w"> </span><span class="s1">&#39;[{embedding_string}]&#39;</span><span class="p">::</span><span class="n">vector</span><span class="w">      </span><span class="c1">-- 코사인 거리 오름차순</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="k">LIMIT</span><span class="w"> </span><span class="err">$</span><span class="mi">3</span><span class="p">;</span><span class="w">                                                          </span><span class="c1">-- top_k</span>
+</code></pre></div>
+<h4 id="sql_1">관계 검색 SQL<a class="headerlink" href="#sql_1" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">r</span><span class="p">.</span><span class="n">source_id</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">src_id</span><span class="p">,</span><span class="w"> </span><span class="n">r</span><span class="p">.</span><span class="n">target_id</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">tgt_id</span><span class="p">,</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">       </span><span class="k">EXTRACT</span><span class="p">(</span><span class="n">EPOCH</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">r</span><span class="p">.</span><span class="n">create_time</span><span class="p">)::</span><span class="nb">BIGINT</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">created_at</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="k">FROM</span><span class="w"> </span><span class="n">LIGHTRAG_VDB_RELATION</span><span class="w"> </span><span class="n">r</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="k">WHERE</span><span class="w"> </span><span class="n">r</span><span class="p">.</span><span class="n">workspace</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="err">$</span><span class="mi">1</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span><span class="k">AND</span><span class="w"> </span><span class="n">r</span><span class="p">.</span><span class="n">content_vector</span><span class="w"> </span><span class="o">&lt;=&gt;</span><span class="w"> </span><span class="s1">&#39;[{embedding_string}]&#39;</span><span class="p">::</span><span class="n">vector</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="err">$</span><span class="mi">2</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">r</span><span class="p">.</span><span class="n">content_vector</span><span class="w"> </span><span class="o">&lt;=&gt;</span><span class="w"> </span><span class="s1">&#39;[{embedding_string}]&#39;</span><span class="p">::</span><span class="n">vector</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="k">LIMIT</span><span class="w"> </span><span class="err">$</span><span class="mi">3</span><span class="p">;</span>
+</code></pre></div>
+<h4 id="sql-mixnaive">벡터 청크 검색 SQL (mix/naive 모드)<a class="headerlink" href="#sql-mixnaive" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">SELECT</span><span class="w"> </span><span class="k">c</span><span class="p">.</span><span class="n">id</span><span class="p">,</span><span class="w"> </span><span class="k">c</span><span class="p">.</span><span class="n">content</span><span class="p">,</span><span class="w"> </span><span class="k">c</span><span class="p">.</span><span class="n">file_path</span><span class="p">,</span><span class="w"> </span><span class="k">c</span><span class="p">.</span><span class="n">full_doc_id</span><span class="p">,</span><span class="w"> </span><span class="k">c</span><span class="p">.</span><span class="n">structured_content</span><span class="p">,</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">       </span><span class="k">EXTRACT</span><span class="p">(</span><span class="n">EPOCH</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="k">c</span><span class="p">.</span><span class="n">create_time</span><span class="p">)::</span><span class="nb">BIGINT</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">created_at</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="k">FROM</span><span class="w"> </span><span class="n">LIGHTRAG_VDB_CHUNKS</span><span class="w"> </span><span class="k">c</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="k">WHERE</span><span class="w"> </span><span class="k">c</span><span class="p">.</span><span class="n">workspace</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="err">$</span><span class="mi">1</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span><span class="k">AND</span><span class="w"> </span><span class="k">c</span><span class="p">.</span><span class="n">content_vector</span><span class="w"> </span><span class="o">&lt;=&gt;</span><span class="w"> </span><span class="s1">&#39;[{embedding_string}]&#39;</span><span class="p">::</span><span class="n">vector</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="err">$</span><span class="mi">2</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="k">c</span><span class="p">.</span><span class="n">content_vector</span><span class="w"> </span><span class="o">&lt;=&gt;</span><span class="w"> </span><span class="s1">&#39;[{embedding_string}]&#39;</span><span class="p">::</span><span class="n">vector</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="k">LIMIT</span><span class="w"> </span><span class="err">$</span><span class="mi">3</span><span class="p">;</span>
+</code></pre></div>
+<h3 id="23">2.3 그래프 구조 보강<a class="headerlink" href="#23" title="Permanent link">&para;</a></h3>
+<p>엔티티 검색 후 그래프에서 추가 정보를 조회합니다:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># 노드 속성 + degree 일괄 조회</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">nodes_dict</span><span class="p">,</span> <span class="n">degrees_dict</span> <span class="o">=</span> <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">gather</span><span class="p">(</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    <span class="n">knowledge_graph_inst</span><span class="o">.</span><span class="n">get_nodes_batch</span><span class="p">(</span><span class="n">node_ids</span><span class="p">),</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    <span class="n">knowledge_graph_inst</span><span class="o">.</span><span class="n">node_degrees_batch</span><span class="p">(</span><span class="n">node_ids</span><span class="p">),</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="p">)</span>
+</code></pre></div>
+<ul>
+<li><strong>소스 파일</strong>: <code>operate.py</code> — <code>_get_node_data()</code></li>
+<li>Local 모드에서 찾은 관계는 <code>(노드 degree 합, edge weight)</code> 내림차순으로 정렬</li>
+<li>Global 모드에서 관계 → 양쪽 엔티티 자동 탐색</li>
+</ul>
+<h3 id="24">2.4 관련 텍스트 청크 선택<a class="headerlink" href="#24" title="Permanent link">&para;</a></h3>
+<p>엔티티/관계의 <code>source_id</code>(청크 ID 목록)에서 원본 청크를 추출합니다.</p>
+<table>
+<thead>
+<tr>
+<th>방식</th>
+<th>기본값</th>
+<th>선택 기준</th>
+<th>소스</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>VECTOR</strong></td>
+<td>✅ (기본)</td>
+<td>쿼리 임베딩과 청크 임베딩의 코사인 유사도 순</td>
+<td><code>utils.py</code> — <code>pick_by_vector_similarity()</code></td>
+</tr>
+<tr>
+<td><strong>WEIGHT</strong></td>
+<td>-</td>
+<td>엔티티 중요도 기반 선형 가중치 할당</td>
+<td><code>utils.py</code> — <code>pick_by_weighted_polling()</code></td>
+</tr>
+</tbody>
+</table>
+<h4 id="vector">VECTOR 방식 상세<a class="headerlink" href="#vector" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">cosine_similarity</span><span class="p">(</span><span class="n">v1</span><span class="p">,</span> <span class="n">v2</span><span class="p">):</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>    <span class="n">dot_product</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">dot</span><span class="p">(</span><span class="n">v1</span><span class="p">,</span> <span class="n">v2</span><span class="p">)</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>    <span class="n">norm1</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">v1</span><span class="p">)</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>    <span class="n">norm2</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">v2</span><span class="p">)</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>    <span class="k">return</span> <span class="n">dot_product</span> <span class="o">/</span> <span class="p">(</span><span class="n">norm1</span> <span class="o">*</span> <span class="n">norm2</span><span class="p">)</span>
+</code></pre></div>
+<ul>
+<li>엔티티/관계에 연결된 모든 청크 ID를 수집</li>
+<li>각 청크의 임베딩과 쿼리 임베딩의 코사인 유사도 계산</li>
+<li>유사도 내림차순 정렬 후 상위 N개 선택</li>
+<li>N = <code>related_chunk_number * num_entities / 2</code> (기본: <code>5 * 엔티티 수 / 2</code>)</li>
+</ul>
+<h4 id="weight">WEIGHT 방식 상세<a class="headerlink" href="#weight" title="Permanent link">&para;</a></h4>
+<ul>
+<li>선형 그래디언트 가중 폴링: 높은 중요도 엔티티에 더 많은 청크 할당</li>
+<li>위치 i의 엔티티: <code>max_chunks - (i/(N-1)) * (max - min)</code> 개 청크</li>
+<li>기본값: max = 5, min = 1</li>
+<li>2라운드 할당: 1차 기대값 할당 → 2차 미사용 할당량 재배포</li>
+</ul>
+<h3 id="25-round-robin">2.5 결과 병합 (Round-Robin)<a class="headerlink" href="#25-round-robin" title="Permanent link">&para;</a></h3>
+<p>Local/Global 결과를 <strong>라운드 로빈</strong>으로 교차 병합합니다:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">max_len</span><span class="p">):</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>    <span class="k">if</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">local_entities</span><span class="p">):</span>   <span class="c1"># Local 엔티티 먼저</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>        <span class="o">...</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    <span class="k">if</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">global_entities</span><span class="p">):</span>  <span class="c1"># Global 엔티티 교대</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>        <span class="o">...</span>
+</code></pre></div>
+<ul>
+<li>중복 제거: 동일 <code>chunk_id</code>는 첫 출현만 유지</li>
+<li>3개 소스 병합 (mix 모드): vector_chunks → entity_chunks → relation_chunks</li>
+</ul>
+<hr />
+<h2 id="3-scoring">3. 순위 결정 기준 (Scoring)<a class="headerlink" href="#3-scoring" title="Permanent link">&para;</a></h2>
+<p>검색 결과의 순위가 결정되는 기준은 단계별로 다릅니다:</p>
+<table>
+<thead>
+<tr>
+<th>단계</th>
+<th>대상</th>
+<th>정렬 기준</th>
+<th>근거</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>엔티티 검색</td>
+<td><code>entities_vdb</code></td>
+<td>코사인 유사도 (높은 순)</td>
+<td>pgvector <code>&lt;=&gt;</code> 거리 오름차순</td>
+</tr>
+<tr>
+<td>Local 관계</td>
+<td>entity edges</td>
+<td><code>(노드 degree 합, edge weight)</code> 내림차순</td>
+<td>그래프 구조 중요도</td>
+</tr>
+<tr>
+<td>Global 관계</td>
+<td><code>relationships_vdb</code></td>
+<td>코사인 유사도 (높은 순)</td>
+<td>pgvector <code>&lt;=&gt;</code> 거리 오름차순</td>
+</tr>
+<tr>
+<td>벡터 청크</td>
+<td><code>chunks_vdb</code></td>
+<td>코사인 유사도 (높은 순)</td>
+<td>pgvector <code>&lt;=&gt;</code> 거리 오름차순</td>
+</tr>
+<tr>
+<td>KG 관련 청크 (VECTOR)</td>
+<td>source chunks</td>
+<td>쿼리-청크 코사인 유사도</td>
+<td>numpy 코사인 유사도</td>
+</tr>
+<tr>
+<td>KG 관련 청크 (WEIGHT)</td>
+<td>source chunks</td>
+<td>엔티티 중요도 가중치</td>
+<td>선형 그래디언트</td>
+</tr>
+<tr>
+<td><strong>최종 청크</strong></td>
+<td><strong>리랭킹 후</strong></td>
+<td><strong>리랭크 모델의 relevance_score</strong></td>
+<td>외부 리랭크 모델</td>
+</tr>
+</tbody>
+</table>
+<h3 id="local">Local 관계의 특별한 정렬<a class="headerlink" href="#local" title="Permanent link">&para;</a></h3>
+<p>Local 모드에서 찾은 관계(edge)는 단순 유사도가 아니라, <strong>양쪽 노드의 degree 합 + edge weight</strong>로 정렬됩니다:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># operate.py — _find_most_related_edges_from_entities()</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">all_edges_data</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>    <span class="n">all_edges_data</span><span class="p">,</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="s2">&quot;rank&quot;</span><span class="p">],</span> <span class="n">x</span><span class="p">[</span><span class="s2">&quot;weight&quot;</span><span class="p">]),</span>  <span class="c1"># rank = degree_src + degree_tgt</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="n">reverse</span><span class="o">=</span><span class="kc">True</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="p">)</span>
+</code></pre></div>
+<p>그래프 내에서 더 많이 연결된(허브) 노드 간의 관계가 우선시됩니다.</p>
+<hr />
+<h2 id="4-reranking">4. 리랭킹 (Reranking)<a class="headerlink" href="#4-reranking" title="Permanent link">&para;</a></h2>
+<h3 id="41">4.1 동작 조건<a class="headerlink" href="#41" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>enable_rerank=True</code> (기본값, 환경변수 <code>RERANK_BY_DEFAULT</code>로 제어)</li>
+<li><code>rerank_model_func</code>이 설정되어 있어야 함</li>
+</ul>
+<h3 id="42">4.2 리랭킹 함수<a class="headerlink" href="#42" title="Permanent link">&para;</a></h3>
+<p><strong>소스</strong>: <code>utils.py</code> — <code>apply_rerank_if_enabled()</code></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">apply_rerank_if_enabled</span><span class="p">(</span><span class="n">query</span><span class="p">,</span> <span class="n">retrieved_docs</span><span class="p">,</span> <span class="n">global_config</span><span class="p">,</span> <span class="n">enable_rerank</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">top_n</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">enable_rerank</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">retrieved_docs</span><span class="p">:</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>        <span class="k">return</span> <span class="n">retrieved_docs</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>    <span class="n">rerank_func</span> <span class="o">=</span> <span class="n">global_config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;rerank_model_func&quot;</span><span class="p">)</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">rerank_func</span><span class="p">:</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">&quot;Rerank is enabled but no rerank model is configured...&quot;</span><span class="p">)</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>        <span class="k">return</span> <span class="n">retrieved_docs</span>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>    <span class="n">document_texts</span> <span class="o">=</span> <span class="p">[</span><span class="n">doc</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;content&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="n">doc</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;text&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="o">...</span> <span class="k">for</span> <span class="n">doc</span> <span class="ow">in</span> <span class="n">retrieved_docs</span><span class="p">]</span>
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>    <span class="n">rerank_results</span> <span class="o">=</span> <span class="k">await</span> <span class="n">rerank_func</span><span class="p">(</span><span class="n">query</span><span class="o">=</span><span class="n">query</span><span class="p">,</span> <span class="n">documents</span><span class="o">=</span><span class="n">document_texts</span><span class="p">,</span> <span class="n">top_n</span><span class="o">=</span><span class="n">top_n</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="43">4.3 리랭크 결과 처리<a class="headerlink" href="#43" title="Permanent link">&para;</a></h3>
+<p>두 가지 결과 형식을 지원합니다:</p>
+<table>
+<thead>
+<tr>
+<th>형식</th>
+<th>구조</th>
+<th>처리 방식</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>인덱스 기반</strong> (신규)</td>
+<td><code>[{"index": 0, "relevance_score": 0.85}, ...]</code></td>
+<td>원본 문서에 인덱스 매핑 + 점수 부여</td>
+</tr>
+<tr>
+<td><strong>레거시</strong></td>
+<td>이미 정렬된 문서 리스트</td>
+<td>그대로 사용</td>
+</tr>
+</tbody>
+</table>
+<p>인덱스 기반 형식에서 각 청크에 <code>rerank_score</code> 필드가 추가됩니다:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">doc</span><span class="p">[</span><span class="s2">&quot;rerank_score&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">relevance_score</span>
+</code></pre></div>
+<h3 id="44">4.4 리랭킹 후 필터링<a class="headerlink" href="#44" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># utils.py — process_chunks_unified()</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">min_rerank_score</span> <span class="o">=</span> <span class="n">global_config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;min_rerank_score&quot;</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">)</span>  <span class="c1"># 런타임 기본값</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="k">if</span> <span class="n">min_rerank_score</span> <span class="o">&gt;</span> <span class="mf">0.0</span><span class="p">:</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>    <span class="n">filtered_chunks</span> <span class="o">=</span> <span class="p">[</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>        <span class="n">chunk</span> <span class="k">for</span> <span class="n">chunk</span> <span class="ow">in</span> <span class="n">unique_chunks</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>        <span class="k">if</span> <span class="n">chunk</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;rerank_score&quot;</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="n">min_rerank_score</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>    <span class="p">]</span>
+</code></pre></div>
+<ul>
+<li>리랭크 점수 0.5 미만인 청크는 제거</li>
+<li><code>rerank_score</code>가 없는 청크는 <code>1.0</code>으로 간주 (통과)</li>
+</ul>
+<h3 id="45">4.5 리랭킹 파이프라인 요약<a class="headerlink" href="#45" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>청크 목록 (라운드 로빈 병합 후)
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>    │
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>    ▼
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>[1] rerank_model_func(query, chunks, top_n=chunk_top_k)
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>    → relevance_score 부여, 점수 내림차순 정렬
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>    │
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>    ▼
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>[2] min_rerank_score 필터 (기본 ≥ 0.5)
+<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>    → 낮은 점수 청크 제거
+<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>    │
+<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>    ▼
+<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a>[3] chunk_top_k 상한 적용 (기본 20)
+<a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a>    → 상위 20개만 유지
+<a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a>    │
+<a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a>    ▼
+<a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a>[4] 토큰 예산 절삭
+<a id="__codelineno-12-17" name="__codelineno-12-17" href="#__codelineno-12-17"></a>    → available_chunk_tokens 이내로 절삭
+</code></pre></div>
+<hr />
+<h2 id="5">5. 토큰 예산 관리<a class="headerlink" href="#5" title="Permanent link">&para;</a></h2>
+<h3 id="51">5.1 고정 토큰 예산<a class="headerlink" href="#51" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>기본 토큰 예산</th>
+<th>상수명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>엔티티 컨텍스트</td>
+<td>6,000</td>
+<td><code>DEFAULT_MAX_ENTITY_TOKENS</code></td>
+</tr>
+<tr>
+<td>관계 컨텍스트</td>
+<td>8,000</td>
+<td><code>DEFAULT_MAX_RELATION_TOKENS</code></td>
+</tr>
+<tr>
+<td>전체 합계</td>
+<td>30,000</td>
+<td><code>DEFAULT_MAX_TOTAL_TOKENS</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="52">5.2 동적 청크 토큰 예산<a class="headerlink" href="#52" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># operate.py — _build_context_str()</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="n">available_chunk_tokens</span> <span class="o">=</span> <span class="n">max_total_tokens</span> <span class="o">-</span> <span class="p">(</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>    <span class="n">sys_prompt_tokens</span> <span class="o">+</span>     <span class="c1"># 시스템 프롬프트</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>    <span class="n">kg_context_tokens</span> <span class="o">+</span>     <span class="c1"># 엔티티 + 관계 JSON</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>    <span class="n">query_tokens</span> <span class="o">+</span>          <span class="c1"># 사용자 쿼리</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>    <span class="n">buffer_tokens</span>           <span class="c1"># 200 (레퍼런스 목록 + 안전 마진)</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="p">)</span>
+</code></pre></div>
+<h3 id="53">5.3 절삭 함수<a class="headerlink" href="#53" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="c1"># utils.py — truncate_list_by_token_size()</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="k">def</span><span class="w"> </span><span class="nf">truncate_list_by_token_size</span><span class="p">(</span><span class="n">list_data</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">max_token_size</span><span class="p">,</span> <span class="n">tokenizer</span><span class="p">):</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>    <span class="k">if</span> <span class="n">max_token_size</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>        <span class="k">return</span> <span class="p">[]</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>    <span class="n">tokens</span> <span class="o">=</span> <span class="mi">0</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">data</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">list_data</span><span class="p">):</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>        <span class="n">tokens</span> <span class="o">+=</span> <span class="nb">len</span><span class="p">(</span><span class="n">tokenizer</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">key</span><span class="p">(</span><span class="n">data</span><span class="p">)))</span>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a>        <span class="k">if</span> <span class="n">tokens</span> <span class="o">&gt;</span> <span class="n">max_token_size</span><span class="p">:</span>
+<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a>            <span class="k">return</span> <span class="n">list_data</span><span class="p">[:</span><span class="n">i</span><span class="p">]</span>
+<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a>    <span class="k">return</span> <span class="n">list_data</span>
+</code></pre></div>
+<ul>
+<li><strong>순서 유지</strong>: 앞쪽에 위치한(=점수가 높은) 항목이 우선 포함</li>
+<li>누적 토큰이 예산 초과 시 즉시 중단</li>
+</ul>
+<hr />
+<h2 id="6">6. 쿼리 모드별 차이<a class="headerlink" href="#6" title="Permanent link">&para;</a></h2>
+<h3 id="61">6.1 모드 비교표<a class="headerlink" href="#61" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>모드</th>
+<th>엔티티 검색</th>
+<th>관계 검색</th>
+<th>벡터 청크</th>
+<th>사용 키워드</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>local</strong></td>
+<td>ll_keywords로 VDB 검색</td>
+<td>엔티티에서 파생 (degree+weight 순)</td>
+<td>KG source_ids만</td>
+<td>low-level</td>
+</tr>
+<tr>
+<td><strong>global</strong></td>
+<td>관계에서 파생</td>
+<td>hl_keywords로 VDB 검색</td>
+<td>KG source_ids만</td>
+<td>high-level</td>
+</tr>
+<tr>
+<td><strong>hybrid</strong></td>
+<td>local + global 모두</td>
+<td>local + global 모두</td>
+<td>KG source_ids만</td>
+<td>양쪽 모두</td>
+</tr>
+<tr>
+<td><strong>mix</strong></td>
+<td>local + global 모두</td>
+<td>local + global 모두</td>
+<td>KG source_ids + 직접 벡터 검색</td>
+<td>양쪽 모두</td>
+</tr>
+<tr>
+<td><strong>naive</strong></td>
+<td>없음</td>
+<td>없음</td>
+<td>직접 벡터 검색만</td>
+<td>없음 (LLM 키워드 추출 생략)</td>
+</tr>
+<tr>
+<td><strong>bypass</strong></td>
+<td>없음</td>
+<td>없음</td>
+<td>없음</td>
+<td>없음 (LLM 직접 호출)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="62">6.2 모드별 상세 설명<a class="headerlink" href="#62" title="Permanent link">&para;</a></h3>
+<h4 id="local_1">Local 모드<a class="headerlink" href="#local_1" title="Permanent link">&para;</a></h4>
+<ul>
+<li><strong>저수준 키워드</strong>(구체적 엔티티명)로 엔티티 VDB를 검색</li>
+<li>검색된 엔티티에서 연결된 edge(관계)를 탐색</li>
+<li>관계 정렬: <code>(노드 degree 합, edge weight)</code> 내림차순</li>
+<li>특정 엔티티 중심의 질문에 적합</li>
+</ul>
+<h4 id="global">Global 모드<a class="headerlink" href="#global" title="Permanent link">&para;</a></h4>
+<ul>
+<li><strong>고수준 키워드</strong>(추상적 개념)로 관계 VDB를 검색</li>
+<li>검색된 관계의 양쪽 엔티티를 자동 탐색</li>
+<li>관계 정렬: 코사인 유사도 순</li>
+<li>넓은 범위의 주제/개념 질문에 적합</li>
+</ul>
+<h4 id="hybrid">Hybrid 모드<a class="headerlink" href="#hybrid" title="Permanent link">&para;</a></h4>
+<ul>
+<li>Local + Global 결과를 라운드 로빈으로 병합</li>
+<li>두 가지 시각(엔티티 중심 + 관계 중심)을 동시에 활용</li>
+<li>벡터 청크 직접 검색은 하지 않음</li>
+</ul>
+<h4 id="mix">Mix 모드 (기본값)<a class="headerlink" href="#mix" title="Permanent link">&para;</a></h4>
+<ul>
+<li>Hybrid + 벡터 청크 직접 검색</li>
+<li>3가지 소스 라운드 로빈 병합: 벡터 → 엔티티 관련 → 관계 관련</li>
+<li><strong>가장 포괄적인 검색 모드</strong></li>
+</ul>
+<h4 id="naive">Naive 모드<a class="headerlink" href="#naive" title="Permanent link">&para;</a></h4>
+<ul>
+<li>KG 검색 완전 생략</li>
+<li>벡터 청크 직접 검색만 수행</li>
+<li><code>naive_rag_response</code> 프롬프트 사용 (엔티티/관계 컨텍스트 없음)</li>
+<li>단순 시맨틱 검색에 적합</li>
+</ul>
+<h4 id="bypass">Bypass 모드<a class="headerlink" href="#bypass" title="Permanent link">&para;</a></h4>
+<ul>
+<li>검색 없이 LLM에 직접 질문</li>
+<li>RAG 파이프라인 완전 우회</li>
+</ul>
+<hr />
+<h2 id="7">7. 핵심 파라미터 요약<a class="headerlink" href="#7" title="Permanent link">&para;</a></h2>
+<h3 id="71-queryparam">7.1 QueryParam 파라미터<a class="headerlink" href="#71-queryparam" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>파라미터</th>
+<th>기본값</th>
+<th>설명</th>
+<th>소스</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mode</code></td>
+<td><code>"mix"</code></td>
+<td>쿼리 모드</td>
+<td><code>base.py</code></td>
+</tr>
+<tr>
+<td><code>top_k</code></td>
+<td>40</td>
+<td>엔티티/관계 VDB 검색 수</td>
+<td><code>constants.py</code></td>
+</tr>
+<tr>
+<td><code>chunk_top_k</code></td>
+<td>20</td>
+<td>벡터 청크 검색 수 &amp; 리랭킹 후 상한</td>
+<td><code>constants.py</code></td>
+</tr>
+<tr>
+<td><code>max_entity_tokens</code></td>
+<td>6,000</td>
+<td>엔티티 컨텍스트 토큰 한도</td>
+<td><code>constants.py</code></td>
+</tr>
+<tr>
+<td><code>max_relation_tokens</code></td>
+<td>8,000</td>
+<td>관계 컨텍스트 토큰 한도</td>
+<td><code>constants.py</code></td>
+</tr>
+<tr>
+<td><code>max_total_tokens</code></td>
+<td>30,000</td>
+<td>전체 컨텍스트 토큰 한도</td>
+<td><code>constants.py</code></td>
+</tr>
+<tr>
+<td><code>enable_rerank</code></td>
+<td><code>True</code></td>
+<td>리랭킹 활성화 여부</td>
+<td>환경변수 <code>RERANK_BY_DEFAULT</code></td>
+</tr>
+<tr>
+<td><code>hl_keywords</code></td>
+<td><code>[]</code></td>
+<td>사용자 지정 고수준 키워드</td>
+<td><code>base.py</code></td>
+</tr>
+<tr>
+<td><code>ll_keywords</code></td>
+<td><code>[]</code></td>
+<td>사용자 지정 저수준 키워드</td>
+<td><code>base.py</code></td>
+</tr>
+<tr>
+<td><code>response_type</code></td>
+<td><code>"Multiple Paragraphs"</code></td>
+<td>LLM 응답 형식</td>
+<td><code>base.py</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="72">7.2 시스템 설정 파라미터<a class="headerlink" href="#72" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>파라미터</th>
+<th>기본값</th>
+<th>설명</th>
+<th>소스</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cosine_better_than_threshold</code></td>
+<td>0.2</td>
+<td>VDB 검색 최소 코사인 유사도</td>
+<td><code>constants.py</code></td>
+</tr>
+<tr>
+<td><code>related_chunk_number</code></td>
+<td>5</td>
+<td>엔티티/관계당 관련 청크 최대 수</td>
+<td><code>constants.py</code></td>
+</tr>
+<tr>
+<td><code>kg_chunk_pick_method</code></td>
+<td><code>"VECTOR"</code></td>
+<td>관련 청크 선택 방식</td>
+<td><code>constants.py</code></td>
+</tr>
+<tr>
+<td><code>min_rerank_score</code></td>
+<td>0.0 (상수) / 0.5 (런타임)</td>
+<td>리랭킹 최소 점수 필터</td>
+<td><code>constants.py</code> / <code>utils.py</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="8">8. 주요 관찰 사항 및 개선 포인트<a class="headerlink" href="#8" title="Permanent link">&para;</a></h2>
+<h3 id="81">8.1 리랭크 모델 미설정 시 주의<a class="headerlink" href="#81" title="Permanent link">&para;</a></h3>
+<p><code>enable_rerank=True</code>가 기본이지만, <code>rerank_model_func</code>이 없으면 경고만 출력하고 원본 순서 유지됩니다. 리랭킹이 사실상 비활성화된 상태일 수 있으므로 운영 환경에서 반드시 확인 필요.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># 경고 메시지</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">&quot;Rerank is enabled but no rerank model is configured...&quot;</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="82-min_rerank_score">8.2 min_rerank_score 불일치<a class="headerlink" href="#82-min_rerank_score" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>위치</th>
+<th>값</th>
+<th>비고</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>constants.py</code></td>
+<td><code>DEFAULT_MIN_RERANK_SCORE = 0.0</code></td>
+<td>상수 정의</td>
+</tr>
+<tr>
+<td><code>utils.py</code> (<code>process_chunks_unified</code>)</td>
+<td><code>global_config.get("min_rerank_score", 0.5)</code></td>
+<td>런타임 기본값</td>
+</tr>
+</tbody>
+</table>
+<p>상수는 0.0이지만 런타임 코드에서는 0.5를 기본값으로 사용합니다. 이 불일치가 의도적인 것인지 확인이 필요합니다.</p>
+<h3 id="83-local-degree">8.3 Local 관계의 Degree 기반 정렬<a class="headerlink" href="#83-local-degree" title="Permanent link">&para;</a></h3>
+<p>코사인 유사도가 아닌 그래프 구조(노드 degree + edge weight)를 기준으로 정렬되어, <strong>허브 노드 중심의 관계가 우선</strong>됩니다. 이는 그래프 구조 정보를 활용하는 장점이 있지만, 유사도가 높지만 degree가 낮은 특수한 관계가 누락될 수 있습니다.</p>
+<h3 id="84">8.4 토큰 예산의 동적 분배<a class="headerlink" href="#84" title="Permanent link">&para;</a></h3>
+<p>청크에 할당되는 토큰 예산은 <code>전체 예산 - 고정 비용</code>으로 동적 계산됩니다. 엔티티/관계 컨텍스트가 많으면 청크에 할당되는 토큰이 줄어들어, 원본 텍스트 참조 범위가 축소될 수 있습니다.</p>
+<h3 id="85-mix">8.5 Mix 모드의 청크 다양성<a class="headerlink" href="#85-mix" title="Permanent link">&para;</a></h3>
+<p>3가지 소스(벡터 검색, 엔티티 관련, 관계 관련)에서 라운드 로빈으로 병합하여 검색 다양성을 확보합니다. 이는 단일 소스 의존도를 낮추는 장점이 있습니다.</p>
+<h3 id="86-rerank_score">8.6 rerank_score 미존재 시 기본값<a class="headerlink" href="#86-rerank_score" title="Permanent link">&para;</a></h3>
+<p>리랭크 모델이 설정되지 않은 경우 <code>rerank_score</code> 필드가 없으며, 필터링 시 기본값 <code>1.0</code>으로 처리됩니다. 따라서 모든 청크가 필터를 통과하게 됩니다.</p>
+<hr />
+<h2 id="9-end-to-end">9. End-to-End 파이프라인 다이어그램<a class="headerlink" href="#9-end-to-end" title="Permanent link">&para;</a></h2>
+<h3 id="mix_1">Mix 모드 전체 흐름<a class="headerlink" href="#mix_1" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>┌─────────────────────────────────────────────────────┐
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>│                    쿼리 요청                          │
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>│  POST /api/query  { query, mode: &quot;mix&quot;, ... }       │
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>└─────────────────────┬───────────────────────────────┘
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a>                      │
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a>                      ▼
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a>┌─────────────────────────────────────────────────────┐
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a>│              [1] 키워드 추출 (LLM)                    │
+<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a>│  ┌──────────────────┐  ┌──────────────────────────┐ │
+<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a>│  │ hl_keywords       │  │ ll_keywords              │ │
+<a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a>│  │ (고수준 개념)       │  │ (저수준 엔티티)            │ │
+<a id="__codelineno-16-12" name="__codelineno-16-12" href="#__codelineno-16-12"></a>│  └────────┬─────────┘  └──────────┬───────────────┘ │
+<a id="__codelineno-16-13" name="__codelineno-16-13" href="#__codelineno-16-13"></a>└───────────┼────────────────────────┼────────────────┘
+<a id="__codelineno-16-14" name="__codelineno-16-14" href="#__codelineno-16-14"></a>            │                        │
+<a id="__codelineno-16-15" name="__codelineno-16-15" href="#__codelineno-16-15"></a>            ▼                        ▼
+<a id="__codelineno-16-16" name="__codelineno-16-16" href="#__codelineno-16-16"></a>┌───────────────────────┐ ┌──────────────────────────┐
+<a id="__codelineno-16-17" name="__codelineno-16-17" href="#__codelineno-16-17"></a>│ [2a] Global 검색       │ │ [2b] Local 검색           │
+<a id="__codelineno-16-18" name="__codelineno-16-18" href="#__codelineno-16-18"></a>│                       │ │                          │
+<a id="__codelineno-16-19" name="__codelineno-16-19" href="#__codelineno-16-19"></a>│ 관계 VDB 검색          │ │ 엔티티 VDB 검색            │
+<a id="__codelineno-16-20" name="__codelineno-16-20" href="#__codelineno-16-20"></a>│ (hl_keywords)         │ │ (ll_keywords)            │
+<a id="__codelineno-16-21" name="__codelineno-16-21" href="#__codelineno-16-21"></a>│ cosine sim, top_k=40  │ │ cosine sim, top_k=40     │
+<a id="__codelineno-16-22" name="__codelineno-16-22" href="#__codelineno-16-22"></a>│         │             │ │         │                │
+<a id="__codelineno-16-23" name="__codelineno-16-23" href="#__codelineno-16-23"></a>│         ▼             │ │         ▼                │
+<a id="__codelineno-16-24" name="__codelineno-16-24" href="#__codelineno-16-24"></a>│ 양쪽 엔티티 탐색       │ │ 연결된 edge 탐색          │
+<a id="__codelineno-16-25" name="__codelineno-16-25" href="#__codelineno-16-25"></a>│                       │ │ (degree+weight 정렬)      │
+<a id="__codelineno-16-26" name="__codelineno-16-26" href="#__codelineno-16-26"></a>└───────────┬───────────┘ └──────────┬───────────────┘
+<a id="__codelineno-16-27" name="__codelineno-16-27" href="#__codelineno-16-27"></a>            │                        │
+<a id="__codelineno-16-28" name="__codelineno-16-28" href="#__codelineno-16-28"></a>            ▼                        ▼
+<a id="__codelineno-16-29" name="__codelineno-16-29" href="#__codelineno-16-29"></a>┌─────────────────────────────────────────────────────┐
+<a id="__codelineno-16-30" name="__codelineno-16-30" href="#__codelineno-16-30"></a>│        [2c] 라운드 로빈 병합 + 중복 제거               │
+<a id="__codelineno-16-31" name="__codelineno-16-31" href="#__codelineno-16-31"></a>│  local[0] → global[0] → local[1] → global[1] → ... │
+<a id="__codelineno-16-32" name="__codelineno-16-32" href="#__codelineno-16-32"></a>└───────────────────────┬─────────────────────────────┘
+<a id="__codelineno-16-33" name="__codelineno-16-33" href="#__codelineno-16-33"></a>                        │
+<a id="__codelineno-16-34" name="__codelineno-16-34" href="#__codelineno-16-34"></a>                        ▼
+<a id="__codelineno-16-35" name="__codelineno-16-35" href="#__codelineno-16-35"></a>┌─────────────────────────────────────────────────────┐
+<a id="__codelineno-16-36" name="__codelineno-16-36" href="#__codelineno-16-36"></a>│             [3] 토큰 절삭                            │
+<a id="__codelineno-16-37" name="__codelineno-16-37" href="#__codelineno-16-37"></a>│  엔티티: truncate(max=6,000 tokens)                  │
+<a id="__codelineno-16-38" name="__codelineno-16-38" href="#__codelineno-16-38"></a>│  관계:   truncate(max=8,000 tokens)                  │
+<a id="__codelineno-16-39" name="__codelineno-16-39" href="#__codelineno-16-39"></a>└───────────────────────┬─────────────────────────────┘
+<a id="__codelineno-16-40" name="__codelineno-16-40" href="#__codelineno-16-40"></a>                        │
+<a id="__codelineno-16-41" name="__codelineno-16-41" href="#__codelineno-16-41"></a>                        ▼
+<a id="__codelineno-16-42" name="__codelineno-16-42" href="#__codelineno-16-42"></a>┌─────────────────────────────────────────────────────┐
+<a id="__codelineno-16-43" name="__codelineno-16-43" href="#__codelineno-16-43"></a>│             [4] 청크 수집                            │
+<a id="__codelineno-16-44" name="__codelineno-16-44" href="#__codelineno-16-44"></a>│                                                     │
+<a id="__codelineno-16-45" name="__codelineno-16-45" href="#__codelineno-16-45"></a>│  ┌──────────┐  ┌──────────────┐  ┌────────────────┐│
+<a id="__codelineno-16-46" name="__codelineno-16-46" href="#__codelineno-16-46"></a>│  │벡터 청크   │  │엔티티 관련 청크│  │관계 관련 청크  ││
+<a id="__codelineno-16-47" name="__codelineno-16-47" href="#__codelineno-16-47"></a>│  │(직접 검색) │  │(source_id)   │  │(source_id)    ││
+<a id="__codelineno-16-48" name="__codelineno-16-48" href="#__codelineno-16-48"></a>│  │top_k=20  │  │VECTOR 방식    │  │VECTOR 방식    ││
+<a id="__codelineno-16-49" name="__codelineno-16-49" href="#__codelineno-16-49"></a>│  └─────┬────┘  └──────┬───────┘  └──────┬─────────┘│
+<a id="__codelineno-16-50" name="__codelineno-16-50" href="#__codelineno-16-50"></a>│        │              │                  │          │
+<a id="__codelineno-16-51" name="__codelineno-16-51" href="#__codelineno-16-51"></a>│        ▼              ▼                  ▼          │
+<a id="__codelineno-16-52" name="__codelineno-16-52" href="#__codelineno-16-52"></a>│     라운드 로빈 병합: vec→entity→relation (중복 제거)  │
+<a id="__codelineno-16-53" name="__codelineno-16-53" href="#__codelineno-16-53"></a>└───────────────────────┬─────────────────────────────┘
+<a id="__codelineno-16-54" name="__codelineno-16-54" href="#__codelineno-16-54"></a>                        │
+<a id="__codelineno-16-55" name="__codelineno-16-55" href="#__codelineno-16-55"></a>                        ▼
+<a id="__codelineno-16-56" name="__codelineno-16-56" href="#__codelineno-16-56"></a>┌─────────────────────────────────────────────────────┐
+<a id="__codelineno-16-57" name="__codelineno-16-57" href="#__codelineno-16-57"></a>│             [5] 리랭킹 + 필터링                       │
+<a id="__codelineno-16-58" name="__codelineno-16-58" href="#__codelineno-16-58"></a>│                                                     │
+<a id="__codelineno-16-59" name="__codelineno-16-59" href="#__codelineno-16-59"></a>│  ① rerank_model_func(query, chunks, top_n=20)      │
+<a id="__codelineno-16-60" name="__codelineno-16-60" href="#__codelineno-16-60"></a>│     → relevance_score 부여, 점수 내림차순 정렬         │
+<a id="__codelineno-16-61" name="__codelineno-16-61" href="#__codelineno-16-61"></a>│                                                     │
+<a id="__codelineno-16-62" name="__codelineno-16-62" href="#__codelineno-16-62"></a>│  ② min_rerank_score 필터 (≥ 0.5)                    │
+<a id="__codelineno-16-63" name="__codelineno-16-63" href="#__codelineno-16-63"></a>│     → 낮은 관련도 청크 제거                            │
+<a id="__codelineno-16-64" name="__codelineno-16-64" href="#__codelineno-16-64"></a>│                                                     │
+<a id="__codelineno-16-65" name="__codelineno-16-65" href="#__codelineno-16-65"></a>│  ③ chunk_top_k 상한 (20)                            │
+<a id="__codelineno-16-66" name="__codelineno-16-66" href="#__codelineno-16-66"></a>│     → 상위 20개만 유지                                │
+<a id="__codelineno-16-67" name="__codelineno-16-67" href="#__codelineno-16-67"></a>│                                                     │
+<a id="__codelineno-16-68" name="__codelineno-16-68" href="#__codelineno-16-68"></a>│  ④ 토큰 예산 절삭                                    │
+<a id="__codelineno-16-69" name="__codelineno-16-69" href="#__codelineno-16-69"></a>│     → available = 30K - prompt - KG - query - 200   │
+<a id="__codelineno-16-70" name="__codelineno-16-70" href="#__codelineno-16-70"></a>└───────────────────────┬─────────────────────────────┘
+<a id="__codelineno-16-71" name="__codelineno-16-71" href="#__codelineno-16-71"></a>                        │
+<a id="__codelineno-16-72" name="__codelineno-16-72" href="#__codelineno-16-72"></a>                        ▼
+<a id="__codelineno-16-73" name="__codelineno-16-73" href="#__codelineno-16-73"></a>┌─────────────────────────────────────────────────────┐
+<a id="__codelineno-16-74" name="__codelineno-16-74" href="#__codelineno-16-74"></a>│             [6] 컨텍스트 조립                         │
+<a id="__codelineno-16-75" name="__codelineno-16-75" href="#__codelineno-16-75"></a>│                                                     │
+<a id="__codelineno-16-76" name="__codelineno-16-76" href="#__codelineno-16-76"></a>│  ┌─ Knowledge Graph Data (Entity): ──────────────┐  │
+<a id="__codelineno-16-77" name="__codelineno-16-77" href="#__codelineno-16-77"></a>│  │  { entity_name, description, ... }            │  │
+<a id="__codelineno-16-78" name="__codelineno-16-78" href="#__codelineno-16-78"></a>│  └───────────────────────────────────────────────┘  │
+<a id="__codelineno-16-79" name="__codelineno-16-79" href="#__codelineno-16-79"></a>│  ┌─ Knowledge Graph Data (Relationship): ────────┐  │
+<a id="__codelineno-16-80" name="__codelineno-16-80" href="#__codelineno-16-80"></a>│  │  { src_id, tgt_id, description, ... }         │  │
+<a id="__codelineno-16-81" name="__codelineno-16-81" href="#__codelineno-16-81"></a>│  └───────────────────────────────────────────────┘  │
+<a id="__codelineno-16-82" name="__codelineno-16-82" href="#__codelineno-16-82"></a>│  ┌─ Document Chunks: ───────────────────────────┐   │
+<a id="__codelineno-16-83" name="__codelineno-16-83" href="#__codelineno-16-83"></a>│  │  { reference_id, content, file_path, ... }    │  │
+<a id="__codelineno-16-84" name="__codelineno-16-84" href="#__codelineno-16-84"></a>│  └───────────────────────────────────────────────┘  │
+<a id="__codelineno-16-85" name="__codelineno-16-85" href="#__codelineno-16-85"></a>│  ┌─ Reference Document List: ───────────────────┐   │
+<a id="__codelineno-16-86" name="__codelineno-16-86" href="#__codelineno-16-86"></a>│  │  ref_id → file_name (빈도 기반 ID 할당)         │  │
+<a id="__codelineno-16-87" name="__codelineno-16-87" href="#__codelineno-16-87"></a>│  └───────────────────────────────────────────────┘  │
+<a id="__codelineno-16-88" name="__codelineno-16-88" href="#__codelineno-16-88"></a>└───────────────────────┬─────────────────────────────┘
+<a id="__codelineno-16-89" name="__codelineno-16-89" href="#__codelineno-16-89"></a>                        │
+<a id="__codelineno-16-90" name="__codelineno-16-90" href="#__codelineno-16-90"></a>                        ▼
+<a id="__codelineno-16-91" name="__codelineno-16-91" href="#__codelineno-16-91"></a>┌─────────────────────────────────────────────────────┐
+<a id="__codelineno-16-92" name="__codelineno-16-92" href="#__codelineno-16-92"></a>│             [7] LLM 생성                             │
+<a id="__codelineno-16-93" name="__codelineno-16-93" href="#__codelineno-16-93"></a>│                                                     │
+<a id="__codelineno-16-94" name="__codelineno-16-94" href="#__codelineno-16-94"></a>│  시스템 프롬프트: rag_response 템플릿 + 컨텍스트        │
+<a id="__codelineno-16-95" name="__codelineno-16-95" href="#__codelineno-16-95"></a>│  사용자 메시지: 원본 쿼리 + conversation_history       │
+<a id="__codelineno-16-96" name="__codelineno-16-96" href="#__codelineno-16-96"></a>│  → 최종 응답 생성                                    │
+<a id="__codelineno-16-97" name="__codelineno-16-97" href="#__codelineno-16-97"></a>└─────────────────────────────────────────────────────┘
+</code></pre></div>
+<hr />
+<h2 id="_2">부록: 관련 소스 파일 참조<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>파일</th>
+<th>주요 함수/영역</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>lightrag/operate.py</code></td>
+<td><code>kg_query()</code>, <code>naive_query()</code>, <code>_build_query_context()</code>, <code>_perform_kg_search()</code>, <code>_get_node_data()</code>, <code>_get_edge_data()</code>, <code>_get_vector_context()</code>, <code>_apply_token_truncation()</code>, <code>_merge_all_chunks()</code>, <code>_build_context_str()</code></td>
+</tr>
+<tr>
+<td><code>lightrag/utils.py</code></td>
+<td><code>apply_rerank_if_enabled()</code>, <code>process_chunks_unified()</code>, <code>pick_by_vector_similarity()</code>, <code>pick_by_weighted_polling()</code>, <code>truncate_list_by_token_size()</code>, <code>cosine_similarity()</code></td>
+</tr>
+<tr>
+<td><code>lightrag/lightrag.py</code></td>
+<td><code>aquery_llm()</code>, <code>aquery_data()</code></td>
+</tr>
+<tr>
+<td><code>lightrag/prompt.py</code></td>
+<td><code>keywords_extraction</code>, <code>kg_query_context</code>, <code>rag_response</code>, <code>naive_rag_response</code></td>
+</tr>
+<tr>
+<td><code>lightrag/base.py</code></td>
+<td><code>QueryParam</code> dataclass</td>
+</tr>
+<tr>
+<td><code>lightrag/constants.py</code></td>
+<td>기본값 상수 정의</td>
+</tr>
+<tr>
+<td><code>lightrag/kg/postgres_impl.py</code></td>
+<td>VDB SQL 템플릿 (entities, relationships, chunks)</td>
+</tr>
+<tr>
+<td><code>lightrag/api/routers/query_routes.py</code></td>
+<td>API 엔드포인트 (<code>query_text</code>, <code>query_text_stream</code>, <code>query_data</code>)</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  맨위로
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\ud074\ub9bd\ubcf4\ub4dc\uc5d0 \ubcf5\uc0ac\ub428", "clipboard.copy": "\ud074\ub9bd\ubcf4\ub4dc\ub85c \ubcf5\uc0ac", "search.result.more.one": "\uc774 \ubb38\uc11c\uc5d0\uc11c 1\uac1c\uc758 \uac80\uc0c9 \uacb0\uacfc \ub354 \ubcf4\uae30", "search.result.more.other": "\uc774 \ubb38\uc11c\uc5d0\uc11c #\uac1c\uc758 \uac80\uc0c9 \uacb0\uacfc \ub354 \ubcf4\uae30", "search.result.none": "\uac80\uc0c9\uc5b4\uc640 \uc77c\uce58\ud558\ub294 \ubb38\uc11c\uac00 \uc5c6\uc2b5\ub2c8\ub2e4", "search.result.one": "1\uac1c\uc758 \uc77c\uce58\ud558\ub294 \ubb38\uc11c", "search.result.other": "#\uac1c\uc758 \uc77c\uce58\ud558\ub294 \ubb38\uc11c", "search.result.placeholder": "\uac80\uc0c9\uc5b4\ub97c \uc785\ub825\ud558\uc138\uc694", "search.result.term.missing": "\ud3ec\ud568\ub418\uc9c0 \uc54a\uc740 \uac80\uc0c9\uc5b4", "select.version": "\ubc84\uc804 \uc120\ud0dd"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

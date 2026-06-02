@@ -1,0 +1,2948 @@
+
+<!doctype html>
+<html lang="ko" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="LightRAG 프로젝트 기술 분석 및 설계 문서">
+      
+      
+      
+      
+        <link rel="prev" href="../2026-02-13_board-api-ingestion-guide/">
+      
+      
+        <link rel="next" href="../2026-02-10_query-response-structure/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>2026-02-11_url-ingestion-pipeline-analysis - LightRAG 기술 문서</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Noto+Sans+KR:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Noto Sans KR";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#lightrag-url-knowledge-ingestion" class="md-skip">
+          콘텐츠로 이동
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="상단/헤더">
+    <a href="../.." title="LightRAG 기술 문서" class="md-header__button md-logo" aria-label="LightRAG 기술 문서" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            LightRAG 기술 문서
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              2026-02-11_url-ingestion-pipeline-analysis
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="다크 모드로 전환"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="다크 모드로 전환" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="라이트 모드로 전환"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="라이트 모드로 전환" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="검색" placeholder="검색" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="검색">
+        
+        <button type="reset" class="md-search__icon md-icon" title="지우기" aria-label="지우기" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            검색 초기화
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="네비게이션" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="LightRAG 기술 문서" class="md-nav__button md-logo" aria-label="LightRAG 기술 문서" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    LightRAG 기술 문서
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    홈
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    코드분석
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    코드분석
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-05-16_feature-capability-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-05-16_feature-capability-analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-13_board-api-ingestion-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-13_board-api-ingestion-guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-11_url-ingestion-pipeline-analysis
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-11_url-ingestion-pipeline-analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="목차">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      목차
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        목차
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. 시스템 개요
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. 시스템 개요">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        핵심 특성
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. 아키텍처
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. 아키텍처">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 모듈 구조
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 의존 관계
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. 백엔드 모듈 상세
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. 백엔드 모듈 상세">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-urlingestconfig-urlconfigpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 URLIngestConfig (url/config.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-urldetector-urldetectorpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 URLDetector (url/detector.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-webfetcher-urlfetcherpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 WebFetcher (url/fetcher.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-htmlparser-urlparserpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 HTMLParser (url/parser.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. API 엔드포인트
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. API 엔드포인트">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 라우트 등록
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 엔드포인트 목록
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 요청/응답 모델
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4.3 요청/응답 모델">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#post-apiurlvalidate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/url/validate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiurlextract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/url/extract
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiurlingest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/url/ingest
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiurlingest-batch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/url/ingest-batch
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. 7단계 처리 파이프라인
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. 7단계 처리 파이프라인">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        전체 흐름
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-1-url-0-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 1: URL 검증 (0% → 5%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-2-html-10-25" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 2: HTML 페칭 (10% → 25%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-3-html-25-40" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 3: HTML 파싱 (25% → 40%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-4-40-60" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 4: 텍스트 삽입 (40% → 60%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-5-60-95" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 5: 멀티모달 처리 (60% → 95%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-6-url-95-98" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 6: 서브 URL 크롤링 (95% → 98%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-7-98-100" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 7: 완료 (98% → 100%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. 프론트엔드 UI
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. 프론트엔드 UI">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-urlingestdialog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 URLIngestDialog 컴포넌트
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 API 클라이언트
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-documentmanager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 DocumentManager 통합
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 국제화
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. 환경설정
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. 환경설정">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 환경변수
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 멀티모달 연동 설정
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. 데이터 흐름 다이어그램
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. 데이터 흐름 다이어그램">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#81-url" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.1 단건 URL 수집
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#82-url" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.2 배치 URL 수집
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#83" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.3 재귀 크롤링
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. 주요 관찰 사항 및 개선 포인트
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. 주요 관찰 사항 및 개선 포인트">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#91" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.1 잘 설계된 부분
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#92" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.2 해결된 이슈
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#93" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.3 잠재적 개선 포인트
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#94" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.4 태스크 관리 연동
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#95" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.5 파일 소스 참조
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. 버그 수정 이력
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. 버그 수정 이력">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#101-url-2026-02-11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.1 URL 이미지 지식화 실패 (2026-02-11)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10.1 URL 이미지 지식화 실패 (2026-02-11)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        수정 전 데이터 흐름 (실패)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        수정 내용 (3가지)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        수정 후 데이터 흐름 (정상)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        두 가지 입력 경로 호환성
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-10_query-response-structure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-response-structure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-10_query-pipeline-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-pipeline-analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-10_query-mode-behavior-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-mode-behavior-analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-10_query-api-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-api-reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-10_image-analysis-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_image-analysis-pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="목차">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      목차
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        목차
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. 시스템 개요
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. 시스템 개요">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        핵심 특성
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. 아키텍처
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. 아키텍처">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 모듈 구조
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 의존 관계
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. 백엔드 모듈 상세
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. 백엔드 모듈 상세">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-urlingestconfig-urlconfigpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 URLIngestConfig (url/config.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-urldetector-urldetectorpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 URLDetector (url/detector.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-webfetcher-urlfetcherpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 WebFetcher (url/fetcher.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-htmlparser-urlparserpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 HTMLParser (url/parser.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. API 엔드포인트
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. API 엔드포인트">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 라우트 등록
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 엔드포인트 목록
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 요청/응답 모델
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4.3 요청/응답 모델">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#post-apiurlvalidate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/url/validate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiurlextract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/url/extract
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiurlingest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/url/ingest
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiurlingest-batch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/url/ingest-batch
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. 7단계 처리 파이프라인
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. 7단계 처리 파이프라인">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        전체 흐름
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-1-url-0-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 1: URL 검증 (0% → 5%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-2-html-10-25" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 2: HTML 페칭 (10% → 25%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-3-html-25-40" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 3: HTML 파싱 (25% → 40%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-4-40-60" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 4: 텍스트 삽입 (40% → 60%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-5-60-95" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 5: 멀티모달 처리 (60% → 95%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-6-url-95-98" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 6: 서브 URL 크롤링 (95% → 98%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-7-98-100" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 7: 완료 (98% → 100%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. 프론트엔드 UI
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. 프론트엔드 UI">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-urlingestdialog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 URLIngestDialog 컴포넌트
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 API 클라이언트
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-documentmanager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 DocumentManager 통합
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 국제화
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. 환경설정
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. 환경설정">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 환경변수
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 멀티모달 연동 설정
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. 데이터 흐름 다이어그램
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. 데이터 흐름 다이어그램">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#81-url" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.1 단건 URL 수집
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#82-url" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.2 배치 URL 수집
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#83" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.3 재귀 크롤링
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. 주요 관찰 사항 및 개선 포인트
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. 주요 관찰 사항 및 개선 포인트">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#91" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.1 잘 설계된 부분
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#92" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.2 해결된 이슈
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#93" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.3 잠재적 개선 포인트
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#94" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.4 태스크 관리 연동
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#95" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.5 파일 소스 참조
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. 버그 수정 이력
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. 버그 수정 이력">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#101-url-2026-02-11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.1 URL 이미지 지식화 실패 (2026-02-11)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10.1 URL 이미지 지식화 실패 (2026-02-11)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        수정 전 데이터 흐름 (실패)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        수정 내용 (3가지)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        수정 후 데이터 흐름 (정상)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        두 가지 입력 경로 호환성
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="lightrag-url-knowledge-ingestion">LightRAG URL Knowledge Ingestion 파이프라인 분석<a class="headerlink" href="#lightrag-url-knowledge-ingestion" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>분석일: 2026-02-11 (최종 수정: 2026-02-11)
+대상: URL 콘텐츠 추출 및 지식그래프 변환 파이프라인
+분석 범위: <code>lightrag/url/</code>, <code>lightrag/api/routers/url_routes.py</code>, <code>lightrag/multimodal/processors/image.py</code>, <code>lightrag_webui/src/components/documents/URLIngestDialog.tsx</code></p>
+</blockquote>
+<hr />
+<h2 id="_1">목차<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<ol>
+<li><a href="#1-시스템-개요">시스템 개요</a></li>
+<li><a href="#2-아키텍처">아키텍처</a></li>
+<li><a href="#3-백엔드-모듈-상세">백엔드 모듈 상세</a></li>
+<li><a href="#4-api-엔드포인트">API 엔드포인트</a></li>
+<li><a href="#5-7단계-처리-파이프라인">7단계 처리 파이프라인</a></li>
+<li><a href="#6-프론트엔드-ui">프론트엔드 UI</a></li>
+<li><a href="#7-환경설정">환경설정</a></li>
+<li><a href="#8-데이터-흐름-다이어그램">데이터 흐름 다이어그램</a></li>
+<li><a href="#9-주요-관찰-사항-및-개선-포인트">주요 관찰 사항 및 개선 포인트</a></li>
+<li><a href="#10-버그-수정-이력">버그 수정 이력</a></li>
+</ol>
+<hr />
+<h2 id="1">1. 시스템 개요<a class="headerlink" href="#1" title="Permanent link">&para;</a></h2>
+<p>URL Knowledge Ingestion은 웹 페이지 URL을 입력받아 콘텐츠를 추출하고, 텍스트/이미지/테이블 등 멀티모달 콘텐츠를 지식그래프로 변환하는 비동기 파이프라인이다.</p>
+<h3 id="_2">핵심 특성<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>특성</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>비동기 처리</strong></td>
+<td>API 즉시 응답 → 백그라운드 처리 → NDJSON 스트리밍 진행률</td>
+</tr>
+<tr>
+<td><strong>멀티모달 통합</strong></td>
+<td>텍스트 + 이미지(VLM) + 테이블(LLM) 동시 처리</td>
+</tr>
+<tr>
+<td><strong>재귀 크롤링</strong></td>
+<td>링크 추적으로 관련 페이지 자동 수집 (depth 제어)</td>
+</tr>
+<tr>
+<td><strong>배치 처리</strong></td>
+<td>다수 URL 동시 제출, 개별 태스크로 병렬 처리</td>
+</tr>
+<tr>
+<td><strong>중복 감지</strong></td>
+<td>URL 정규화 기반 doc_id로 중복 문서 방지</td>
+</tr>
+<tr>
+<td><strong>워크스페이스 격리</strong></td>
+<td>LIGHTRAG-WORKSPACE 헤더 기반 멀티테넌트</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2">2. 아키텍처<a class="headerlink" href="#2" title="Permanent link">&para;</a></h2>
+<h3 id="21">2.1 모듈 구조<a class="headerlink" href="#21" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>lightrag/url/                        ← 코어 모듈
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── __init__.py                      ← 패키지 export
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├── config.py                        ← URLIngestConfig (환경변수 기반)
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├── detector.py                      ← URL 검증/정규화/추출
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>├── fetcher.py                       ← HTTP 비동기 페칭 (httpx + 재시도)
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>└── parser.py                        ← HTML 파싱 (BeautifulSoup)
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>lightrag/api/routers/
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>└── url_routes.py                    ← FastAPI 엔드포인트 + 백그라운드 처리 로직
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>lightrag_webui/src/
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>├── api/lightrag.ts                  ← TypeScript API 클라이언트
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>├── components/documents/
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>│   └── URLIngestDialog.tsx          ← URL 입력 다이얼로그 (단건/배치)
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>└── features/
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>    └── DocumentManager.tsx          ← URL 다이얼로그 통합
+</code></pre></div>
+<h3 id="22">2.2 의존 관계<a class="headerlink" href="#22" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>URLIngestDialog (Frontend)
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    │
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    ▼
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>url_routes.py (API Layer)
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    │
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    ├── url/detector.py    → URL 검증
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    ├── url/fetcher.py     → HTTP 페칭
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    ├── url/parser.py      → HTML 파싱
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>    │
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>    ├── task_manager.py    → 태스크 생성/진행률/완료
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>    ├── rag.ainsert()      → 텍스트 → 지식그래프
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>    │
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>    └── multimodal/
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>        ├── ImageModalProcessor  → 이미지 → VLM → 엔티티
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>        └── TableModalProcessor  → 테이블 → LLM → 엔티티
+</code></pre></div>
+<hr />
+<h2 id="3">3. 백엔드 모듈 상세<a class="headerlink" href="#3" title="Permanent link">&para;</a></h2>
+<h3 id="31-urlingestconfig-urlconfigpy">3.1 URLIngestConfig (<code>url/config.py</code>)<a class="headerlink" href="#31-urlingestconfig-urlconfigpy" title="Permanent link">&para;</a></h3>
+<p>환경변수 기반 설정. 모든 값은 기본값이 있어 무설정 실행 가능.</p>
+<table>
+<thead>
+<tr>
+<th>설정</th>
+<th>기본값</th>
+<th>환경변수</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>fetch_timeout</code></td>
+<td>30초</td>
+<td><code>URL_FETCH_TIMEOUT</code></td>
+<td>HTTP 요청 타임아웃</td>
+</tr>
+<tr>
+<td><code>fetch_max_retries</code></td>
+<td>3</td>
+<td><code>URL_FETCH_MAX_RETRIES</code></td>
+<td>재시도 횟수</td>
+</tr>
+<tr>
+<td><code>extract_images</code></td>
+<td>True</td>
+<td>-</td>
+<td>이미지 추출 활성화</td>
+</tr>
+<tr>
+<td><code>extract_tables</code></td>
+<td>True</td>
+<td>-</td>
+<td>테이블 추출 활성화</td>
+</tr>
+<tr>
+<td><code>download_images</code></td>
+<td>True</td>
+<td>-</td>
+<td>이미지 다운로드 (VLM 처리용)</td>
+</tr>
+<tr>
+<td><code>max_image_size_mb</code></td>
+<td>10.0</td>
+<td>-</td>
+<td>이미지 최대 크기</td>
+</tr>
+<tr>
+<td><code>min_text_length</code></td>
+<td>50</td>
+<td>-</td>
+<td>유효 판정 최소 텍스트 길이</td>
+</tr>
+<tr>
+<td><code>max_images</code></td>
+<td>20</td>
+<td>-</td>
+<td>페이지당 추출 이미지 수</td>
+</tr>
+<tr>
+<td><code>max_tables</code></td>
+<td>10</td>
+<td>-</td>
+<td>페이지당 추출 테이블 수</td>
+</tr>
+<tr>
+<td><code>max_text_chunk_size</code></td>
+<td>2000</td>
+<td><code>URL_MAX_TEXT_CHUNK_SIZE</code></td>
+<td>텍스트 청크 크기</td>
+</tr>
+<tr>
+<td><code>max_crawl_depth</code></td>
+<td>2</td>
+<td><code>URL_MAX_CRAWL_DEPTH</code></td>
+<td>재귀 크롤링 최대 깊이</td>
+</tr>
+<tr>
+<td><code>max_crawl_urls</code></td>
+<td>10</td>
+<td><code>URL_MAX_CRAWL_URLS</code></td>
+<td>페이지당 크롤링 대상 URL 수</td>
+</tr>
+<tr>
+<td><code>crawl_same_domain_only</code></td>
+<td>True</td>
+<td>-</td>
+<td>동일 도메인만 크롤링</td>
+</tr>
+</tbody>
+</table>
+<h3 id="32-urldetector-urldetectorpy">3.2 URLDetector (<code>url/detector.py</code>)<a class="headerlink" href="#32-urldetector-urldetectorpy" title="Permanent link">&para;</a></h3>
+<p>URL 검증, 정규화, 텍스트에서 URL 추출을 담당.</p>
+<p><strong>핵심 클래스/메서드:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nd">@dataclass</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">URLInfo</span><span class="p">:</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="n">url</span><span class="p">:</span> <span class="nb">str</span>              <span class="c1"># 원본 URL</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="n">normalized_url</span><span class="p">:</span> <span class="nb">str</span>   <span class="c1"># 정규화 URL (소문자 scheme/netloc, 후행 슬래시 제거)</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="n">scheme</span><span class="p">:</span> <span class="nb">str</span>           <span class="c1"># http/https</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="n">netloc</span><span class="p">:</span> <span class="nb">str</span>           <span class="c1"># 도메인 + 포트</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="n">path</span><span class="p">:</span> <span class="nb">str</span>             <span class="c1"># 경로</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    <span class="n">is_valid</span><span class="p">:</span> <span class="nb">bool</span>        <span class="c1"># 유효성</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    <span class="n">domain</span><span class="p">:</span> <span class="nb">str</span>           <span class="c1"># 도메인 (www 접두사 제거)</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="k">class</span><span class="w"> </span><span class="nc">URLDetector</span><span class="p">:</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>    <span class="n">is_valid</span><span class="p">(</span><span class="n">url</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span>          <span class="c1"># 구문 + 스킴 검증, 제외 확장자 필터</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>    <span class="n">extract</span><span class="p">(</span><span class="n">text</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>     <span class="c1"># 텍스트에서 URL 추출 (정규식)</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>    <span class="n">normalize</span><span class="p">(</span><span class="n">url</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>  <span class="c1"># URL 정규화</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>    <span class="n">get_info</span><span class="p">(</span><span class="n">url</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">URLInfo</span>       <span class="c1"># 상세 정보 반환</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>    <span class="n">resolve_relative</span><span class="p">(</span><span class="n">base</span><span class="p">,</span> <span class="n">rel</span><span class="p">)</span>    <span class="c1"># 상대 URL → 절대 URL</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>    <span class="n">is_same_domain</span><span class="p">(</span><span class="n">url1</span><span class="p">,</span> <span class="n">url2</span><span class="p">)</span>     <span class="c1"># 동일 도메인 판정</span>
+</code></pre></div>
+<p><strong>제외 확장자:</strong> <code>.pdf, .doc, .docx, .xls, .xlsx, .ppt, .pptx, .zip, .rar, .7z, .tar, .gz, .mp3, .mp4, .avi, .mov, .wmv, .exe, .dmg, .apk</code></p>
+<h3 id="33-webfetcher-urlfetcherpy">3.3 WebFetcher (<code>url/fetcher.py</code>)<a class="headerlink" href="#33-webfetcher-urlfetcherpy" title="Permanent link">&para;</a></h3>
+<p>httpx 기반 비동기 HTTP 클라이언트. 지수 백오프 재시도 내장.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nd">@dataclass</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">FetchResult</span><span class="p">:</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="n">success</span><span class="p">:</span> <span class="nb">bool</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="n">url</span><span class="p">:</span> <span class="nb">str</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="n">content</span><span class="p">:</span> <span class="nb">str</span>            <span class="c1"># HTML/텍스트 내용</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="n">content_type</span><span class="p">:</span> <span class="nb">str</span>       <span class="c1"># Content-Type 헤더</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    <span class="n">status_code</span><span class="p">:</span> <span class="nb">int</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    <span class="n">error_message</span><span class="p">:</span> <span class="nb">str</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>    <span class="n">metadata</span><span class="p">:</span> <span class="n">Dict</span>          <span class="c1"># final_url (리다이렉트 후), headers</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="k">class</span><span class="w"> </span><span class="nc">WebFetcher</span><span class="p">:</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>    <span class="n">fetch</span><span class="p">(</span><span class="n">url</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">FetchResult</span>     <span class="c1"># HTML 페칭 (재시도 포함)</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>    <span class="n">fetch_bytes</span><span class="p">(</span><span class="n">url</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span>     <span class="c1"># 바이너리 페칭 (이미지용, 재시도 없음)</span>
+</code></pre></div>
+<p><strong>기본 HTTP 헤더:</strong>
+- User-Agent: Chrome 120.0.0.0 (Windows)
+- Accept-Language: ko-KR, en-US
+- 리다이렉트 자동 추적</p>
+<p><strong>재시도 전략:</strong>
+- 지수 백오프: <code>2^attempt</code>초 대기 (1차: 2초, 2차: 4초, 3차: 8초)
+- 타임아웃/연결 오류만 재시도 (HTTP 에러 코드는 재시도 안 함)</p>
+<h3 id="34-htmlparser-urlparserpy">3.4 HTMLParser (<code>url/parser.py</code>)<a class="headerlink" href="#34-htmlparser-urlparserpy" title="Permanent link">&para;</a></h3>
+<p>BeautifulSoup 기반 HTML 구조화 파싱. lxml 우선, html.parser 폴백.</p>
+<p><strong>데이터 모델:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nd">@dataclass</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">ExtractedImage</span><span class="p">:</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>    <span class="n">src</span><span class="p">:</span> <span class="nb">str</span>        <span class="c1"># 절대 URL</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>    <span class="n">alt</span><span class="p">:</span> <span class="nb">str</span>        <span class="c1"># alt 텍스트</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>    <span class="n">title</span><span class="p">:</span> <span class="nb">str</span>      <span class="c1"># title 속성</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    <span class="n">context</span><span class="p">:</span> <span class="nb">str</span>    <span class="c1"># 주변 텍스트 (figcaption, 형제 요소)</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="nd">@dataclass</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="k">class</span><span class="w"> </span><span class="nc">ExtractedTable</span><span class="p">:</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>    <span class="n">html</span><span class="p">:</span> <span class="nb">str</span>           <span class="c1"># 원본 HTML</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>    <span class="n">markdown</span><span class="p">:</span> <span class="nb">str</span>       <span class="c1"># 마크다운 변환</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>    <span class="n">caption</span><span class="p">:</span> <span class="nb">str</span>        <span class="c1"># 테이블 캡션</span>
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>    <span class="n">headers</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>  <span class="c1"># 컬럼 헤더</span>
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>    <span class="n">rows</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span>  <span class="c1"># 데이터 행</span>
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>
+<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a><span class="nd">@dataclass</span>
+<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a><span class="k">class</span><span class="w"> </span><span class="nc">ExtractedLink</span><span class="p">:</span>
+<a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a>    <span class="n">url</span><span class="p">:</span> <span class="nb">str</span>            <span class="c1"># 절대 URL</span>
+<a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a>    <span class="n">text</span><span class="p">:</span> <span class="nb">str</span>           <span class="c1"># 링크 텍스트 (최대 200자)</span>
+<a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a>    <span class="n">is_internal</span><span class="p">:</span> <span class="nb">bool</span>   <span class="c1"># 내부/외부 분류</span>
+<a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a>
+<a id="__codelineno-4-22" name="__codelineno-4-22" href="#__codelineno-4-22"></a><span class="nd">@dataclass</span>
+<a id="__codelineno-4-23" name="__codelineno-4-23" href="#__codelineno-4-23"></a><span class="k">class</span><span class="w"> </span><span class="nc">ParsedContent</span><span class="p">:</span>
+<a id="__codelineno-4-24" name="__codelineno-4-24" href="#__codelineno-4-24"></a>    <span class="n">url</span><span class="p">:</span> <span class="nb">str</span>
+<a id="__codelineno-4-25" name="__codelineno-4-25" href="#__codelineno-4-25"></a>    <span class="n">title</span><span class="p">:</span> <span class="nb">str</span>          <span class="c1"># &lt;title&gt; → og:title → &lt;h1&gt;</span>
+<a id="__codelineno-4-26" name="__codelineno-4-26" href="#__codelineno-4-26"></a>    <span class="n">main_text</span><span class="p">:</span> <span class="nb">str</span>      <span class="c1"># 본문 텍스트</span>
+<a id="__codelineno-4-27" name="__codelineno-4-27" href="#__codelineno-4-27"></a>    <span class="n">description</span><span class="p">:</span> <span class="nb">str</span>    <span class="c1"># meta description → og:description</span>
+<a id="__codelineno-4-28" name="__codelineno-4-28" href="#__codelineno-4-28"></a>    <span class="n">images</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">ExtractedImage</span><span class="p">]</span>
+<a id="__codelineno-4-29" name="__codelineno-4-29" href="#__codelineno-4-29"></a>    <span class="n">tables</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">ExtractedTable</span><span class="p">]</span>
+<a id="__codelineno-4-30" name="__codelineno-4-30" href="#__codelineno-4-30"></a>    <span class="n">links</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">ExtractedLink</span><span class="p">]</span>
+<a id="__codelineno-4-31" name="__codelineno-4-31" href="#__codelineno-4-31"></a>    <span class="n">metadata</span><span class="p">:</span> <span class="n">Dict</span>      <span class="c1"># 카운트 정보</span>
+</code></pre></div>
+<p><strong>본문 추출 전략:</strong>
+1. 노이즈 태그 제거: <code>script, style, noscript, iframe, svg, canvas, video, audio, form, nav, footer, header, aside</code>
+2. 메인 콘텐츠 영역 탐색: <code>article → main → [role="main"] → .content → #content</code>
+3. 블록 레벨 태그에서 줄바꿈 보존: <code>p, div, h1-h6, li, tr, br, hr, blockquote, pre</code>
+4. 공백 정규화 및 다중 줄바꿈 정리</p>
+<p><strong>이미지 필터링:</strong>
+- <code>data:</code> URL 제외
+- SVG 제외
+- 50px 미만 작은 이미지 제외
+- 최대 <code>max_images</code> × 2 탐색 후 상위 <code>max_images</code>개 반환</p>
+<hr />
+<h2 id="4-api">4. API 엔드포인트<a class="headerlink" href="#4-api" title="Permanent link">&para;</a></h2>
+<h3 id="41">4.1 라우트 등록<a class="headerlink" href="#41" title="Permanent link">&para;</a></h3>
+<p><code>lightrag_server.py</code>에서 등록:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">lightrag.api.routers.url_routes</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>    <span class="n">create_url_routes</span><span class="p">,</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    <span class="n">set_rag_workspace_getter</span> <span class="k">as</span> <span class="n">set_url_rag_workspace_getter</span><span class="p">,</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    <span class="n">set_vlm_model_func</span> <span class="k">as</span> <span class="n">set_url_vlm_model_func</span><span class="p">,</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="n">set_llm_model_func</span> <span class="k">as</span> <span class="n">set_url_llm_model_func</span><span class="p">,</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="p">)</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="n">set_url_rag_workspace_getter</span><span class="p">(</span><span class="n">get_rag_for_workspace</span><span class="p">)</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="n">app</span><span class="o">.</span><span class="n">include_router</span><span class="p">(</span><span class="n">create_url_routes</span><span class="p">())</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="n">set_url_vlm_model_func</span><span class="p">(</span><span class="n">vlm_model_func</span><span class="p">)</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="n">set_url_llm_model_func</span><span class="p">(</span><span class="n">llm_model_func</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="42">4.2 엔드포인트 목록<a class="headerlink" href="#42" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>메서드</th>
+<th>경로</th>
+<th>설명</th>
+<th style="text-align: center;">워크스페이스</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>POST</td>
+<td><code>/api/url/validate</code></td>
+<td>URL 검증 및 정규화</td>
+<td style="text-align: center;">O</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/url/extract</code></td>
+<td>텍스트에서 URL 추출</td>
+<td style="text-align: center;">X</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/url/ingest</code></td>
+<td>단건 URL 수집 (비동기)</td>
+<td style="text-align: center;">O</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/url/ingest-batch</code></td>
+<td>배치 URL 수집 (비동기)</td>
+<td style="text-align: center;">O</td>
+</tr>
+</tbody>
+</table>
+<h3 id="43">4.3 요청/응답 모델<a class="headerlink" href="#43" title="Permanent link">&para;</a></h3>
+<h4 id="post-apiurlvalidate">POST <code>/api/url/validate</code><a class="headerlink" href="#post-apiurlvalidate" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># Request</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">URLValidateRequest</span><span class="p">:</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>    <span class="n">url</span><span class="p">:</span> <span class="nb">str</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="c1"># Response</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="k">class</span><span class="w"> </span><span class="nc">URLValidateResponse</span><span class="p">:</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>    <span class="n">valid</span><span class="p">:</span> <span class="nb">bool</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>    <span class="n">normalized_url</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>    <span class="n">domain</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>    <span class="n">doc_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>    <span class="c1"># MD5(normalized_url)[:16]</span>
+</code></pre></div>
+<h4 id="post-apiurlextract">POST <code>/api/url/extract</code><a class="headerlink" href="#post-apiurlextract" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># Request</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">URLExtractRequest</span><span class="p">:</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>    <span class="n">text</span><span class="p">:</span> <span class="nb">str</span>           <span class="c1"># URL이 포함된 텍스트</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="c1"># Response</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="k">class</span><span class="w"> </span><span class="nc">URLExtractResponse</span><span class="p">:</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>    <span class="n">urls</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>     <span class="c1"># 추출된 유효 URL 목록</span>
+</code></pre></div>
+<h4 id="post-apiurlingest">POST <code>/api/url/ingest</code><a class="headerlink" href="#post-apiurlingest" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Request</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">URLIngestRequest</span><span class="p">:</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>    <span class="n">url</span><span class="p">:</span> <span class="nb">str</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="n">file_path_label</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>   <span class="c1"># 커스텀 문서 라벨</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="n">process_images</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>    <span class="n">process_tables</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>    <span class="n">skip_duplicates</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>    <span class="n">force_reindex</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>             <span class="c1"># 재처리 강제</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>    <span class="n">follow_links</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>              <span class="c1"># 크롤링 활성화</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>    <span class="n">max_depth</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">2</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="c1"># Response</span>
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="k">class</span><span class="w"> </span><span class="nc">URLIngestAsyncResponse</span><span class="p">:</span>
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>    <span class="n">task_id</span><span class="p">:</span> <span class="nb">str</span>
+<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>    <span class="n">stream_url</span><span class="p">:</span> <span class="nb">str</span>     <span class="c1"># /api/tasks/{task_id}/stream</span>
+<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a>    <span class="n">message</span><span class="p">:</span> <span class="nb">str</span>
+</code></pre></div>
+<h4 id="post-apiurlingest-batch">POST <code>/api/url/ingest-batch</code><a class="headerlink" href="#post-apiurlingest-batch" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># Request</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">URLBatchIngestRequest</span><span class="p">:</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>    <span class="n">urls</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>    <span class="n">process_images</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>    <span class="n">process_tables</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>    <span class="n">skip_duplicates</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>    <span class="n">force_reindex</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>    <span class="n">follow_links</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>    <span class="n">max_depth</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">2</span>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="c1"># Response</span>
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="k">class</span><span class="w"> </span><span class="nc">URLBatchIngestResponse</span><span class="p">:</span>
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>    <span class="n">tasks</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">URLBatchTaskInfo</span><span class="p">]</span>       <span class="c1"># 제출된 태스크 목록</span>
+<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a>    <span class="n">skipped</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">URLBatchSkippedInfo</span><span class="p">]</span>  <span class="c1"># 건너뛴 URL 목록</span>
+<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a>    <span class="n">total_submitted</span><span class="p">:</span> <span class="nb">int</span>
+<a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a>    <span class="n">total_skipped</span><span class="p">:</span> <span class="nb">int</span>
+</code></pre></div>
+<hr />
+<h2 id="5-7">5. 7단계 처리 파이프라인<a class="headerlink" href="#5-7" title="Permanent link">&para;</a></h2>
+<p><code>_ingest_url_background()</code> 함수에서 실행되는 비동기 처리 단계.</p>
+<h3 id="_3">전체 흐름<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>Phase 1 [0-5%]     URL 검증
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>    │
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>Phase 2 [10-25%]   HTML 페칭 (httpx + 재시도)
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    │
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>Phase 3 [25-40%]   HTML 파싱 (텍스트/이미지/테이블/링크 추출)
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>    │
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>Phase 4 [40-60%]   텍스트 청크 → KG 삽입 (rag.ainsert)
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>    │
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>Phase 5 [60-95%]   멀티모달 처리 (이미지→VLM, 테이블→LLM)
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>    │
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>Phase 6 [95-98%]   서브 URL 크롤링 (재귀, 옵션)
+<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>    │
+<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a>Phase 7 [98-100%]  완료 및 결과 집계
+</code></pre></div>
+<h3 id="phase-1-url-0-5">Phase 1: URL 검증 (0% → 5%)<a class="headerlink" href="#phase-1-url-0-5" title="Permanent link">&para;</a></h3>
+<ul>
+<li>URLDetector로 URL 형식 검증</li>
+<li>태스크 취소 상태 확인</li>
+</ul>
+<h3 id="phase-2-html-10-25">Phase 2: HTML 페칭 (10% → 25%)<a class="headerlink" href="#phase-2-html-10-25" title="Permanent link">&para;</a></h3>
+<ul>
+<li>WebFetcher로 HTTP GET 요청</li>
+<li>설정된 timeout/max_retries 적용</li>
+<li>실패 시 <code>fail_task()</code> 호출 후 종료</li>
+<li>성공 시 content length 리포트</li>
+</ul>
+<h3 id="phase-3-html-25-40">Phase 3: HTML 파싱 (25% → 40%)<a class="headerlink" href="#phase-3-html-25-40" title="Permanent link">&para;</a></h3>
+<ul>
+<li>HTMLParser로 구조화된 콘텐츠 추출</li>
+<li>title, description, main_text</li>
+<li>images (설정에 따라)</li>
+<li>tables (설정에 따라)</li>
+<li>links (<code>follow_links=true</code> &amp;&amp; <code>current_depth &lt; max_depth</code>일 때만)</li>
+<li>최소 텍스트 길이 검증 (<code>min_text_length</code>)</li>
+<li>실패 시 <code>fail_task()</code> 호출</li>
+</ul>
+<h3 id="phase-4-40-60">Phase 4: 텍스트 삽입 (40% → 60%)<a class="headerlink" href="#phase-4-40-60" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>텍스트 조합</strong>: <code>제목 + 설명 + 본문</code> 결합</li>
+<li><strong>청크 분할</strong>: <code>_chunk_text()</code> 함수</li>
+<li>단락 단위(더블 줄바꿈) 우선 분할</li>
+<li>단락이 <code>max_text_chunk_size</code> 초과 시 문장 단위 분할</li>
+<li><strong>KG 삽입</strong>: 각 청크마다 <code>rag.ainsert()</code> 호출</li>
+<li><code>file_paths=file_label</code> (중복 감지용)</li>
+<li><strong>진행률</strong>: 청크별로 진행률 업데이트</li>
+</ol>
+<h3 id="phase-5-60-95">Phase 5: 멀티모달 처리 (60% → 95%)<a class="headerlink" href="#phase-5-60-95" title="Permanent link">&para;</a></h3>
+<p><strong>초기화:</strong>
+- MultimodalConfig 생성
+- ImageModalProcessor (VLM 함수 필요)
+- TableModalProcessor (LLM 함수 필요)</p>
+<p><strong>이미지 처리 (process_images=true):</strong></p>
+<p>URL 라우트에서 이미지를 다운로드하고 base64로 인코딩하여 <code>img_data</code> 키로 전달합니다.
+ImageModalProcessor는 <code>img_data</code>(인라인 base64)와 <code>img_path</code>(파일 경로) 두 가지 입력을 모두 지원합니다.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>URL 라우트: img_data(base64) + alt + context
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>    ↓
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>generate_description_only:
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>    img_data 있음 → image_base64 직접 사용 (파일 I/O 스킵)
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>    img_path 있음 → 파일에서 읽어 base64 변환 (기존 문서 파싱 경로)
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>    alt → captions, context → footnotes (자동 키 매핑)
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>    → VLM 호출 → 이미지 설명 + 엔티티 정보 생성
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>    ↓
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>process_multimodal_content:
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>    img_data → _upload_base64_image_to_s3 → S3 URL (임시 파일 → 업로드 → 삭제)
+<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>    img_path → _upload_image_to_s3 → S3 URL (기존 경로)
+<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>    alt → captions, context → footnotes
+<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a>    → structured_content 생성 → KG 엔티티/청크 저장
+</code></pre></div>
+<p><strong>테이블 처리 (process_tables=true):</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>테이블 HTML/Markdown
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>    → TableModalProcessor.process_multimodal_content()
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>    → 엔티티/관계 생성
+</code></pre></div>
+<p><strong>에러 처리:</strong> 개별 이미지/테이블 실패는 기록만 하고 태스크 전체를 실패시키지 않음</p>
+<h3 id="phase-6-url-95-98">Phase 6: 서브 URL 크롤링 (95% → 98%)<a class="headerlink" href="#phase-6-url-95-98" title="Permanent link">&para;</a></h3>
+<p><code>follow_links=true</code> &amp;&amp; <code>current_depth &lt; max_depth</code>일 때만 실행.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>추출된 링크 목록
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>    → 내부 링크만 필터 (crawl_same_domain_only)
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>    → max_crawl_urls개까지
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>    → 각 링크:
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>        ├── URL 검증
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>        ├── 중복 체크
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>        ├── 자식 태스크 생성 (TaskType.URL_INGEST)
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>        └── _ingest_url_background(current_depth+1) 재귀 호출
+</code></pre></div>
+<h3 id="phase-7-98-100">Phase 7: 완료 (98% → 100%)<a class="headerlink" href="#phase-7-98-100" title="Permanent link">&para;</a></h3>
+<p>최종 결과 집계:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="n">final_result</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>    <span class="s2">&quot;success&quot;</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>          <span class="c1"># 에러 없으면 True</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>    <span class="s2">&quot;url&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>               <span class="c1"># 원본 URL</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>    <span class="s2">&quot;title&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>             <span class="c1"># 페이지 제목</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>    <span class="s2">&quot;text_length&quot;</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>       <span class="c1"># 텍스트 길이</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>    <span class="s2">&quot;image_count&quot;</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>       <span class="c1"># 이미지 수</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>    <span class="s2">&quot;table_count&quot;</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>       <span class="c1"># 테이블 수</span>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a>    <span class="s2">&quot;results&quot;</span><span class="p">:</span> <span class="p">[</span>              <span class="c1"># 항목별 처리 결과</span>
+<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a>        <span class="p">{</span><span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;image&quot;</span><span class="p">,</span> <span class="s2">&quot;success&quot;</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span> <span class="s2">&quot;entity_name&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">},</span>
+<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a>        <span class="p">{</span><span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;table&quot;</span><span class="p">,</span> <span class="s2">&quot;success&quot;</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span> <span class="s2">&quot;entity_name&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">},</span>
+<a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a>    <span class="p">],</span>
+<a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a>    <span class="s2">&quot;spawned_tasks&quot;</span><span class="p">:</span> <span class="p">[</span><span class="o">...</span><span class="p">],</span>   <span class="c1"># 크롤링으로 생성된 자식 태스크</span>
+<a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a>    <span class="s2">&quot;crawl_depth&quot;</span><span class="p">:</span> <span class="nb">int</span>        <span class="c1"># 현재 크롤링 깊이</span>
+<a id="__codelineno-14-14" name="__codelineno-14-14" href="#__codelineno-14-14"></a><span class="p">}</span>
+</code></pre></div>
+<p><code>service.complete_task(task_id, result=final_result)</code> 호출.</p>
+<hr />
+<h2 id="6-ui">6. 프론트엔드 UI<a class="headerlink" href="#6-ui" title="Permanent link">&para;</a></h2>
+<h3 id="61-urlingestdialog">6.1 URLIngestDialog 컴포넌트<a class="headerlink" href="#61-urlingestdialog" title="Permanent link">&para;</a></h3>
+<p><code>lightrag_webui/src/components/documents/URLIngestDialog.tsx</code></p>
+<p><strong>구성:</strong>
+- <strong>탭 1 - 단건 URL</strong>: 입력 필드 + 검증 버튼 + 결과 표시 + 수집 버튼
+- <strong>탭 2 - 배치 URL</strong>: 텍스트 영역 (줄바꿈 구분) + 건너뛴 URL 표시</p>
+<p><strong>공통 옵션:</strong></p>
+<table>
+<thead>
+<tr>
+<th>옵션</th>
+<th>기본값</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>이미지 처리</td>
+<td>✓</td>
+<td>VLM으로 이미지 분석</td>
+</tr>
+<tr>
+<td>테이블 처리</td>
+<td>✓</td>
+<td>LLM으로 테이블 분석</td>
+</tr>
+<tr>
+<td>중복 건너뛰기</td>
+<td>✓</td>
+<td>이미 수집된 URL 스킵</td>
+</tr>
+<tr>
+<td>서브링크 크롤링</td>
+<td>✗</td>
+<td>페이지 내 링크 재귀 추적</td>
+</tr>
+<tr>
+<td>최대 깊이</td>
+<td>2</td>
+<td>크롤링 깊이 (1-3)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>처리 흐름:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>1. URL 입력 → &quot;검증&quot; 클릭
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>   → POST /api/url/validate
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>   → 결과: ✓ 도메인 + doc_id / ✗ 오류 메시지
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>2. &quot;수집 시작&quot; 클릭
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a>   → POST /api/url/ingest (또는 /ingest-batch)
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a>   → task_id 수신
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a>   → TaskProgressPanel 표시 (NDJSON 스트리밍)
+<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a>
+<a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a>3. 완료 시
+<a id="__codelineno-15-11" name="__codelineno-15-11" href="#__codelineno-15-11"></a>   → onDocumentsUploaded() 콜백 → 문서 목록 갱신
+<a id="__codelineno-15-12" name="__codelineno-15-12" href="#__codelineno-15-12"></a>   → &quot;닫기&quot; 버튼 활성화
+</code></pre></div>
+<h3 id="62-api">6.2 API 클라이언트<a class="headerlink" href="#62-api" title="Permanent link">&para;</a></h3>
+<p><code>lightrag_webui/src/api/lightrag.ts</code> (라인 1396-1465)</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1">// 검증</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="k">export</span><span class="w"> </span><span class="kd">const</span><span class="w"> </span><span class="nx">validateUrl</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">async</span><span class="w"> </span><span class="p">(</span><span class="nx">url</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="o">:</span><span class="w"> </span><span class="nb">Promise</span><span class="o">&lt;</span><span class="nx">URLValidateResponse</span><span class="o">&gt;</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="c1">// 단건 수집</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="k">export</span><span class="w"> </span><span class="kd">const</span><span class="w"> </span><span class="nx">ingestUrl</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">async</span><span class="w"> </span><span class="p">(</span><span class="nx">request</span><span class="o">:</span><span class="w"> </span><span class="kt">URLIngestRequest</span><span class="p">)</span><span class="o">:</span><span class="w"> </span><span class="nb">Promise</span><span class="o">&lt;</span><span class="nx">URLIngestResponse</span><span class="o">&gt;</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="c1">// 배치 수집</span>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="k">export</span><span class="w"> </span><span class="kd">const</span><span class="w"> </span><span class="nx">ingestUrlBatch</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">async</span><span class="w"> </span><span class="p">(</span><span class="nx">request</span><span class="o">:</span><span class="w"> </span><span class="kt">URLBatchIngestRequest</span><span class="p">)</span><span class="o">:</span><span class="w"> </span><span class="nb">Promise</span><span class="o">&lt;</span><span class="nx">URLBatchIngestResponse</span><span class="o">&gt;</span>
+</code></pre></div>
+<p>모든 함수는 <code>axiosInstance</code> 사용 → LIGHTRAG-WORKSPACE 헤더 자동 주입.</p>
+<h3 id="63-documentmanager">6.3 DocumentManager 통합<a class="headerlink" href="#63-documentmanager" title="Permanent link">&para;</a></h3>
+<p><code>lightrag_webui/src/features/DocumentManager.tsx</code>에서:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="p">&lt;</span><span class="nt">URLIngestDialog</span><span class="w"> </span><span class="na">onDocumentsUploaded</span><span class="o">=</span><span class="p">{</span><span class="nx">fetchDocuments</span><span class="p">}</span><span class="w"> </span><span class="p">/&gt;</span>
+</code></pre></div>
+<p>기존 업로드 버튼들(파일 업로드, 멀티모달 업로드) 옆에 배치.</p>
+<h3 id="64">6.4 국제화<a class="headerlink" href="#64" title="Permanent link">&para;</a></h3>
+<p><code>en.json</code>, <code>ko.json</code>의 <code>documentPanel.urlIngest</code> 네임스페이스에 모든 UI 텍스트 정의.</p>
+<hr />
+<h2 id="7">7. 환경설정<a class="headerlink" href="#7" title="Permanent link">&para;</a></h2>
+<h3 id="71">7.1 환경변수<a class="headerlink" href="#71" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>환경변수</th>
+<th>기본값</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>URL_FETCH_TIMEOUT</code></td>
+<td>30</td>
+<td>HTTP 타임아웃 (초)</td>
+</tr>
+<tr>
+<td><code>URL_FETCH_MAX_RETRIES</code></td>
+<td>3</td>
+<td>재시도 횟수</td>
+</tr>
+<tr>
+<td><code>URL_MAX_TEXT_CHUNK_SIZE</code></td>
+<td>2000</td>
+<td>텍스트 청크 크기</td>
+</tr>
+<tr>
+<td><code>URL_MAX_CRAWL_DEPTH</code></td>
+<td>2</td>
+<td>최대 크롤링 깊이</td>
+</tr>
+<tr>
+<td><code>URL_MAX_CRAWL_URLS</code></td>
+<td>10</td>
+<td>페이지당 크롤링 URL 수</td>
+</tr>
+</tbody>
+</table>
+<h3 id="72">7.2 멀티모달 연동 설정<a class="headerlink" href="#72" title="Permanent link">&para;</a></h3>
+<p>이미지/테이블 처리는 기존 멀티모달 모듈과 동일한 설정을 공유:</p>
+<table>
+<thead>
+<tr>
+<th>환경변수</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>VLM_MODEL</code></td>
+<td>VLM 모델명 (이미지 분석)</td>
+</tr>
+<tr>
+<td><code>VLM_API_BASE</code></td>
+<td>VLM API 주소</td>
+</tr>
+<tr>
+<td><code>VLM_API_KEY</code></td>
+<td>VLM API 키</td>
+</tr>
+<tr>
+<td><code>VLM_RESPONSE_LANGUAGE</code></td>
+<td>VLM 응답 언어</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="8">8. 데이터 흐름 다이어그램<a class="headerlink" href="#8" title="Permanent link">&para;</a></h2>
+<h3 id="81-url">8.1 단건 URL 수집<a class="headerlink" href="#81-url" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>사용자 (브라우저)
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>    │
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>    ├── [1] POST /api/url/validate ──────────────────────────────────────┐
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a>    │       ← { valid, normalized_url, domain, doc_id }                  │
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a>    │                                                                     │
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a>    ├── [2] POST /api/url/ingest ────────────────────────────────────────┤
+<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a>    │       ← { task_id, stream_url, message }                           │
+<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a>    │                                                                     │  서버
+<a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a>    ├── [3] GET /api/tasks/{task_id}/stream (NDJSON) ◀───────────────────┤
+<a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a>    │       ← { progress, message, detail } (반복)                       │
+<a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a>    │       ← { progress: 100, status: &quot;completed&quot;, result: {...} }      │
+<a id="__codelineno-18-12" name="__codelineno-18-12" href="#__codelineno-18-12"></a>    │                                                                     │
+<a id="__codelineno-18-13" name="__codelineno-18-13" href="#__codelineno-18-13"></a>    └── [4] 문서 목록 갱신                                                │
+<a id="__codelineno-18-14" name="__codelineno-18-14" href="#__codelineno-18-14"></a>                                                                          │
+<a id="__codelineno-18-15" name="__codelineno-18-15" href="#__codelineno-18-15"></a>                                        백그라운드 파이프라인 ◀──────────┘
+<a id="__codelineno-18-16" name="__codelineno-18-16" href="#__codelineno-18-16"></a>                                            │
+<a id="__codelineno-18-17" name="__codelineno-18-17" href="#__codelineno-18-17"></a>                                            ├── URLDetector.validate()
+<a id="__codelineno-18-18" name="__codelineno-18-18" href="#__codelineno-18-18"></a>                                            ├── WebFetcher.fetch()
+<a id="__codelineno-18-19" name="__codelineno-18-19" href="#__codelineno-18-19"></a>                                            ├── HTMLParser.parse()
+<a id="__codelineno-18-20" name="__codelineno-18-20" href="#__codelineno-18-20"></a>                                            ├── rag.ainsert() × N 청크
+<a id="__codelineno-18-21" name="__codelineno-18-21" href="#__codelineno-18-21"></a>                                            ├── ImageModalProcessor × M
+<a id="__codelineno-18-22" name="__codelineno-18-22" href="#__codelineno-18-22"></a>                                            ├── TableModalProcessor × K
+<a id="__codelineno-18-23" name="__codelineno-18-23" href="#__codelineno-18-23"></a>                                            └── 서브 URL 크롤링 (옵션)
+</code></pre></div>
+<h3 id="82-url">8.2 배치 URL 수집<a class="headerlink" href="#82-url" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>사용자 (브라우저)
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>    │
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>    ├── POST /api/url/ingest-batch ──────────────────────────────────────┐
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a>    │       { urls: [url1, url2, ...url_n] }                             │
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a>    │       ← { tasks: [{task_id, url}, ...], skipped: [...] }           │
+<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a>    │                                                                     │
+<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a>    ├── GET /api/tasks/{task_id_1}/stream ◀──────┐                       │
+<a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a>    ├── GET /api/tasks/{task_id_2}/stream ◀──────┤  병렬 스트리밍         │
+<a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a>    └── GET /api/tasks/{task_id_n}/stream ◀──────┘                       │
+<a id="__codelineno-19-10" name="__codelineno-19-10" href="#__codelineno-19-10"></a>                                                                          │
+<a id="__codelineno-19-11" name="__codelineno-19-11" href="#__codelineno-19-11"></a>                                        백그라운드 ◀─────────────────────┘
+<a id="__codelineno-19-12" name="__codelineno-19-12" href="#__codelineno-19-12"></a>                                            │
+<a id="__codelineno-19-13" name="__codelineno-19-13" href="#__codelineno-19-13"></a>                                            ├── Task 1: 7단계 파이프라인
+<a id="__codelineno-19-14" name="__codelineno-19-14" href="#__codelineno-19-14"></a>                                            ├── Task 2: 7단계 파이프라인
+<a id="__codelineno-19-15" name="__codelineno-19-15" href="#__codelineno-19-15"></a>                                            └── Task N: 7단계 파이프라인
+<a id="__codelineno-19-16" name="__codelineno-19-16" href="#__codelineno-19-16"></a>                                                  (독립 병렬 실행)
+</code></pre></div>
+<h3 id="83">8.3 재귀 크롤링<a class="headerlink" href="#83" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>메인 URL (depth=0)
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>    │
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>    ├── 텍스트/이미지/테이블 처리
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a>    │
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a>    ├── 링크 추출 ─── [내부 링크만, max_crawl_urls개]
+<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a>    │   │
+<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a>    │   ├── 서브 URL 1 (depth=1) ── 자식 태스크 생성
+<a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a>    │   │       ├── 텍스트/이미지/테이블 처리
+<a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a>    │   │       └── 링크 추출 → 서브 URL (depth=2) ── 자식 태스크 생성
+<a id="__codelineno-20-10" name="__codelineno-20-10" href="#__codelineno-20-10"></a>    │   │                           └── 처리 (depth=max, 크롤링 중단)
+<a id="__codelineno-20-11" name="__codelineno-20-11" href="#__codelineno-20-11"></a>    │   │
+<a id="__codelineno-20-12" name="__codelineno-20-12" href="#__codelineno-20-12"></a>    │   ├── 서브 URL 2 (depth=1) ── 자식 태스크 생성
+<a id="__codelineno-20-13" name="__codelineno-20-13" href="#__codelineno-20-13"></a>    │   │       └── ...
+<a id="__codelineno-20-14" name="__codelineno-20-14" href="#__codelineno-20-14"></a>    │   └── ...
+<a id="__codelineno-20-15" name="__codelineno-20-15" href="#__codelineno-20-15"></a>    │
+<a id="__codelineno-20-16" name="__codelineno-20-16" href="#__codelineno-20-16"></a>    └── 완료 (spawned_tasks 목록 포함)
+</code></pre></div>
+<hr />
+<h2 id="9">9. 주요 관찰 사항 및 개선 포인트<a class="headerlink" href="#9" title="Permanent link">&para;</a></h2>
+<h3 id="91">9.1 잘 설계된 부분<a class="headerlink" href="#91" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>모듈 분리가 명확</strong>: detector/fetcher/parser/routes가 각각 단일 책임</li>
+<li><strong>비동기 + 스트리밍</strong>: 긴 처리를 블로킹하지 않고 실시간 진행률 제공</li>
+<li><strong>점진적 에러 처리</strong>: 이미지/테이블 실패가 전체 태스크를 중단시키지 않음</li>
+<li><strong>중복 방지 체계</strong>: URL 정규화 → MD5 doc_id → DB 조회 3단계</li>
+<li><strong>재귀 크롤링 안전장치</strong>: 깊이 제한 + 동일 도메인 필터 + URL 수 제한</li>
+<li><strong>멀티모달 통합</strong>: 기존 ImageModalProcessor/TableModalProcessor 재사용</li>
+</ol>
+<h3 id="92">9.2 해결된 이슈<a class="headerlink" href="#92" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>이슈</th>
+<th>원인</th>
+<th>수정 내용</th>
+<th>수정일</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>URL 이미지 VLM 미호출</strong></td>
+<td><code>img_data</code>(base64) 키를 <code>img_path</code>(파일경로)로만 처리</td>
+<td><code>img_data</code> 직접 사용 분기 추가</td>
+<td>2026-02-11</td>
+</tr>
+<tr>
+<td><strong>alt/context 미전달</strong></td>
+<td>URL의 <code>alt</code>/<code>context</code> 키가 프로세서의 <code>image_caption</code>/<code>image_footnote</code>와 불일치</td>
+<td>자동 키 매핑 추가</td>
+<td>2026-02-11</td>
+</tr>
+<tr>
+<td><strong>base64 이미지 S3 업로드 불가</strong></td>
+<td><code>_upload_image_to_s3()</code>가 파일 경로만 지원</td>
+<td><code>_upload_base64_image_to_s3()</code> 메서드 추가</td>
+<td>2026-02-11</td>
+</tr>
+</tbody>
+</table>
+<p>상세 내용은 <a href="#10-버그-수정-이력">섹션 10. 버그 수정 이력</a> 참조.</p>
+<h3 id="93">9.3 잠재적 개선 포인트<a class="headerlink" href="#93" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>영역</th>
+<th>현재 상태</th>
+<th>개선 방향</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>robots.txt</strong></td>
+<td>미확인</td>
+<td>크롤링 전 robots.txt 준수 로직 추가</td>
+</tr>
+<tr>
+<td><strong>속도 제한</strong></td>
+<td>미구현</td>
+<td>동일 도메인 동시 요청 수 제한 (rate limiter)</td>
+</tr>
+<tr>
+<td><strong>JavaScript 렌더링</strong></td>
+<td>미지원</td>
+<td>SPA/동적 콘텐츠는 추출 불가 (Playwright 등 필요)</td>
+</tr>
+<tr>
+<td><strong>PDF 등 바이너리</strong></td>
+<td>제외됨</td>
+<td>확장자 필터에서 제외 (별도 파이프라인 필요)</td>
+</tr>
+<tr>
+<td><strong>크롤링 중복</strong></td>
+<td>배치 내 검사만</td>
+<td>크롤링 중 발견된 URL 간 전역 중복 검사 미비</td>
+</tr>
+<tr>
+<td><strong>메모리</strong></td>
+<td>전체 HTML 메모리 로드</td>
+<td>초대형 페이지 대응 스트리밍 파싱 검토</td>
+</tr>
+<tr>
+<td><strong>retry 범위</strong></td>
+<td>타임아웃/연결만</td>
+<td>HTTP 429 (Rate Limit) 등 특정 상태 코드 재시도 추가</td>
+</tr>
+</tbody>
+</table>
+<h3 id="94">9.4 태스크 관리 연동<a class="headerlink" href="#94" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>TaskType.URL_INGEST</code>로 등록됨</li>
+<li>기존 <code>TaskType.MULTIMODAL_PROCESS</code>와 동일한 진행률 스트리밍 인프라 공유</li>
+<li>프론트엔드 <code>TaskProgressPanel</code> 컴포넌트로 실시간 표시</li>
+<li><code>/api/tasks/{id}/cancel</code>로 진행 중 취소 가능</li>
+</ul>
+<h3 id="95">9.5 파일 소스 참조<a class="headerlink" href="#95" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>파일</th>
+<th>핵심 역할</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>lightrag/url/config.py</code></td>
+<td>설정 클래스</td>
+</tr>
+<tr>
+<td><code>lightrag/url/detector.py</code></td>
+<td>URL 검증/정규화/추출</td>
+</tr>
+<tr>
+<td><code>lightrag/url/fetcher.py</code></td>
+<td>HTTP 비동기 페칭</td>
+</tr>
+<tr>
+<td><code>lightrag/url/parser.py</code></td>
+<td>HTML 파싱 + 콘텐츠 추출</td>
+</tr>
+<tr>
+<td><code>lightrag/api/routers/url_routes.py</code></td>
+<td>API 엔드포인트 + 백그라운드 파이프라인</td>
+</tr>
+<tr>
+<td><code>lightrag/api/task_manager.py</code></td>
+<td>태스크 생성/진행률/완료</td>
+</tr>
+<tr>
+<td><code>lightrag/api/lightrag_server.py:84-89,1251,1304-1306</code></td>
+<td>라우트 등록</td>
+</tr>
+<tr>
+<td><code>lightrag_webui/src/api/lightrag.ts:1396-1465</code></td>
+<td>API 클라이언트</td>
+</tr>
+<tr>
+<td><code>lightrag/multimodal/processors/image.py</code></td>
+<td>이미지 VLM 처리 (URL base64 지원 추가)</td>
+</tr>
+<tr>
+<td><code>lightrag/multimodal/base.py</code></td>
+<td>멀티모달 프로세서 베이스 클래스</td>
+</tr>
+<tr>
+<td><code>lightrag_webui/src/components/documents/URLIngestDialog.tsx</code></td>
+<td>UI 다이얼로그</td>
+</tr>
+<tr>
+<td><code>lightrag_webui/src/features/DocumentManager.tsx</code></td>
+<td>UI 통합</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="10">10. 버그 수정 이력<a class="headerlink" href="#10" title="Permanent link">&para;</a></h2>
+<h3 id="101-url-2026-02-11">10.1 URL 이미지 지식화 실패 (2026-02-11)<a class="headerlink" href="#101-url-2026-02-11" title="Permanent link">&para;</a></h3>
+<p><strong>증상:</strong> URL 수집 시 이미지가 지식그래프 엔티티로 정상 변환되지 않음. VLM이 호출되지 않고 의미 없는 fallback 엔티티가 생성됨.</p>
+<p><strong>근본 원인:</strong> <code>ImageModalProcessor</code>가 문서 파싱(PyMuPDF) 전용으로 설계되어, 로컬 파일 경로(<code>img_path</code>)만 처리하고 인라인 base64 데이터(<code>img_data</code>)를 지원하지 않았음.</p>
+<p><strong>영향 받은 파일:</strong> <code>lightrag/multimodal/processors/image.py</code></p>
+<h4 id="_4">수정 전 데이터 흐름 (실패)<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>url_routes.py                              image.py
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>──────────────────                         ──────────────────
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>img_b64 = base64.b64encode(img_bytes)      image_path = content_data.get(&quot;img_path&quot;)
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a>modal_content = {                              → None (키 불일치!)
+<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a>    &quot;img_data&quot;: img_b64,  ◀── 불일치 ──▶  if not image_path:
+<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a>    &quot;alt&quot;: ...,           ◀── 불일치 ──▶      raise ValueError(...)  ← 예외!
+<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a>    &quot;context&quot;: ...,       ◀── 불일치 ──▶
+<a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a>}                                          except:
+<a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a>                                               fallback_entity = {
+<a id="__codelineno-21-10" name="__codelineno-21-10" href="#__codelineno-21-10"></a>                                                   &quot;entity_name&quot;: &quot;image_&lt;hash&gt;&quot;,
+<a id="__codelineno-21-11" name="__codelineno-21-11" href="#__codelineno-21-11"></a>                                                   &quot;summary&quot;: &quot;Image content: &lt;base64쓰레기&gt;&quot;
+<a id="__codelineno-21-12" name="__codelineno-21-12" href="#__codelineno-21-12"></a>                                               }
+<a id="__codelineno-21-13" name="__codelineno-21-13" href="#__codelineno-21-13"></a>                                               → VLM 미호출, 의미없는 엔티티 생성
+</code></pre></div>
+<h4 id="3_1">수정 내용 (3가지)<a class="headerlink" href="#3_1" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>문제</th>
+<th>수정</th>
+<th>상세</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>img_data</code>(base64) 미지원</td>
+<td><code>img_data</code> 키 직접 사용 분기 추가</td>
+<td><code>img_data</code> 있으면 파일 I/O 없이 직접 VLM 호출, 없으면 기존 <code>img_path</code>에서 읽기</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>alt</code>/<code>context</code> 키 매핑 누락</td>
+<td>자동 키 매핑 추가</td>
+<td><code>alt</code> → <code>captions</code>, <code>context</code> → <code>footnotes</code>로 변환하여 VLM 프롬프트에 전달</td>
+</tr>
+<tr>
+<td>3</td>
+<td>base64 이미지 S3 업로드 불가</td>
+<td><code>_upload_base64_image_to_s3()</code> 추가</td>
+<td>base64 → 임시 파일 저장 → S3 업로드 → 임시 파일 삭제</td>
+</tr>
+</tbody>
+</table>
+<h4 id="_5">수정 후 데이터 흐름 (정상)<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>url_routes.py                              image.py (수정됨)
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>──────────────────                         ──────────────────
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a>modal_content = {                          # 1. img_data 우선 확인
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a>    &quot;img_data&quot;: img_b64,  ──────────────▶  image_base64 = content_data.get(&quot;img_data&quot;)
+<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a>    &quot;alt&quot;: &quot;설명&quot;,        ──────────────▶  if image_base64:
+<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a>    &quot;context&quot;: &quot;주변텍스트&quot;,──────────────▶      → 파일 I/O 스킵, 직접 사용
+<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a>}
+<a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a>                                           # 2. 키 매핑
+<a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a>                                           alt → captions (VLM 프롬프트 전달)
+<a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a>                                           context → footnotes (VLM 프롬프트 전달)
+<a id="__codelineno-22-11" name="__codelineno-22-11" href="#__codelineno-22-11"></a>
+<a id="__codelineno-22-12" name="__codelineno-22-12" href="#__codelineno-22-12"></a>                                           # 3. VLM 호출 성공
+<a id="__codelineno-22-13" name="__codelineno-22-13" href="#__codelineno-22-13"></a>                                           response = await modal_caption_func(
+<a id="__codelineno-22-14" name="__codelineno-22-14" href="#__codelineno-22-14"></a>                                               prompt, image_data=image_base64, ...
+<a id="__codelineno-22-15" name="__codelineno-22-15" href="#__codelineno-22-15"></a>                                           )
+<a id="__codelineno-22-16" name="__codelineno-22-16" href="#__codelineno-22-16"></a>                                           → 의미있는 description + entity_info 생성
+<a id="__codelineno-22-17" name="__codelineno-22-17" href="#__codelineno-22-17"></a>
+<a id="__codelineno-22-18" name="__codelineno-22-18" href="#__codelineno-22-18"></a>                                           # 4. S3 업로드
+<a id="__codelineno-22-19" name="__codelineno-22-19" href="#__codelineno-22-19"></a>                                           _upload_base64_image_to_s3(img_b64, ...)
+<a id="__codelineno-22-20" name="__codelineno-22-20" href="#__codelineno-22-20"></a>                                           → S3 URL 생성 → structured_content에 포함
+<a id="__codelineno-22-21" name="__codelineno-22-21" href="#__codelineno-22-21"></a>
+<a id="__codelineno-22-22" name="__codelineno-22-22" href="#__codelineno-22-22"></a>                                           # 5. KG 저장
+<a id="__codelineno-22-23" name="__codelineno-22-23" href="#__codelineno-22-23"></a>                                           _create_entity_and_chunk(...)
+<a id="__codelineno-22-24" name="__codelineno-22-24" href="#__codelineno-22-24"></a>                                           → 정상 엔티티/청크/관계 생성
+</code></pre></div>
+<h4 id="_6">두 가지 입력 경로 호환성<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h4>
+<p>수정 후 <code>ImageModalProcessor</code>는 두 가지 입력을 모두 지원합니다:</p>
+<table>
+<thead>
+<tr>
+<th>소스</th>
+<th>키</th>
+<th>이미지 데이터</th>
+<th>S3 업로드</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>URL 수집</strong></td>
+<td><code>img_data</code></td>
+<td>인라인 base64 (HTTP 다운로드)</td>
+<td><code>_upload_base64_image_to_s3()</code></td>
+</tr>
+<tr>
+<td><strong>문서 파싱</strong> (PyMuPDF)</td>
+<td><code>img_path</code></td>
+<td>로컬 파일 경로 → base64 변환</td>
+<td><code>_upload_image_to_s3()</code></td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  맨위로
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\ud074\ub9bd\ubcf4\ub4dc\uc5d0 \ubcf5\uc0ac\ub428", "clipboard.copy": "\ud074\ub9bd\ubcf4\ub4dc\ub85c \ubcf5\uc0ac", "search.result.more.one": "\uc774 \ubb38\uc11c\uc5d0\uc11c 1\uac1c\uc758 \uac80\uc0c9 \uacb0\uacfc \ub354 \ubcf4\uae30", "search.result.more.other": "\uc774 \ubb38\uc11c\uc5d0\uc11c #\uac1c\uc758 \uac80\uc0c9 \uacb0\uacfc \ub354 \ubcf4\uae30", "search.result.none": "\uac80\uc0c9\uc5b4\uc640 \uc77c\uce58\ud558\ub294 \ubb38\uc11c\uac00 \uc5c6\uc2b5\ub2c8\ub2e4", "search.result.one": "1\uac1c\uc758 \uc77c\uce58\ud558\ub294 \ubb38\uc11c", "search.result.other": "#\uac1c\uc758 \uc77c\uce58\ud558\ub294 \ubb38\uc11c", "search.result.placeholder": "\uac80\uc0c9\uc5b4\ub97c \uc785\ub825\ud558\uc138\uc694", "search.result.term.missing": "\ud3ec\ud568\ub418\uc9c0 \uc54a\uc740 \uac80\uc0c9\uc5b4", "select.version": "\ubc84\uc804 \uc120\ud0dd"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

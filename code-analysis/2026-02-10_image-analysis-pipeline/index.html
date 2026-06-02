@@ -1,0 +1,3433 @@
+
+<!doctype html>
+<html lang="ko" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="LightRAG 프로젝트 기술 분석 및 설계 문서">
+      
+      
+      
+      
+        <link rel="prev" href="../2026-02-10_query-api-reference/">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>2026-02-10_image-analysis-pipeline - LightRAG 기술 문서</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Noto+Sans+KR:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Noto Sans KR";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#lightrag" class="md-skip">
+          콘텐츠로 이동
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="상단/헤더">
+    <a href="../.." title="LightRAG 기술 문서" class="md-header__button md-logo" aria-label="LightRAG 기술 문서" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            LightRAG 기술 문서
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              2026-02-10_image-analysis-pipeline
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="다크 모드로 전환"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="다크 모드로 전환" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="라이트 모드로 전환"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="라이트 모드로 전환" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="검색" placeholder="검색" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="검색">
+        
+        <button type="reset" class="md-search__icon md-icon" title="지우기" aria-label="지우기" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            검색 초기화
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="네비게이션" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="LightRAG 기술 문서" class="md-nav__button md-logo" aria-label="LightRAG 기술 문서" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    LightRAG 기술 문서
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    홈
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    코드분석
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    코드분석
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-05-16_feature-capability-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-05-16_feature-capability-analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-13_board-api-ingestion-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-13_board-api-ingestion-guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-11_url-ingestion-pipeline-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-11_url-ingestion-pipeline-analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-10_query-response-structure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-response-structure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-10_query-pipeline-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-pipeline-analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-10_query-mode-behavior-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-mode-behavior-analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-10_query-api-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-api-reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_image-analysis-pipeline
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_image-analysis-pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="목차">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      목차
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        목차
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. 파이프라인 개요
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-multimodalconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. 설정 (MultimodalConfig)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. 설정 (MultimodalConfig)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-vlm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 VLM 설정
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 처리 토글
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 이미지 필터링
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#24" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.4 컨텍스트 추출
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#25" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.5 동시성
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. 문서 파싱 — 이미지 추출
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. 문서 파싱 — 이미지 추출">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-pymupdf" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 PyMuPDF 파서 (기본)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-docling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 Docling 파서 (대안)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. 이미지 필터링 기준
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. 이미지 필터링 기준">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 크기 필터
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 종횡비 필터
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 중복 필터
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 필터링 기준 요약
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. 컨텍스트 추출
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. 컨텍스트 추출">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 페이지 기반 컨텍스트 (기본)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 청크 기반 컨텍스트
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 토큰 절삭
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-vlm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. VLM 이미지 분석
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. VLM 이미지 분석">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-vlm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 VLM 클라이언트 설정
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-vlm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 VLM 호출 파라미터
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 이미지 처리 흐름
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-vlm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 VLM 응답 구조
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-vlm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. VLM 프롬프트 상세
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. VLM 프롬프트 상세">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 시스템 프롬프트
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 비전 프롬프트 (컨텍스트 없음)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#73" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.3 비전 프롬프트 (컨텍스트 있음)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#74" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.4 프롬프트 설계 원칙
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-vlm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. VLM 응답 파싱
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. VLM 응답 파싱">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#81-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.1 4단계 로버스트 파싱
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#82-json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.2 JSON 후보 추출
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#83" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.3 엔티티 이름 후처리
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-kg" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. KG 엔티티 생성
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. KG 엔티티 생성">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#91" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.1 텍스트 청크 생성
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#92-kg" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.2 KG 노드 생성
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#93-db" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.3 엔티티 벡터 DB 등록
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#94-structured_content" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.4 structured_content 구조
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. 2차 엔티티 추출
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. 2차 엔티티 추출">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#101" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.1 처리 흐름
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#102-belongs_to" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.2 belongs_to 관계 생성
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#103-1-kg" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.3 결과: 이미지 1개에서 생성되는 KG 구조
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-s3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. S3 이미지 업로드
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11. S3 이미지 업로드">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#111" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.1 업로드 경로
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#112" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.2 업로드 설정
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#113-s3-url" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.3 S3 URL 저장 위치
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. API 엔드포인트
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="12. API 엔드포인트">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#121-post-apimultimodalprocess" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.1 POST /api/multimodal/process
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#122" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.2 백그라운드 처리 단계
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#123" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.3 진행 상황 스트리밍
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. 파서별 비교
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#14" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14. 프로세서별 비교
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#15-end-to-end" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15. 전체 End-to-End 흐름도
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="15. 전체 End-to-End 흐름도">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pdf-1-kg" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDF 1개 → KG 생성까지의 전체 과정
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#16" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        16. 핵심 임계값 및 제한 사항
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#17" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17. 관찰 사항 및 개선 포인트
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="17. 관찰 사항 및 개선 포인트">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#171-pymupdf" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.1 PyMuPDF 캡션 미추출
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#172-vlm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.2 VLM 파라미터 하드코딩
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#173" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.3 병렬 처리 미구현
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#174-mime" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.4 이미지 MIME 타입 고정
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#175-belongs_to" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.5 belongs_to 관계의 높은 가중치
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#176-2-llm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.6 2차 엔티티 추출의 LLM 비용
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        부록: 관련 소스 파일 참조
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="목차">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      목차
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        목차
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. 파이프라인 개요
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-multimodalconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. 설정 (MultimodalConfig)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. 설정 (MultimodalConfig)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-vlm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 VLM 설정
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 처리 토글
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 이미지 필터링
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#24" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.4 컨텍스트 추출
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#25" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.5 동시성
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. 문서 파싱 — 이미지 추출
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. 문서 파싱 — 이미지 추출">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-pymupdf" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 PyMuPDF 파서 (기본)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-docling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 Docling 파서 (대안)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. 이미지 필터링 기준
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. 이미지 필터링 기준">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 크기 필터
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 종횡비 필터
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 중복 필터
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 필터링 기준 요약
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. 컨텍스트 추출
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. 컨텍스트 추출">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 페이지 기반 컨텍스트 (기본)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 청크 기반 컨텍스트
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 토큰 절삭
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-vlm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. VLM 이미지 분석
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. VLM 이미지 분석">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-vlm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 VLM 클라이언트 설정
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-vlm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 VLM 호출 파라미터
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 이미지 처리 흐름
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-vlm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 VLM 응답 구조
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-vlm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. VLM 프롬프트 상세
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. VLM 프롬프트 상세">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 시스템 프롬프트
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 비전 프롬프트 (컨텍스트 없음)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#73" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.3 비전 프롬프트 (컨텍스트 있음)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#74" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.4 프롬프트 설계 원칙
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-vlm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. VLM 응답 파싱
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. VLM 응답 파싱">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#81-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.1 4단계 로버스트 파싱
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#82-json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.2 JSON 후보 추출
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#83" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.3 엔티티 이름 후처리
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-kg" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. KG 엔티티 생성
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. KG 엔티티 생성">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#91" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.1 텍스트 청크 생성
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#92-kg" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.2 KG 노드 생성
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#93-db" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.3 엔티티 벡터 DB 등록
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#94-structured_content" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.4 structured_content 구조
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. 2차 엔티티 추출
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. 2차 엔티티 추출">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#101" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.1 처리 흐름
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#102-belongs_to" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.2 belongs_to 관계 생성
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#103-1-kg" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.3 결과: 이미지 1개에서 생성되는 KG 구조
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-s3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. S3 이미지 업로드
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11. S3 이미지 업로드">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#111" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.1 업로드 경로
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#112" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.2 업로드 설정
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#113-s3-url" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.3 S3 URL 저장 위치
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. API 엔드포인트
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="12. API 엔드포인트">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#121-post-apimultimodalprocess" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.1 POST /api/multimodal/process
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#122" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.2 백그라운드 처리 단계
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#123" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12.3 진행 상황 스트리밍
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. 파서별 비교
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#14" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14. 프로세서별 비교
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#15-end-to-end" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        15. 전체 End-to-End 흐름도
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="15. 전체 End-to-End 흐름도">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pdf-1-kg" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDF 1개 → KG 생성까지의 전체 과정
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#16" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        16. 핵심 임계값 및 제한 사항
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#17" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17. 관찰 사항 및 개선 포인트
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="17. 관찰 사항 및 개선 포인트">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#171-pymupdf" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.1 PyMuPDF 캡션 미추출
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#172-vlm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.2 VLM 파라미터 하드코딩
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#173" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.3 병렬 처리 미구현
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#174-mime" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.4 이미지 MIME 타입 고정
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#175-belongs_to" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.5 belongs_to 관계의 높은 가중치
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#176-2-llm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.6 2차 엔티티 추출의 LLM 비용
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        부록: 관련 소스 파일 참조
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="lightrag">LightRAG 이미지 분석 파이프라인 상세 분석<a class="headerlink" href="#lightrag" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>분석일: 2026-02-10
+대상: 멀티모달 이미지 처리 파이프라인 (PDF → 이미지 추출 → VLM 분석 → KG 엔티티 생성)
+분석 범위: <code>lightrag/multimodal/</code> 패키지 전체, <code>multimodal_routes.py</code>, <code>lightrag_server.py</code></p>
+</blockquote>
+<hr />
+<h2 id="_1">목차<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<ol>
+<li><a href="#1-파이프라인-개요">파이프라인 개요</a></li>
+<li><a href="#2-설정-multimodalconfig">설정 (MultimodalConfig)</a></li>
+<li><a href="#3-문서-파싱--이미지-추출">문서 파싱 — 이미지 추출</a></li>
+<li><a href="#4-이미지-필터링-기준">이미지 필터링 기준</a></li>
+<li><a href="#5-컨텍스트-추출">컨텍스트 추출 (ContextExtractor)</a></li>
+<li><a href="#6-vlm-이미지-분석">VLM 이미지 분석</a></li>
+<li><a href="#7-vlm-프롬프트-상세">VLM 프롬프트 상세</a></li>
+<li><a href="#8-vlm-응답-파싱">VLM 응답 파싱</a></li>
+<li><a href="#9-kg-엔티티-생성">KG 엔티티 생성</a></li>
+<li><a href="#10-2차-엔티티-추출">2차 엔티티 추출 (LLM)</a></li>
+<li><a href="#11-s3-이미지-업로드">S3 이미지 업로드</a></li>
+<li><a href="#12-api-엔드포인트">API 엔드포인트</a></li>
+<li><a href="#13-파서별-비교">파서별 비교 (PyMuPDF vs Docling)</a></li>
+<li><a href="#14-프로세서별-비교">프로세서별 비교 (이미지 vs 테이블 vs 수식)</a></li>
+<li><a href="#15-전체-end-to-end-흐름도">전체 End-to-End 흐름도</a></li>
+<li><a href="#16-핵심-임계값-및-제한-사항">핵심 임계값 및 제한 사항</a></li>
+<li><a href="#17-관찰-사항-및-개선-포인트">관찰 사항 및 개선 포인트</a></li>
+</ol>
+<hr />
+<h2 id="1">1. 파이프라인 개요<a class="headerlink" href="#1" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>PDF 업로드 (API)
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    │
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    ▼
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>문서 파서 (PyMuPDF 또는 Docling)
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    │  → 이미지, 텍스트, 테이블, 수식을 content_list로 추출
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    ▼
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>백그라운드 태스크 매니저
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    │  → 비동기 실행, NDJSON 스트리밍으로 진행 상황 보고
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    ▼
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>텍스트 삽입 (rag.ainsert)
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    │  → 텍스트 블록을 표준 LightRAG 파이프라인으로 처리
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    ▼
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>ImageModalProcessor (VLM 호출)
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    │  → 이미지 설명(description) + 엔티티 정보(entity_info) JSON 생성
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>    ▼
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>BaseModalProcessor._create_entity_and_chunk()
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>    │  → 청크를 KV + 벡터 DB에 저장, KG 노드 생성
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>    ▼
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>extract_entities() + merge_nodes_and_edges()
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>    │  → 설명 텍스트에서 추가 엔티티 추출
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>    │  → &quot;belongs_to&quot; edge로 이미지 엔티티에 연결
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>    ▼
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>지식 그래프 (완성)
+</code></pre></div>
+<hr />
+<h2 id="2-multimodalconfig">2. 설정 (MultimodalConfig)<a class="headerlink" href="#2-multimodalconfig" title="Permanent link">&para;</a></h2>
+<p>파일: <code>lightrag/multimodal/config.py</code></p>
+<p>모든 설정은 환경변수에서 읽으며 기본값이 있습니다.</p>
+<h3 id="21-vlm">2.1 VLM 설정<a class="headerlink" href="#21-vlm" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>환경변수</th>
+<th>기본값</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>VLM_MODEL</code></td>
+<td><code>""</code></td>
+<td>VLM 모델명 (예: <code>qwen3-vl-8b</code>)</td>
+</tr>
+<tr>
+<td><code>VLM_API_BASE</code></td>
+<td><code>""</code></td>
+<td>VLM API 엔드포인트 (예: <code>http://10.62.130.84:18006/v1</code>)</td>
+</tr>
+<tr>
+<td><code>VLM_API_KEY</code></td>
+<td><code>"not-needed"</code></td>
+<td>VLM API 키</td>
+</tr>
+<tr>
+<td><code>VLM_RESPONSE_LANGUAGE</code></td>
+<td><code>"Korean"</code></td>
+<td>VLM 응답 언어</td>
+</tr>
+</tbody>
+</table>
+<h3 id="22">2.2 처리 토글<a class="headerlink" href="#22" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>환경변수</th>
+<th>기본값</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ENABLE_IMAGE_PROCESSING</code></td>
+<td><code>True</code></td>
+<td>이미지 처리 활성화</td>
+</tr>
+<tr>
+<td><code>ENABLE_TABLE_PROCESSING</code></td>
+<td><code>True</code></td>
+<td>테이블 처리 활성화</td>
+</tr>
+<tr>
+<td><code>ENABLE_EQUATION_PROCESSING</code></td>
+<td><code>True</code></td>
+<td>수식 처리 활성화</td>
+</tr>
+</tbody>
+</table>
+<h3 id="23">2.3 이미지 필터링<a class="headerlink" href="#23" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>환경변수</th>
+<th>기본값</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>MIN_IMAGE_WIDTH</code></td>
+<td><code>100</code> (px)</td>
+<td>최소 이미지 너비</td>
+</tr>
+<tr>
+<td><code>MIN_IMAGE_HEIGHT</code></td>
+<td><code>100</code> (px)</td>
+<td>최소 이미지 높이</td>
+</tr>
+<tr>
+<td><code>MAX_IMAGE_ASPECT_RATIO</code></td>
+<td><code>10.0</code></td>
+<td>최대 종횡비</td>
+</tr>
+<tr>
+<td><code>ENABLE_DUPLICATE_FILTERING</code></td>
+<td><code>True</code></td>
+<td>MD5 기반 중복 필터링</td>
+</tr>
+</tbody>
+</table>
+<h3 id="24">2.4 컨텍스트 추출<a class="headerlink" href="#24" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>환경변수</th>
+<th>기본값</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>CONTEXT_WINDOW</code></td>
+<td><code>1</code></td>
+<td>앞뒤 페이지/청크 수</td>
+</tr>
+<tr>
+<td><code>CONTEXT_MODE</code></td>
+<td><code>"page"</code></td>
+<td>컨텍스트 추출 방식 (<code>page</code> 또는 <code>chunk</code>)</td>
+</tr>
+<tr>
+<td><code>MAX_CONTEXT_TOKENS</code></td>
+<td><code>2000</code></td>
+<td>최대 컨텍스트 토큰 수</td>
+</tr>
+<tr>
+<td><code>INCLUDE_HEADERS</code></td>
+<td><code>True</code></td>
+<td>제목/헤더 포함 여부</td>
+</tr>
+<tr>
+<td><code>INCLUDE_CAPTIONS</code></td>
+<td><code>True</code></td>
+<td>캡션 포함 여부</td>
+</tr>
+<tr>
+<td><code>CONTEXT_FILTER_CONTENT_TYPES</code></td>
+<td><code>["text"]</code></td>
+<td>컨텍스트에 포함할 콘텐츠 타입</td>
+</tr>
+<tr>
+<td><code>CONTENT_FORMAT</code></td>
+<td><code>"auto"</code></td>
+<td>콘텐츠 형식</td>
+</tr>
+</tbody>
+</table>
+<h3 id="25">2.5 동시성<a class="headerlink" href="#25" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>환경변수</th>
+<th>기본값</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>MAX_PARALLEL_MULTIMODAL</code></td>
+<td><code>4</code></td>
+<td>최대 병렬 처리 수 (설정만, 현재 코드에서 미적용)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3">3. 문서 파싱 — 이미지 추출<a class="headerlink" href="#3" title="Permanent link">&para;</a></h2>
+<h3 id="31-pymupdf">3.1 PyMuPDF 파서 (기본)<a class="headerlink" href="#31-pymupdf" title="Permanent link">&para;</a></h3>
+<p>파일: <code>lightrag/multimodal/parsers/pymupdf_parser.py</code></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># 페이지별 이미지 목록 조회</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">image_list</span> <span class="o">=</span> <span class="n">page</span><span class="o">.</span><span class="n">get_images</span><span class="p">(</span><span class="n">full</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="k">for</span> <span class="n">img_idx</span><span class="p">,</span> <span class="n">img_info</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">image_list</span><span class="p">):</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="n">xref</span> <span class="o">=</span> <span class="n">img_info</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    <span class="n">base_image</span> <span class="o">=</span> <span class="n">doc</span><span class="o">.</span><span class="n">extract_image</span><span class="p">(</span><span class="n">xref</span><span class="p">)</span>     <span class="c1"># 원본 이미지 바이트</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    <span class="n">image_bytes</span> <span class="o">=</span> <span class="n">base_image</span><span class="p">[</span><span class="s2">&quot;image&quot;</span><span class="p">]</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    <span class="n">width</span> <span class="o">=</span> <span class="n">base_image</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;width&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>    <span class="n">height</span> <span class="o">=</span> <span class="n">base_image</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;height&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>    <span class="n">ext</span> <span class="o">=</span> <span class="n">base_image</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;ext&quot;</span><span class="p">,</span> <span class="s2">&quot;png&quot;</span><span class="p">)</span>
+</code></pre></div>
+<p><strong>출력 형식:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">{</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">    </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;image&quot;</span><span class="p">,</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="nt">&quot;img_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;/absolute/path/to/page1_img0.png&quot;</span><span class="p">,</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">    </span><span class="nt">&quot;image_caption&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[],</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">    </span><span class="nt">&quot;image_footnote&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[],</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">    </span><span class="nt">&quot;page_idx&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">    </span><span class="nt">&quot;image_width&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">800</span><span class="p">,</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">    </span><span class="nt">&quot;image_height&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">600</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="p">}</span>
+</code></pre></div>
+<p><strong>제한사항</strong>: PyMuPDF는 캡션/각주를 추출하지 못함 — 항상 빈 배열</p>
+<h3 id="32-docling">3.2 Docling 파서 (대안)<a class="headerlink" href="#32-docling" title="Permanent link">&para;</a></h3>
+<p>파일: <code>lightrag/multimodal/parsers/docling_parser.py</code></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># GPU 가속 문서 AI 활용</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">pdf_pipeline_options</span> <span class="o">=</span> <span class="n">PdfPipelineOptions</span><span class="p">(</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="n">generate_picture_images</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>    <span class="c1"># 이미지 추출 활성화</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="n">images_scale</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span>                <span class="c1"># 2배 해상도 업스케일링</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="n">do_ocr</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>                     <span class="c1"># OCR 활성화</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="n">do_table_structure</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>         <span class="c1"># 테이블 구조 감지</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="p">)</span>
+</code></pre></div>
+<p><strong>출력 형식:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="p">{</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">    </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;image&quot;</span><span class="p">,</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">    </span><span class="nt">&quot;img_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;/path/to/image.png&quot;</span><span class="p">,</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">    </span><span class="nt">&quot;image_caption&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;그림 3-1. 긴급출동 서비스 처리 흐름도&quot;</span><span class="p">,</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">    </span><span class="nt">&quot;image_footnote&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;출처: 서비스 운영 매뉴얼 2024&quot;</span><span class="p">,</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">    </span><span class="nt">&quot;image_label&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;chart&quot;</span><span class="p">,</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">    </span><span class="nt">&quot;page_idx&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">5</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="p">}</span>
+</code></pre></div>
+<p><strong>장점</strong>: 문서 구조에서 캡션과 각주를 자동 추출</p>
+<hr />
+<h2 id="4">4. 이미지 필터링 기준<a class="headerlink" href="#4" title="Permanent link">&para;</a></h2>
+<p>이미지 추출 후 3단계 필터링을 거칩니다:</p>
+<h3 id="41">4.1 크기 필터<a class="headerlink" href="#41" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">if</span> <span class="n">width</span> <span class="o">&lt;</span> <span class="n">min_image_width</span> <span class="ow">or</span> <span class="n">height</span> <span class="o">&lt;</span> <span class="n">min_image_height</span><span class="p">:</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>    <span class="c1"># 100x100 미만 이미지 제거</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    <span class="k">continue</span>
+</code></pre></div>
+<ul>
+<li>기본: 너비 &lt; 100px 또는 높이 &lt; 100px → 제거</li>
+<li>목적: 아이콘, 불릿 포인트, 로고 등 소형 장식 이미지 제거</li>
+</ul>
+<h3 id="42">4.2 종횡비 필터<a class="headerlink" href="#42" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">aspect_ratio</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">width</span> <span class="o">/</span> <span class="n">height</span><span class="p">,</span> <span class="n">height</span> <span class="o">/</span> <span class="n">width</span><span class="p">)</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="k">if</span> <span class="n">aspect_ratio</span> <span class="o">&gt;</span> <span class="n">max_image_aspect_ratio</span><span class="p">:</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>    <span class="c1"># 종횡비 10:1 초과 이미지 제거</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>    <span class="k">continue</span>
+</code></pre></div>
+<ul>
+<li>기본: 10:1 초과 → 제거</li>
+<li>목적: 가로줄, 세로줄 등 장식적 막대 이미지 제거</li>
+</ul>
+<h3 id="43">4.3 중복 필터<a class="headerlink" href="#43" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">hashlib</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">image_hash</span> <span class="o">=</span> <span class="n">hashlib</span><span class="o">.</span><span class="n">md5</span><span class="p">(</span><span class="n">image_bytes</span><span class="p">)</span><span class="o">.</span><span class="n">hexdigest</span><span class="p">()</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="k">if</span> <span class="n">image_hash</span> <span class="ow">in</span> <span class="n">seen_hashes</span><span class="p">:</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    <span class="k">continue</span>  <span class="c1"># 이미 처리된 이미지 건너뛰기</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="n">seen_hashes</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">image_hash</span><span class="p">)</span>
+</code></pre></div>
+<ul>
+<li>MD5 해시 기반, 같은 문서 내 동일 이미지 중복 제거</li>
+<li><code>ENABLE_DUPLICATE_FILTERING=True</code> (기본) 로 제어</li>
+</ul>
+<h3 id="44">4.4 필터링 기준 요약<a class="headerlink" href="#44" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>필터</th>
+<th>기준</th>
+<th>기본값</th>
+<th>대상</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>크기</td>
+<td>width/height 최소값</td>
+<td>100×100 px</td>
+<td>소형 장식 이미지</td>
+</tr>
+<tr>
+<td>종횡비</td>
+<td>max(w/h, h/w) 최대값</td>
+<td>10.0</td>
+<td>줄, 막대 이미지</td>
+</tr>
+<tr>
+<td>중복</td>
+<td>MD5 해시 일치</td>
+<td>활성화</td>
+<td>반복 삽입된 이미지</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="5">5. 컨텍스트 추출<a class="headerlink" href="#5" title="Permanent link">&para;</a></h2>
+<p>파일: <code>lightrag/multimodal/context.py</code></p>
+<p>이미지 주변의 텍스트를 수집하여 VLM에 전달합니다.</p>
+<h3 id="51">5.1 페이지 기반 컨텍스트 (기본)<a class="headerlink" href="#51" title="Permanent link">&para;</a></h3>
+<p><code>context_mode="page"</code>, <code>context_window=1</code> 일 때:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>┌─────────────┐
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>│  Page N-1   │ ← 이전 페이지 텍스트
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>│  (텍스트)    │
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>├─────────────┤
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>│  Page N     │ ← 현재 페이지 (이미지가 있는 페이지)
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>│  [이미지]    │   텍스트 블록만 수집
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>│  (텍스트)    │
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>├─────────────┤
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>│  Page N+1   │ ← 다음 페이지 텍스트
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>│  (텍스트)    │
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>└─────────────┘
+</code></pre></div>
+<ul>
+<li><code>content_list</code>에서 <code>page_idx</code>가 <code>[N-1, N, N+1]</code> 범위인 텍스트 블록 수집</li>
+<li><code>filter_content_types=["text"]</code> → 텍스트 타입만 포함</li>
+<li>다른 페이지의 텍스트는 <code>[Page X]</code> 접두사 추가</li>
+<li>헤더는 마크다운 <code>#</code> 형식으로 변환 (<code>text_level</code> 기반)</li>
+<li>이미지/테이블 캡션은 <code>[Image: ...]</code> 또는 <code>[Table: ...]</code> 형식으로 포함</li>
+</ul>
+<h3 id="52">5.2 청크 기반 컨텍스트<a class="headerlink" href="#52" title="Permanent link">&para;</a></h3>
+<p><code>context_mode="chunk"</code>, <code>context_window=1</code> 일 때:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>content_list[I-1]  ← 이전 항목
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>content_list[I]    ← 현재 이미지 (제외)
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>content_list[I+1]  ← 다음 항목
+</code></pre></div>
+<ul>
+<li><code>content_list</code>의 인덱스 기반</li>
+<li>현재 항목(이미지) 자체는 제외</li>
+</ul>
+<h3 id="53">5.3 토큰 절삭<a class="headerlink" href="#53" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># 토크나이저 사용 가능 시</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">tokens</span> <span class="o">=</span> <span class="n">tokenizer</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">context</span><span class="p">)</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">tokens</span><span class="p">)</span> <span class="o">&gt;</span> <span class="n">max_context_tokens</span><span class="p">:</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    <span class="n">tokens</span> <span class="o">=</span> <span class="n">tokens</span><span class="p">[:</span><span class="n">max_context_tokens</span><span class="p">]</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>    <span class="n">text</span> <span class="o">=</span> <span class="n">tokenizer</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">tokens</span><span class="p">)</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>    <span class="c1"># 마지막 20% 내 마침표(.) 또는 줄바꿈에서 끊기 시도</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>    <span class="c1"># 없으면 &quot;...&quot; 추가</span>
+</code></pre></div>
+<ul>
+<li><code>max_context_tokens=2000</code> (기본)</li>
+<li>토크나이저 없으면 문자 수 기반 절삭</li>
+</ul>
+<hr />
+<h2 id="6-vlm">6. VLM 이미지 분석<a class="headerlink" href="#6-vlm" title="Permanent link">&para;</a></h2>
+<p>파일: <code>lightrag/multimodal/processors/image.py</code></p>
+<h3 id="61-vlm">6.1 VLM 클라이언트 설정<a class="headerlink" href="#61-vlm" title="Permanent link">&para;</a></h3>
+<p>파일: <code>lightrag/api/lightrag_server.py</code></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">vlm_client</span> <span class="o">=</span> <span class="n">AsyncOpenAI</span><span class="p">(</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>    <span class="n">base_url</span><span class="o">=</span><span class="n">mm_config</span><span class="o">.</span><span class="n">vlm_api_base</span><span class="p">,</span>    <span class="c1"># &quot;http://10.62.130.84:18006/v1&quot;</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    <span class="n">api_key</span><span class="o">=</span><span class="n">mm_config</span><span class="o">.</span><span class="n">vlm_api_key</span><span class="p">,</span>      <span class="c1"># &quot;not-needed&quot;</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="p">)</span>
+</code></pre></div>
+<h3 id="62-vlm">6.2 VLM 호출 파라미터<a class="headerlink" href="#62-vlm" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>파라미터</th>
+<th>값</th>
+<th>비고</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>모델</td>
+<td><code>qwen3-vl-8b</code></td>
+<td>환경변수 <code>VLM_MODEL</code></td>
+</tr>
+<tr>
+<td>max_tokens</td>
+<td><code>4096</code></td>
+<td>하드코딩</td>
+</tr>
+<tr>
+<td>temperature</td>
+<td><code>0.1</code></td>
+<td>하드코딩, 매우 낮음 (결정적 출력)</td>
+</tr>
+<tr>
+<td>이미지 형식</td>
+<td><code>data:image/png;base64,...</code></td>
+<td>항상 PNG MIME 타입</td>
+</tr>
+<tr>
+<td>메시지 구조</td>
+<td><code>[image_url, text]</code></td>
+<td>이미지가 먼저, 텍스트가 나중</td>
+</tr>
+</tbody>
+</table>
+<h3 id="63">6.3 이미지 처리 흐름<a class="headerlink" href="#63" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># 1. 이미지 파일 읽기 + Base64 인코딩</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="n">image_base64</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_encode_image_to_base64</span><span class="p">(</span><span class="n">image_path</span><span class="p">)</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="c1"># 2. 주변 컨텍스트 추출</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="n">context</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_context_for_item</span><span class="p">(</span><span class="n">item_info</span><span class="p">)</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="c1"># 3. 프롬프트 구성 (컨텍스트 유무에 따라 다른 템플릿)</span>
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="k">if</span> <span class="n">context</span><span class="p">:</span>
+<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>    <span class="n">vision_prompt</span> <span class="o">=</span> <span class="n">PROMPTS</span><span class="p">[</span><span class="s2">&quot;vision_prompt_with_context&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a><span class="k">else</span><span class="p">:</span>
+<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>    <span class="n">vision_prompt</span> <span class="o">=</span> <span class="n">PROMPTS</span><span class="p">[</span><span class="s2">&quot;vision_prompt&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a>
+<a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a><span class="c1"># 4. VLM API 호출</span>
+<a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a><span class="n">response</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">modal_caption_func</span><span class="p">(</span>
+<a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a>    <span class="n">vision_prompt</span><span class="p">,</span>
+<a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a>    <span class="n">image_data</span><span class="o">=</span><span class="n">image_base64</span><span class="p">,</span>
+<a id="__codelineno-12-17" name="__codelineno-12-17" href="#__codelineno-12-17"></a>    <span class="n">system_prompt</span><span class="o">=</span><span class="n">PROMPTS</span><span class="p">[</span><span class="s2">&quot;IMAGE_ANALYSIS_SYSTEM&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+<a id="__codelineno-12-18" name="__codelineno-12-18" href="#__codelineno-12-18"></a>        <span class="n">response_language</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">response_language</span>
+<a id="__codelineno-12-19" name="__codelineno-12-19" href="#__codelineno-12-19"></a>    <span class="p">),</span>
+<a id="__codelineno-12-20" name="__codelineno-12-20" href="#__codelineno-12-20"></a><span class="p">)</span>
+<a id="__codelineno-12-21" name="__codelineno-12-21" href="#__codelineno-12-21"></a>
+<a id="__codelineno-12-22" name="__codelineno-12-22" href="#__codelineno-12-22"></a><span class="c1"># 5. JSON 응답 파싱</span>
+<a id="__codelineno-12-23" name="__codelineno-12-23" href="#__codelineno-12-23"></a><span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_parse_response</span><span class="p">(</span><span class="n">response</span><span class="p">,</span> <span class="n">entity_name</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="64-vlm">6.4 VLM 응답 구조<a class="headerlink" href="#64-vlm" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="p">{</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">    </span><span class="nt">&quot;detailed_description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;이 다이어그램은 긴급출동 서비스의 처리 절차를 보여줍니다. 고객 요청 접수 → 출동 지시 → 현장 도착 → 조치 수행 → 완료 보고의 5단계로 구성됩니다...&quot;</span><span class="p">,</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">    </span><span class="nt">&quot;entity_info&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">        </span><span class="nt">&quot;entity_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;긴급출동 처리 절차 흐름도&quot;</span><span class="p">,</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="w">        </span><span class="nt">&quot;entity_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;image&quot;</span><span class="p">,</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="w">        </span><span class="nt">&quot;summary&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;긴급출동 서비스의 5단계 처리 절차(접수→출동→도착→조치→보고)를 설명하는 흐름도&quot;</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="p">}</span>
+</code></pre></div>
+<hr />
+<h2 id="7-vlm">7. VLM 프롬프트 상세<a class="headerlink" href="#7-vlm" title="Permanent link">&para;</a></h2>
+<p>파일: <code>lightrag/multimodal/prompts.py</code></p>
+<h3 id="71">7.1 시스템 프롬프트<a class="headerlink" href="#71" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>당신은 문서 이미지에서 도메인 핵심 정보를 추출하는 전문가입니다.
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>이미지에 포함된 기술적 내용, 장치명, 절차, 규격, 데이터 등 지식으로서 가치 있는 정보에 집중하세요.
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>배경색, 텍스트 색상, 레이아웃 구성, 시각적 장식 요소는 설명하지 마세요.
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>반드시 {response_language}로 응답하세요.
+</code></pre></div>
+<p><strong>핵심 원칙</strong>: 도메인 지식에 집중, 시각적 스타일 정보 배제</p>
+<h3 id="72">7.2 비전 프롬프트 (컨텍스트 없음)<a class="headerlink" href="#72" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>**중요: 반드시 {response_language}로 응답하세요.**
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>이 이미지에서 도메인 핵심 정보를 추출하고 아래 JSON 형식으로 응답하세요:
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>{
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a>    &quot;detailed_description&quot;: &quot;이미지의 핵심 정보를 다음 지침에 따라 작성:
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a>    - 이미지가 설명하는 주제, 장치, 절차, 개념을 구체적으로 기술
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a>    - 이미지 내 텍스트(라벨, 제목, 설명문, 수치 등)를 정확하게 읽어서 기록
+<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a>    - 다이어그램, 도식, 흐름도 등의 기술적 내용을 상세히 설명
+<a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a>    - 장치명, 부품명, 규격, 단위 등 고유명사와 전문 용어를 정확하게 기록
+<a id="__codelineno-15-11" name="__codelineno-15-11" href="#__codelineno-15-11"></a>    - 대명사 대신 구체적인 명칭을 사용하여 명확하게 기술
+<a id="__codelineno-15-12" name="__codelineno-15-12" href="#__codelineno-15-12"></a>
+<a id="__codelineno-15-13" name="__codelineno-15-13" href="#__codelineno-15-13"></a>    [추출하지 말 것]:
+<a id="__codelineno-15-14" name="__codelineno-15-14" href="#__codelineno-15-14"></a>    - 배경색, 텍스트 색상, 글꼴, 폰트 크기 등 시각적 스타일
+<a id="__codelineno-15-15" name="__codelineno-15-15" href="#__codelineno-15-15"></a>    - 이미지 레이아웃, 여백, 정렬, 위치 배치 등 구성 요소
+<a id="__codelineno-15-16" name="__codelineno-15-16" href="#__codelineno-15-16"></a>    - 아이콘, 마커, 화살표 등 장식적 시각 요소의 색상이나 형태
+<a id="__codelineno-15-17" name="__codelineno-15-17" href="#__codelineno-15-17"></a>    - &#39;이미지 분석 결과&#39;, &#39;시각적 분석&#39; 같은 메타 표현&quot;,
+<a id="__codelineno-15-18" name="__codelineno-15-18" href="#__codelineno-15-18"></a>    &quot;entity_info&quot;: {
+<a id="__codelineno-15-19" name="__codelineno-15-19" href="#__codelineno-15-19"></a>        &quot;entity_name&quot;: &quot;{entity_name}&quot;,
+<a id="__codelineno-15-20" name="__codelineno-15-20" href="#__codelineno-15-20"></a>        &quot;entity_type&quot;: &quot;image&quot;,
+<a id="__codelineno-15-21" name="__codelineno-15-21" href="#__codelineno-15-21"></a>        &quot;summary&quot;: &quot;이미지가 전달하는 핵심 지식을 간결하게 요약 (최대 100단어).
+<a id="__codelineno-15-22" name="__codelineno-15-22" href="#__codelineno-15-22"></a>                    시각적 묘사가 아닌 도메인 정보 중심으로 작성.&quot;
+<a id="__codelineno-15-23" name="__codelineno-15-23" href="#__codelineno-15-23"></a>    }
+<a id="__codelineno-15-24" name="__codelineno-15-24" href="#__codelineno-15-24"></a>}
+<a id="__codelineno-15-25" name="__codelineno-15-25" href="#__codelineno-15-25"></a>
+<a id="__codelineno-15-26" name="__codelineno-15-26" href="#__codelineno-15-26"></a>참고 정보:
+<a id="__codelineno-15-27" name="__codelineno-15-27" href="#__codelineno-15-27"></a>- 캡션: {captions}
+<a id="__codelineno-15-28" name="__codelineno-15-28" href="#__codelineno-15-28"></a>- 각주: {footnotes}
+<a id="__codelineno-15-29" name="__codelineno-15-29" href="#__codelineno-15-29"></a>
+<a id="__codelineno-15-30" name="__codelineno-15-30" href="#__codelineno-15-30"></a>지식 그래프 구축에 유용한 도메인 핵심 정보 추출에 집중하세요.
+</code></pre></div>
+<h3 id="73">7.3 비전 프롬프트 (컨텍스트 있음)<a class="headerlink" href="#73" title="Permanent link">&para;</a></h3>
+<p>위 프롬프트에 추가되는 요소:</p>
+<ul>
+<li><strong>추가 지침</strong>: "주변 문맥과의 연관성을 설명 (이 이미지가 문서에서 어떤 역할을 하는지)"</li>
+<li><strong>컨텍스트 섹션</strong>: <code>주변 문맥 정보:\n{context}</code></li>
+<li><strong>요약 지침</strong>: "주변 문맥과의 관계를 간결하게 요약"</li>
+</ul>
+<h3 id="74">7.4 프롬프트 설계 원칙<a class="headerlink" href="#74" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>원칙</th>
+<th>구현 방법</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>도메인 정보 집중</td>
+<td>"기술적 내용, 장치명, 절차, 규격, 데이터에 집중"</td>
+</tr>
+<tr>
+<td>시각적 노이즈 배제</td>
+<td>배경색, 글꼴, 레이아웃 등 명시적 제외 목록</td>
+</tr>
+<tr>
+<td>메타 표현 배제</td>
+<td>"이미지 분석 결과", "시각적 분석" 같은 표현 금지</td>
+</tr>
+<tr>
+<td>구체적 명칭 사용</td>
+<td>대명사 대신 고유명사, 전문 용어 강조</td>
+</tr>
+<tr>
+<td>이미지 내 텍스트 추출</td>
+<td>라벨, 제목, 설명문, 수치를 정확히 읽기</td>
+</tr>
+<tr>
+<td>구조화된 출력</td>
+<td>JSON 형식 (description + entity_info) 강제</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="8-vlm">8. VLM 응답 파싱<a class="headerlink" href="#8-vlm" title="Permanent link">&para;</a></h2>
+<p>파일: <code>lightrag/multimodal/base.py</code></p>
+<h3 id="81-4">8.1 4단계 로버스트 파싱<a class="headerlink" href="#81-4" title="Permanent link">&para;</a></h3>
+<p>VLM 출력이 종종 malformed JSON이므로 4단계 파싱 전략을 사용합니다:</p>
+<table>
+<thead>
+<tr>
+<th>단계</th>
+<th>방법</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>직접 파싱</td>
+<td>JSON 후보를 추출하여 <code>json.loads()</code> 시도</td>
+</tr>
+<tr>
+<td>2</td>
+<td>기본 정리</td>
+<td>곱은따옴표 교체, 후행 쉼표 제거</td>
+</tr>
+<tr>
+<td>3</td>
+<td>따옴표 수정</td>
+<td>이스케이프된 따옴표와 백슬래시 수정</td>
+</tr>
+<tr>
+<td>4</td>
+<td>정규식 폴백</td>
+<td>개별 필드를 regex로 추출</td>
+</tr>
+</tbody>
+</table>
+<h3 id="82-json">8.2 JSON 후보 추출<a class="headerlink" href="#82-json" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>우선순위:
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>1. 코드 블록: ```json ... ```
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>2. 균형 잡힌 중괄호 매칭
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>3. 단순 {..} 정규식
+</code></pre></div>
+<ul>
+<li><code>&lt;think&gt;</code>, <code>&lt;thinking&gt;</code> 태그는 사전 제거 (추론 모델 대응)</li>
+</ul>
+<h3 id="83">8.3 엔티티 이름 후처리<a class="headerlink" href="#83" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="c1"># entity_name에 타입 접미사 자동 추가</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="n">entity_data</span><span class="p">[</span><span class="s2">&quot;entity_name&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">entity_data</span><span class="p">[</span><span class="s1">&#39;entity_name&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">entity_data</span><span class="p">[</span><span class="s1">&#39;entity_type&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">)&quot;</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="c1"># 예: &quot;긴급출동 처리 절차 흐름도&quot; → &quot;긴급출동 처리 절차 흐름도 (image)&quot;</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="c1"># 호출자가 entity_name을 명시적으로 제공한 경우 그것을 사용</span>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="k">if</span> <span class="n">entity_name</span><span class="p">:</span>
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a>    <span class="n">entity_data</span><span class="p">[</span><span class="s2">&quot;entity_name&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">entity_name</span>
+</code></pre></div>
+<hr />
+<h2 id="9-kg">9. KG 엔티티 생성<a class="headerlink" href="#9-kg" title="Permanent link">&para;</a></h2>
+<p>파일: <code>lightrag/multimodal/base.py</code> — <code>_create_entity_and_chunk()</code></p>
+<h3 id="91">9.1 텍스트 청크 생성<a class="headerlink" href="#91" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="n">chunk_id</span> <span class="o">=</span> <span class="n">compute_mdhash_id</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">modal_chunk</span><span class="p">),</span> <span class="n">prefix</span><span class="o">=</span><span class="s2">&quot;chunk-&quot;</span><span class="p">)</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="n">tokens</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">tokenizer</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">modal_chunk</span><span class="p">))</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="n">chunk_data</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a>    <span class="s2">&quot;tokens&quot;</span><span class="p">:</span> <span class="n">tokens</span><span class="p">,</span>
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a>    <span class="s2">&quot;content&quot;</span><span class="p">:</span> <span class="n">modal_chunk</span><span class="p">,</span>                    <span class="c1"># VLM description 텍스트</span>
+<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a>    <span class="s2">&quot;chunk_order_index&quot;</span><span class="p">:</span> <span class="n">chunk_order_index</span><span class="p">,</span>
+<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a>    <span class="s2">&quot;full_doc_id&quot;</span><span class="p">:</span> <span class="n">actual_doc_id</span><span class="p">,</span>
+<a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a>    <span class="s2">&quot;file_path&quot;</span><span class="p">:</span> <span class="n">file_path</span><span class="p">,</span>
+<a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a><span class="p">}</span>
+<a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a><span class="k">if</span> <span class="n">structured_content</span><span class="p">:</span>
+<a id="__codelineno-18-12" name="__codelineno-18-12" href="#__codelineno-18-12"></a>    <span class="n">chunk_data</span><span class="p">[</span><span class="s2">&quot;structured_content&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">structured_content</span>  <span class="c1"># 전체 메타데이터</span>
+<a id="__codelineno-18-13" name="__codelineno-18-13" href="#__codelineno-18-13"></a>
+<a id="__codelineno-18-14" name="__codelineno-18-14" href="#__codelineno-18-14"></a><span class="c1"># KV 저장소 + 벡터 DB에 저장</span>
+<a id="__codelineno-18-15" name="__codelineno-18-15" href="#__codelineno-18-15"></a><span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">text_chunks_db</span><span class="o">.</span><span class="n">upsert</span><span class="p">({</span><span class="n">chunk_id</span><span class="p">:</span> <span class="n">chunk_data</span><span class="p">})</span>
+<a id="__codelineno-18-16" name="__codelineno-18-16" href="#__codelineno-18-16"></a><span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">chunks_vdb</span><span class="o">.</span><span class="n">upsert</span><span class="p">({</span><span class="n">chunk_id</span><span class="p">:</span> <span class="n">chunk_data</span><span class="p">})</span>
+</code></pre></div>
+<p><strong>이미지 청크의 <code>content</code></strong>: VLM의 <code>detailed_description</code> 출력 그대로 사용</p>
+<h3 id="92-kg">9.2 KG 노드 생성<a class="headerlink" href="#92-kg" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="n">node_data</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>    <span class="s2">&quot;entity_id&quot;</span><span class="p">:</span> <span class="n">entity_info</span><span class="p">[</span><span class="s2">&quot;entity_name&quot;</span><span class="p">],</span>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>    <span class="s2">&quot;entity_type&quot;</span><span class="p">:</span> <span class="s2">&quot;image&quot;</span><span class="p">,</span>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a>    <span class="s2">&quot;description&quot;</span><span class="p">:</span> <span class="n">entity_info</span><span class="p">[</span><span class="s2">&quot;summary&quot;</span><span class="p">],</span>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a>    <span class="s2">&quot;source_id&quot;</span><span class="p">:</span> <span class="n">chunk_id</span><span class="p">,</span>
+<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a>    <span class="s2">&quot;file_path&quot;</span><span class="p">:</span> <span class="n">file_path</span><span class="p">,</span>
+<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a>    <span class="s2">&quot;created_at&quot;</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()),</span>
+<a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a>    <span class="s2">&quot;s3_url&quot;</span><span class="p">:</span> <span class="s2">&quot;https://...&quot;</span><span class="p">,</span>           <span class="c1"># S3 업로드 시</span>
+<a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a><span class="p">}</span>
+<a id="__codelineno-19-10" name="__codelineno-19-10" href="#__codelineno-19-10"></a><span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">knowledge_graph_inst</span><span class="o">.</span><span class="n">upsert_node</span><span class="p">(</span><span class="n">entity_info</span><span class="p">[</span><span class="s2">&quot;entity_name&quot;</span><span class="p">],</span> <span class="n">node_data</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="93-db">9.3 엔티티 벡터 DB 등록<a class="headerlink" href="#93-db" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">entities_vdb</span><span class="o">.</span><span class="n">upsert</span><span class="p">({</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>    <span class="n">compute_mdhash_id</span><span class="p">(</span><span class="n">entity_name</span><span class="p">,</span> <span class="n">prefix</span><span class="o">=</span><span class="s2">&quot;ent-&quot;</span><span class="p">):</span> <span class="p">{</span>
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>        <span class="s2">&quot;entity_name&quot;</span><span class="p">:</span> <span class="n">entity_name</span><span class="p">,</span>
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a>        <span class="s2">&quot;entity_type&quot;</span><span class="p">:</span> <span class="s2">&quot;image&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a>        <span class="s2">&quot;content&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">entity_name</span><span class="si">}</span><span class="se">\n</span><span class="si">{</span><span class="n">summary</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>  <span class="c1"># 검색용 콘텐츠</span>
+<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a>        <span class="s2">&quot;source_id&quot;</span><span class="p">:</span> <span class="n">chunk_id</span><span class="p">,</span>
+<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a>        <span class="s2">&quot;file_path&quot;</span><span class="p">:</span> <span class="n">file_path</span><span class="p">,</span>
+<a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a>    <span class="p">}</span>
+<a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a><span class="p">})</span>
+</code></pre></div>
+<h3 id="94-structured_content">9.4 structured_content 구조<a class="headerlink" href="#94-structured_content" title="Permanent link">&para;</a></h3>
+<p>이미지 청크에 첨부되는 메타데이터:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="p">{</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="w">    </span><span class="nt">&quot;version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1.0&quot;</span><span class="p">,</span>
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="w">    </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;image&quot;</span><span class="p">,</span>
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="w">    </span><span class="nt">&quot;source&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="w">        </span><span class="nt">&quot;file_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;긴급출동_메뉴얼.pdf&quot;</span><span class="p">,</span>
+<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a><span class="w">        </span><span class="nt">&quot;doc_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;doc-abc123&quot;</span><span class="p">,</span>
+<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a><span class="w">        </span><span class="nt">&quot;chunk_order_index&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">5</span><span class="p">,</span>
+<a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a><span class="w">        </span><span class="nt">&quot;page_idx&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span>
+<a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a><span class="w">    </span><span class="p">},</span>
+<a id="__codelineno-21-10" name="__codelineno-21-10" href="#__codelineno-21-10"></a><span class="w">    </span><span class="nt">&quot;image&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-21-11" name="__codelineno-21-11" href="#__codelineno-21-11"></a><span class="w">        </span><span class="nt">&quot;path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;/absolute/path/to/image.png&quot;</span><span class="p">,</span>
+<a id="__codelineno-21-12" name="__codelineno-21-12" href="#__codelineno-21-12"></a><span class="w">        </span><span class="nt">&quot;s3_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://s3.example.com/lightrag/images/.../image.png&quot;</span><span class="p">,</span>
+<a id="__codelineno-21-13" name="__codelineno-21-13" href="#__codelineno-21-13"></a><span class="w">        </span><span class="nt">&quot;captions&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;그림 3-1. 긴급출동 처리 흐름도&quot;</span><span class="p">],</span>
+<a id="__codelineno-21-14" name="__codelineno-21-14" href="#__codelineno-21-14"></a><span class="w">        </span><span class="nt">&quot;footnotes&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span>
+<a id="__codelineno-21-15" name="__codelineno-21-15" href="#__codelineno-21-15"></a><span class="w">    </span><span class="p">},</span>
+<a id="__codelineno-21-16" name="__codelineno-21-16" href="#__codelineno-21-16"></a><span class="w">    </span><span class="nt">&quot;analysis&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-21-17" name="__codelineno-21-17" href="#__codelineno-21-17"></a><span class="w">        </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;이 다이어그램은 긴급출동 서비스의...&quot;</span>
+<a id="__codelineno-21-18" name="__codelineno-21-18" href="#__codelineno-21-18"></a><span class="w">    </span><span class="p">},</span>
+<a id="__codelineno-21-19" name="__codelineno-21-19" href="#__codelineno-21-19"></a><span class="w">    </span><span class="nt">&quot;entity&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-21-20" name="__codelineno-21-20" href="#__codelineno-21-20"></a><span class="w">        </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;긴급출동 처리 절차 흐름도 (image)&quot;</span><span class="p">,</span>
+<a id="__codelineno-21-21" name="__codelineno-21-21" href="#__codelineno-21-21"></a><span class="w">        </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;image&quot;</span><span class="p">,</span>
+<a id="__codelineno-21-22" name="__codelineno-21-22" href="#__codelineno-21-22"></a><span class="w">        </span><span class="nt">&quot;summary&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;긴급출동 서비스의 5단계 처리 절차를...&quot;</span>
+<a id="__codelineno-21-23" name="__codelineno-21-23" href="#__codelineno-21-23"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-21-24" name="__codelineno-21-24" href="#__codelineno-21-24"></a><span class="p">}</span>
+</code></pre></div>
+<hr />
+<h2 id="10-2">10. 2차 엔티티 추출<a class="headerlink" href="#10-2" title="Permanent link">&para;</a></h2>
+<p>파일: <code>lightrag/multimodal/base.py</code> — <code>_process_chunk_for_extraction()</code></p>
+<p>VLM이 생성한 description 텍스트에서 LLM을 통해 추가 엔티티를 추출합니다.</p>
+<h3 id="101">10.1 처리 흐름<a class="headerlink" href="#101" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>VLM description 텍스트
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>    │
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a>    ▼
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a>LightRAG extract_entities()
+<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a>    │  → 표준 LLM 엔티티 추출 파이프라인 사용
+<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a>    ▼
+<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a>추가 엔티티 발견
+<a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a>    │  (예: &quot;긴급출동&quot;, &quot;고객&quot;, &quot;출동지시&quot; 등)
+<a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a>    ▼
+<a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a>&quot;belongs_to&quot; edge 생성
+<a id="__codelineno-22-11" name="__codelineno-22-11" href="#__codelineno-22-11"></a>    │  → 각 추가 엔티티 ──belongs_to──→ 이미지 엔티티
+<a id="__codelineno-22-12" name="__codelineno-22-12" href="#__codelineno-22-12"></a>    ▼
+<a id="__codelineno-22-13" name="__codelineno-22-13" href="#__codelineno-22-13"></a>merge_nodes_and_edges()
+<a id="__codelineno-22-14" name="__codelineno-22-14" href="#__codelineno-22-14"></a>    │  → 중복 해결, 그래프 상태 확정
+<a id="__codelineno-22-15" name="__codelineno-22-15" href="#__codelineno-22-15"></a>    ▼
+<a id="__codelineno-22-16" name="__codelineno-22-16" href="#__codelineno-22-16"></a>완료
+</code></pre></div>
+<h3 id="102-belongs_to">10.2 belongs_to 관계 생성<a class="headerlink" href="#102-belongs_to" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="k">for</span> <span class="n">entity_name</span> <span class="ow">in</span> <span class="n">extracted_entities</span><span class="p">:</span>
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>    <span class="k">if</span> <span class="n">entity_name</span> <span class="o">!=</span> <span class="n">image_entity_name</span><span class="p">:</span>
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a>        <span class="n">relation_data</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a>            <span class="s2">&quot;description&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;Entity </span><span class="si">{</span><span class="n">entity_name</span><span class="si">}</span><span class="s2"> belongs to </span><span class="si">{</span><span class="n">image_entity_name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a>            <span class="s2">&quot;keywords&quot;</span><span class="p">:</span> <span class="s2">&quot;belongs_to,part_of,contained_in&quot;</span><span class="p">,</span>
+<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a>            <span class="s2">&quot;source_id&quot;</span><span class="p">:</span> <span class="n">chunk_id</span><span class="p">,</span>
+<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a>            <span class="s2">&quot;weight&quot;</span><span class="p">:</span> <span class="mf">10.0</span><span class="p">,</span>          <span class="c1"># 높은 가중치 (구조적 관계)</span>
+<a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a>            <span class="s2">&quot;file_path&quot;</span><span class="p">:</span> <span class="n">file_path</span><span class="p">,</span>
+<a id="__codelineno-23-9" name="__codelineno-23-9" href="#__codelineno-23-9"></a>        <span class="p">}</span>
+<a id="__codelineno-23-10" name="__codelineno-23-10" href="#__codelineno-23-10"></a>        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">knowledge_graph_inst</span><span class="o">.</span><span class="n">upsert_edge</span><span class="p">(</span>
+<a id="__codelineno-23-11" name="__codelineno-23-11" href="#__codelineno-23-11"></a>            <span class="n">entity_name</span><span class="p">,</span> <span class="n">image_entity_name</span><span class="p">,</span> <span class="n">relation_data</span>
+<a id="__codelineno-23-12" name="__codelineno-23-12" href="#__codelineno-23-12"></a>        <span class="p">)</span>
+</code></pre></div>
+<p><strong>weight=10.0</strong>: 일반 관계보다 높은 가중치로, 이미지에서 추출된 엔티티가 해당 이미지에 속한다는 구조적 관계를 강하게 표현합니다.</p>
+<h3 id="103-1-kg">10.3 결과: 이미지 1개에서 생성되는 KG 구조<a class="headerlink" href="#103-1-kg" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>              [이미지 엔티티]
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>            긴급출동 처리 절차 흐름도 (image)
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a>                   │
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a>          belongs_to (weight=10.0)
+<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a>           ┌───────┼───────┐
+<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a>           ▼       ▼       ▼
+<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a>        [긴급출동] [고객]  [출동지시]
+<a id="__codelineno-24-8" name="__codelineno-24-8" href="#__codelineno-24-8"></a>        (SERVICE) (PERSON) (PROCEDURE)
+</code></pre></div>
+<hr />
+<h2 id="11-s3">11. S3 이미지 업로드<a class="headerlink" href="#11-s3" title="Permanent link">&para;</a></h2>
+<p>파일: <code>lightrag/multimodal/processors/image.py</code>, <code>lightrag/api/utils_s3.py</code></p>
+<h3 id="111">11.1 업로드 경로<a class="headerlink" href="#111" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a>{S3_IMAGE_PREFIX}/{workspace}/{doc_id}/{filename}
+<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a>예: lightrag/images/kevcs/doc-abc123/page3_img0.png
+</code></pre></div>
+<h3 id="112">11.2 업로드 설정<a class="headerlink" href="#112" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="n">ContentDisposition</span><span class="p">:</span> <span class="s2">&quot;inline&quot;</span>     <span class="c1"># 브라우저에서 직접 표시</span>
+<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="n">ContentType</span><span class="p">:</span> <span class="s2">&quot;image/png&quot;</span>         <span class="c1"># 이미지 MIME 타입</span>
+</code></pre></div>
+<h3 id="113-s3-url">11.3 S3 URL 저장 위치<a class="headerlink" href="#113-s3-url" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>위치</th>
+<th>용도</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>structured_content.image.s3_url</code></td>
+<td>청크 메타데이터</td>
+</tr>
+<tr>
+<td>KG 노드 <code>s3_url</code> 속성</td>
+<td>그래프 노드 속성</td>
+</tr>
+<tr>
+<td>레퍼런스의 <code>download_url</code></td>
+<td>쿼리 응답 시 클라이언트에 제공</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="12-api">12. API 엔드포인트<a class="headerlink" href="#12-api" title="Permanent link">&para;</a></h2>
+<p>파일: <code>lightrag/api/routers/multimodal_routes.py</code></p>
+<h3 id="121-post-apimultimodalprocess">12.1 POST /api/multimodal/process<a class="headerlink" href="#121-post-apimultimodalprocess" title="Permanent link">&para;</a></h3>
+<p><strong>요청:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="err">POST /api/multimodal/process</span>
+<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="err">Content-Type: multipart/form-data</span>
+<a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a><span class="err">LIGHTRAG-WORKSPACE: my-workspace</span>
+<a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a>
+<a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a><span class="err">file: (PDF 파일)</span>
+<a id="__codelineno-27-6" name="__codelineno-27-6" href="#__codelineno-27-6"></a><span class="err">parser: &quot;pymupdf&quot;</span>
+<a id="__codelineno-27-7" name="__codelineno-27-7" href="#__codelineno-27-7"></a><span class="err">process_images: true</span>
+<a id="__codelineno-27-8" name="__codelineno-27-8" href="#__codelineno-27-8"></a><span class="err">process_tables: true</span>
+<a id="__codelineno-27-9" name="__codelineno-27-9" href="#__codelineno-27-9"></a><span class="err">process_equations: true</span>
+<a id="__codelineno-27-10" name="__codelineno-27-10" href="#__codelineno-27-10"></a><span class="err">password: (선택, PDF 비밀번호)</span>
+<a id="__codelineno-27-11" name="__codelineno-27-11" href="#__codelineno-27-11"></a><span class="err">file_path_label: (선택, KG에 표시할 파일 경로)</span>
+</code></pre></div>
+<p><strong>즉시 응답:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="p">{</span>
+<a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="w">    </span><span class="nt">&quot;task_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;task-abc123&quot;</span><span class="p">,</span>
+<a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a><span class="w">    </span><span class="nt">&quot;stream_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;/api/tasks/task-abc123/stream&quot;</span><span class="p">,</span>
+<a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a><span class="w">    </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Processing started for document.pdf&quot;</span>
+<a id="__codelineno-28-5" name="__codelineno-28-5" href="#__codelineno-28-5"></a><span class="p">}</span>
+</code></pre></div>
+<h3 id="122">12.2 백그라운드 처리 단계<a class="headerlink" href="#122" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>단계</th>
+<th>진행률</th>
+<th>작업</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Phase 1</td>
+<td>0-20%</td>
+<td>문서 파싱 (content_list 생성)</td>
+</tr>
+<tr>
+<td>Phase 2</td>
+<td>20-40%</td>
+<td>텍스트 블록 삽입 (rag.ainsert + S3 업로드)</td>
+</tr>
+<tr>
+<td>Phase 3</td>
+<td>40-95%</td>
+<td>멀티모달 블록 처리 (이미지/테이블/수식)</td>
+</tr>
+<tr>
+<td>Phase 4</td>
+<td>95-100%</td>
+<td>태스크 완료</td>
+</tr>
+</tbody>
+</table>
+<h3 id="123">12.3 진행 상황 스트리밍<a class="headerlink" href="#123" title="Permanent link">&para;</a></h3>
+<p><code>GET /api/tasks/{task_id}/stream</code> 으로 NDJSON 스트리밍:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a>{&quot;type&quot;: &quot;progress&quot;, &quot;progress&quot;: 15, &quot;message&quot;: &quot;Parsing document...&quot;}
+<a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a>{&quot;type&quot;: &quot;progress&quot;, &quot;progress&quot;: 25, &quot;message&quot;: &quot;Inserting text chunks...&quot;}
+<a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a>{&quot;type&quot;: &quot;progress&quot;, &quot;progress&quot;: 50, &quot;message&quot;: &quot;Processing image 1/5...&quot;}
+<a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a>{&quot;type&quot;: &quot;progress&quot;, &quot;progress&quot;: 65, &quot;message&quot;: &quot;Processing image 2/5...&quot;}
+<a id="__codelineno-29-5" name="__codelineno-29-5" href="#__codelineno-29-5"></a>{&quot;type&quot;: &quot;result&quot;, &quot;status&quot;: &quot;completed&quot;, &quot;data&quot;: {...}}
+</code></pre></div>
+<hr />
+<h2 id="13">13. 파서별 비교<a class="headerlink" href="#13" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>관점</th>
+<th style="text-align: center;">PyMuPDF (기본)</th>
+<th style="text-align: center;">Docling (대안)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>속도</strong></td>
+<td style="text-align: center;">빠름 (CPU)</td>
+<td style="text-align: center;">느림 (GPU 가속)</td>
+</tr>
+<tr>
+<td><strong>이미지 추출</strong></td>
+<td style="text-align: center;">페이지 내 임베디드 이미지</td>
+<td style="text-align: center;">문서 구조 인식 기반</td>
+</tr>
+<tr>
+<td><strong>캡션 추출</strong></td>
+<td style="text-align: center;">❌ (항상 빈 배열)</td>
+<td style="text-align: center;">✅ (문서 구조에서 추출)</td>
+</tr>
+<tr>
+<td><strong>각주 추출</strong></td>
+<td style="text-align: center;">❌ (항상 빈 배열)</td>
+<td style="text-align: center;">✅ (문서 구조에서 추출)</td>
+</tr>
+<tr>
+<td><strong>해상도</strong></td>
+<td style="text-align: center;">원본</td>
+<td style="text-align: center;">2배 업스케일링</td>
+</tr>
+<tr>
+<td><strong>OCR</strong></td>
+<td style="text-align: center;">미지원</td>
+<td style="text-align: center;">지원</td>
+</tr>
+<tr>
+<td><strong>테이블 구조</strong></td>
+<td style="text-align: center;">기본적</td>
+<td style="text-align: center;">고급 구조 인식</td>
+</tr>
+<tr>
+<td><strong>지원 형식</strong></td>
+<td style="text-align: center;">PDF만</td>
+<td style="text-align: center;">PDF, DOCX, PPTX, XLSX, HTML, 이미지 등</td>
+</tr>
+<tr>
+<td><strong>의존성</strong></td>
+<td style="text-align: center;"><code>fitz</code> (PyMuPDF)</td>
+<td style="text-align: center;"><code>docling</code>, <code>docling_core</code></td>
+</tr>
+<tr>
+<td><strong>크기 필터</strong></td>
+<td style="text-align: center;">✅ (코드 내 구현)</td>
+<td style="text-align: center;">미확인</td>
+</tr>
+<tr>
+<td><strong>중복 필터</strong></td>
+<td style="text-align: center;">✅ (MD5 해시)</td>
+<td style="text-align: center;">미확인</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="14">14. 프로세서별 비교<a class="headerlink" href="#14" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>관점</th>
+<th>이미지</th>
+<th>테이블</th>
+<th>수식</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>사용 모델</strong></td>
+<td>VLM (<code>vlm_model_func</code>)</td>
+<td>LLM (<code>llm_model_func</code>)</td>
+<td>LLM (<code>llm_model_func</code>)</td>
+</tr>
+<tr>
+<td><strong>입력 형식</strong></td>
+<td>Base64 이미지 + 텍스트 프롬프트</td>
+<td>마크다운 테이블 텍스트</td>
+<td>LaTeX/텍스트 수식</td>
+</tr>
+<tr>
+<td><strong>시스템 프롬프트 언어</strong></td>
+<td>한국어 (도메인 전문가)</td>
+<td>한국어 (테이블 분석가)</td>
+<td>영어 (수학자)</td>
+</tr>
+<tr>
+<td><strong>컨텍스트 지원</strong></td>
+<td>✅ (with_context 변형)</td>
+<td>✅ (with_context 변형)</td>
+<td>✅ (with_context 변형)</td>
+</tr>
+<tr>
+<td><strong>S3 업로드</strong></td>
+<td>✅ (이미지 파일)</td>
+<td>❌</td>
+<td>❌</td>
+</tr>
+<tr>
+<td><strong>청크 내용</strong></td>
+<td>VLM description만</td>
+<td>테이블 본문 + LLM description</td>
+<td>수식 텍스트 + 형식 + LLM 분석</td>
+</tr>
+<tr>
+<td><strong>엔티티 타입</strong></td>
+<td><code>"image"</code></td>
+<td><code>"table"</code></td>
+<td><code>"equation"</code></td>
+</tr>
+<tr>
+<td><strong>엔티티 이름 형식</strong></td>
+<td><code>{VLM 이름} (image)</code></td>
+<td><code>{LLM 이름} (table)</code></td>
+<td><code>{LLM 이름} (equation)</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="15-end-to-end">15. 전체 End-to-End 흐름도<a class="headerlink" href="#15-end-to-end" title="Permanent link">&para;</a></h2>
+<h3 id="pdf-1-kg">PDF 1개 → KG 생성까지의 전체 과정<a class="headerlink" href="#pdf-1-kg" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a>┌────────────────────────────────────────────┐
+<a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a>│        [Phase 1] 문서 파싱 (0-20%)          │
+<a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a>│                                            │
+<a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a>│  POST /api/multimodal/process              │
+<a id="__codelineno-30-5" name="__codelineno-30-5" href="#__codelineno-30-5"></a>│  file: document.pdf, parser: &quot;pymupdf&quot;     │
+<a id="__codelineno-30-6" name="__codelineno-30-6" href="#__codelineno-30-6"></a>│           │                                │
+<a id="__codelineno-30-7" name="__codelineno-30-7" href="#__codelineno-30-7"></a>│           ▼                                │
+<a id="__codelineno-30-8" name="__codelineno-30-8" href="#__codelineno-30-8"></a>│  PyMuPDF가 PDF 파싱                         │
+<a id="__codelineno-30-9" name="__codelineno-30-9" href="#__codelineno-30-9"></a>│  ├── 텍스트 블록 추출                        │
+<a id="__codelineno-30-10" name="__codelineno-30-10" href="#__codelineno-30-10"></a>│  ├── 이미지 추출 + 3단계 필터링               │
+<a id="__codelineno-30-11" name="__codelineno-30-11" href="#__codelineno-30-11"></a>│  │   ├── 크기 필터 (100×100 미만 제거)       │
+<a id="__codelineno-30-12" name="__codelineno-30-12" href="#__codelineno-30-12"></a>│  │   ├── 종횡비 필터 (10:1 초과 제거)        │
+<a id="__codelineno-30-13" name="__codelineno-30-13" href="#__codelineno-30-13"></a>│  │   └── 중복 필터 (MD5 해시)               │
+<a id="__codelineno-30-14" name="__codelineno-30-14" href="#__codelineno-30-14"></a>│  ├── 테이블 추출                            │
+<a id="__codelineno-30-15" name="__codelineno-30-15" href="#__codelineno-30-15"></a>│  └── 수식 추출                              │
+<a id="__codelineno-30-16" name="__codelineno-30-16" href="#__codelineno-30-16"></a>│           │                                │
+<a id="__codelineno-30-17" name="__codelineno-30-17" href="#__codelineno-30-17"></a>│           ▼                                │
+<a id="__codelineno-30-18" name="__codelineno-30-18" href="#__codelineno-30-18"></a>│  content_list 생성:                         │
+<a id="__codelineno-30-19" name="__codelineno-30-19" href="#__codelineno-30-19"></a>│  [{type:&quot;text&quot;,...}, {type:&quot;image&quot;,...},    │
+<a id="__codelineno-30-20" name="__codelineno-30-20" href="#__codelineno-30-20"></a>│   {type:&quot;table&quot;,...}, ...]                  │
+<a id="__codelineno-30-21" name="__codelineno-30-21" href="#__codelineno-30-21"></a>└────────────────────┬───────────────────────┘
+<a id="__codelineno-30-22" name="__codelineno-30-22" href="#__codelineno-30-22"></a>                     │
+<a id="__codelineno-30-23" name="__codelineno-30-23" href="#__codelineno-30-23"></a>                     ▼
+<a id="__codelineno-30-24" name="__codelineno-30-24" href="#__codelineno-30-24"></a>┌────────────────────────────────────────────┐
+<a id="__codelineno-30-25" name="__codelineno-30-25" href="#__codelineno-30-25"></a>│      [Phase 2] 텍스트 삽입 (20-40%)         │
+<a id="__codelineno-30-26" name="__codelineno-30-26" href="#__codelineno-30-26"></a>│                                            │
+<a id="__codelineno-30-27" name="__codelineno-30-27" href="#__codelineno-30-27"></a>│  텍스트 블록 연결 → rag.ainsert()            │
+<a id="__codelineno-30-28" name="__codelineno-30-28" href="#__codelineno-30-28"></a>│  → 표준 LightRAG 파이프라인 (청킹 + 임베딩)  │
+<a id="__codelineno-30-29" name="__codelineno-30-29" href="#__codelineno-30-29"></a>│  → 원본 PDF → S3 업로드                     │
+<a id="__codelineno-30-30" name="__codelineno-30-30" href="#__codelineno-30-30"></a>│  → doc_id 생성                             │
+<a id="__codelineno-30-31" name="__codelineno-30-31" href="#__codelineno-30-31"></a>└────────────────────┬───────────────────────┘
+<a id="__codelineno-30-32" name="__codelineno-30-32" href="#__codelineno-30-32"></a>                     │
+<a id="__codelineno-30-33" name="__codelineno-30-33" href="#__codelineno-30-33"></a>                     ▼
+<a id="__codelineno-30-34" name="__codelineno-30-34" href="#__codelineno-30-34"></a>┌────────────────────────────────────────────┐
+<a id="__codelineno-30-35" name="__codelineno-30-35" href="#__codelineno-30-35"></a>│    [Phase 3] 멀티모달 처리 (40-95%)          │
+<a id="__codelineno-30-36" name="__codelineno-30-36" href="#__codelineno-30-36"></a>│                                            │
+<a id="__codelineno-30-37" name="__codelineno-30-37" href="#__codelineno-30-37"></a>│  content_list에서 이미지 항목 순회            │
+<a id="__codelineno-30-38" name="__codelineno-30-38" href="#__codelineno-30-38"></a>│  ┌──────────────────────────────────────┐  │
+<a id="__codelineno-30-39" name="__codelineno-30-39" href="#__codelineno-30-39"></a>│  │ 이미지 1개 처리:                       │  │
+<a id="__codelineno-30-40" name="__codelineno-30-40" href="#__codelineno-30-40"></a>│  │                                      │  │
+<a id="__codelineno-30-41" name="__codelineno-30-41" href="#__codelineno-30-41"></a>│  │ [A] 컨텍스트 추출                      │  │
+<a id="__codelineno-30-42" name="__codelineno-30-42" href="#__codelineno-30-42"></a>│  │     Page N-1 ~ N+1 텍스트 수집         │  │
+<a id="__codelineno-30-43" name="__codelineno-30-43" href="#__codelineno-30-43"></a>│  │     max 2000 토큰으로 절삭              │  │
+<a id="__codelineno-30-44" name="__codelineno-30-44" href="#__codelineno-30-44"></a>│  │                                      │  │
+<a id="__codelineno-30-45" name="__codelineno-30-45" href="#__codelineno-30-45"></a>│  │ [B] VLM 호출                          │  │
+<a id="__codelineno-30-46" name="__codelineno-30-46" href="#__codelineno-30-46"></a>│  │     Base64 이미지 + 프롬프트            │  │
+<a id="__codelineno-30-47" name="__codelineno-30-47" href="#__codelineno-30-47"></a>│  │     qwen3-vl-8b, temp=0.1            │  │
+<a id="__codelineno-30-48" name="__codelineno-30-48" href="#__codelineno-30-48"></a>│  │     max_tokens=4096                   │  │
+<a id="__codelineno-30-49" name="__codelineno-30-49" href="#__codelineno-30-49"></a>│  │                                      │  │
+<a id="__codelineno-30-50" name="__codelineno-30-50" href="#__codelineno-30-50"></a>│  │ [C] 응답 파싱                          │  │
+<a id="__codelineno-30-51" name="__codelineno-30-51" href="#__codelineno-30-51"></a>│  │     4단계 로버스트 JSON 파싱             │  │
+<a id="__codelineno-30-52" name="__codelineno-30-52" href="#__codelineno-30-52"></a>│  │     → detailed_description            │  │
+<a id="__codelineno-30-53" name="__codelineno-30-53" href="#__codelineno-30-53"></a>│  │     → entity_info                     │  │
+<a id="__codelineno-30-54" name="__codelineno-30-54" href="#__codelineno-30-54"></a>│  │                                      │  │
+<a id="__codelineno-30-55" name="__codelineno-30-55" href="#__codelineno-30-55"></a>│  │ [D] S3 업로드 (선택)                    │  │
+<a id="__codelineno-30-56" name="__codelineno-30-56" href="#__codelineno-30-56"></a>│  │     이미지 파일 → S3                    │  │
+<a id="__codelineno-30-57" name="__codelineno-30-57" href="#__codelineno-30-57"></a>│  │                                      │  │
+<a id="__codelineno-30-58" name="__codelineno-30-58" href="#__codelineno-30-58"></a>│  │ [E] 청크 생성                          │  │
+<a id="__codelineno-30-59" name="__codelineno-30-59" href="#__codelineno-30-59"></a>│  │     content = VLM description         │  │
+<a id="__codelineno-30-60" name="__codelineno-30-60" href="#__codelineno-30-60"></a>│  │     → KV 저장소 + 벡터 DB              │  │
+<a id="__codelineno-30-61" name="__codelineno-30-61" href="#__codelineno-30-61"></a>│  │                                      │  │
+<a id="__codelineno-30-62" name="__codelineno-30-62" href="#__codelineno-30-62"></a>│  │ [F] KG 노드 생성                       │  │
+<a id="__codelineno-30-63" name="__codelineno-30-63" href="#__codelineno-30-63"></a>│  │     entity_type = &quot;image&quot;             │  │
+<a id="__codelineno-30-64" name="__codelineno-30-64" href="#__codelineno-30-64"></a>│  │     → Neo4j + PG 엔티티 VDB           │  │
+<a id="__codelineno-30-65" name="__codelineno-30-65" href="#__codelineno-30-65"></a>│  │                                      │  │
+<a id="__codelineno-30-66" name="__codelineno-30-66" href="#__codelineno-30-66"></a>│  │ [G] 2차 엔티티 추출                     │  │
+<a id="__codelineno-30-67" name="__codelineno-30-67" href="#__codelineno-30-67"></a>│  │     LLM으로 description에서 추가 엔티티  │  │
+<a id="__codelineno-30-68" name="__codelineno-30-68" href="#__codelineno-30-68"></a>│  │     → belongs_to edge (weight=10.0)   │  │
+<a id="__codelineno-30-69" name="__codelineno-30-69" href="#__codelineno-30-69"></a>│  │     → merge_nodes_and_edges()         │  │
+<a id="__codelineno-30-70" name="__codelineno-30-70" href="#__codelineno-30-70"></a>│  └──────────────────────────────────────┘  │
+<a id="__codelineno-30-71" name="__codelineno-30-71" href="#__codelineno-30-71"></a>│                                            │
+<a id="__codelineno-30-72" name="__codelineno-30-72" href="#__codelineno-30-72"></a>│  (각 이미지, 테이블, 수식에 대해 반복)         │
+<a id="__codelineno-30-73" name="__codelineno-30-73" href="#__codelineno-30-73"></a>└────────────────────┬───────────────────────┘
+<a id="__codelineno-30-74" name="__codelineno-30-74" href="#__codelineno-30-74"></a>                     │
+<a id="__codelineno-30-75" name="__codelineno-30-75" href="#__codelineno-30-75"></a>                     ▼
+<a id="__codelineno-30-76" name="__codelineno-30-76" href="#__codelineno-30-76"></a>┌────────────────────────────────────────────┐
+<a id="__codelineno-30-77" name="__codelineno-30-77" href="#__codelineno-30-77"></a>│      [Phase 4] 완료 (95-100%)              │
+<a id="__codelineno-30-78" name="__codelineno-30-78" href="#__codelineno-30-78"></a>│                                            │
+<a id="__codelineno-30-79" name="__codelineno-30-79" href="#__codelineno-30-79"></a>│  태스크 로그 저장                            │
+<a id="__codelineno-30-80" name="__codelineno-30-80" href="#__codelineno-30-80"></a>│  → {working_dir}/task_logs/{task_id}.json  │
+<a id="__codelineno-30-81" name="__codelineno-30-81" href="#__codelineno-30-81"></a>│  태스크 상태 → &quot;completed&quot;                  │
+<a id="__codelineno-30-82" name="__codelineno-30-82" href="#__codelineno-30-82"></a>└────────────────────────────────────────────┘
+</code></pre></div>
+<hr />
+<h2 id="16">16. 핵심 임계값 및 제한 사항<a class="headerlink" href="#16" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>값</th>
+<th>소스</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>최소 이미지 크기</td>
+<td>100×100 px</td>
+<td><code>config.py</code></td>
+</tr>
+<tr>
+<td>최대 종횡비</td>
+<td>10.0</td>
+<td><code>config.py</code></td>
+</tr>
+<tr>
+<td>중복 필터링</td>
+<td>MD5 해시</td>
+<td><code>pymupdf_parser.py</code></td>
+</tr>
+<tr>
+<td>컨텍스트 윈도우</td>
+<td>1 페이지/청크</td>
+<td><code>config.py</code></td>
+</tr>
+<tr>
+<td>최대 컨텍스트 토큰</td>
+<td>2,000</td>
+<td><code>config.py</code></td>
+</tr>
+<tr>
+<td>VLM max_tokens</td>
+<td>4,096 (하드코딩)</td>
+<td><code>lightrag_server.py</code></td>
+</tr>
+<tr>
+<td>VLM temperature</td>
+<td>0.1 (하드코딩)</td>
+<td><code>lightrag_server.py</code></td>
+</tr>
+<tr>
+<td>belongs_to edge weight</td>
+<td>10.0</td>
+<td><code>base.py</code></td>
+</tr>
+<tr>
+<td>Docling images_scale</td>
+<td>2.0배</td>
+<td><code>docling_parser.py</code></td>
+</tr>
+<tr>
+<td>엔티티 요약 최대</td>
+<td>100단어 (프롬프트 지시, 강제 아님)</td>
+<td><code>prompts.py</code></td>
+</tr>
+<tr>
+<td>병렬 처리 수</td>
+<td>4 (설정만, 코드 미적용)</td>
+<td><code>config.py</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="17">17. 관찰 사항 및 개선 포인트<a class="headerlink" href="#17" title="Permanent link">&para;</a></h2>
+<h3 id="171-pymupdf">17.1 PyMuPDF 캡션 미추출<a class="headerlink" href="#171-pymupdf" title="Permanent link">&para;</a></h3>
+<p>PyMuPDF 파서는 이미지 캡션과 각주를 추출하지 못합니다. VLM에 전달되는 <code>captions</code>와 <code>footnotes</code>가 항상 빈 배열이므로, VLM이 이미지 맥락 파악에 활용할 수 있는 정보가 부족합니다. Docling 파서를 사용하면 이 문제가 해결됩니다.</p>
+<h3 id="172-vlm">17.2 VLM 파라미터 하드코딩<a class="headerlink" href="#172-vlm" title="Permanent link">&para;</a></h3>
+<p><code>max_tokens=4096</code>, <code>temperature=0.1</code>이 하드코딩되어 있습니다. 복잡한 다이어그램의 경우 4096 토큰이 부족할 수 있으며, 환경변수로 설정 가능하게 하면 유연성이 높아집니다.</p>
+<h3 id="173">17.3 병렬 처리 미구현<a class="headerlink" href="#173" title="Permanent link">&para;</a></h3>
+<p><code>MAX_PARALLEL_MULTIMODAL=4</code>로 설정할 수 있지만, 실제 처리는 순차적(sequential)입니다. 이미지가 많은 문서에서 병렬 처리를 구현하면 속도가 크게 향상될 수 있습니다.</p>
+<h3 id="174-mime">17.4 이미지 MIME 타입 고정<a class="headerlink" href="#174-mime" title="Permanent link">&para;</a></h3>
+<p>모든 이미지가 <code>data:image/png;base64,...</code> 형식으로 전송됩니다. 원본이 JPEG, WebP 등이어도 PNG로 간주됩니다. VLM이 MIME 타입에 민감하지 않다면 실질적 문제는 없지만, 정확한 MIME 타입 전달이 바람직합니다.</p>
+<h3 id="175-belongs_to">17.5 belongs_to 관계의 높은 가중치<a class="headerlink" href="#175-belongs_to" title="Permanent link">&para;</a></h3>
+<p>2차 추출된 엔티티의 <code>belongs_to</code> edge가 <code>weight=10.0</code>으로 설정됩니다. 이는 일반 관계보다 매우 높은 가중치로, 쿼리 시 이 관계가 우선 반환될 수 있습니다. 도메인에 따라 가중치 조정이 필요할 수 있습니다.</p>
+<h3 id="176-2-llm">17.6 2차 엔티티 추출의 LLM 비용<a class="headerlink" href="#176-2-llm" title="Permanent link">&para;</a></h3>
+<p>각 이미지에 대해 VLM 1회 + LLM 1회(엔티티 추출) = 최소 2회의 모델 호출이 발생합니다. 이미지가 많은 문서에서는 비용이 급격히 증가합니다.</p>
+<hr />
+<h2 id="_2">부록: 관련 소스 파일 참조<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>파일</th>
+<th>주요 내용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>lightrag/multimodal/config.py</code></td>
+<td><code>MultimodalConfig</code> — 모든 설정 파라미터</td>
+</tr>
+<tr>
+<td><code>lightrag/multimodal/context.py</code></td>
+<td><code>ContextExtractor</code> — 주변 텍스트 컨텍스트 추출</td>
+</tr>
+<tr>
+<td><code>lightrag/multimodal/base.py</code></td>
+<td><code>BaseModalProcessor</code> — KG 엔티티 생성, 2차 추출, JSON 파싱</td>
+</tr>
+<tr>
+<td><code>lightrag/multimodal/prompts.py</code></td>
+<td>모든 VLM/LLM 프롬프트 (시스템, 비전, 테이블, 수식)</td>
+</tr>
+<tr>
+<td><code>lightrag/multimodal/processors/image.py</code></td>
+<td><code>ImageModalProcessor</code> — VLM 이미지 분석</td>
+</tr>
+<tr>
+<td><code>lightrag/multimodal/processors/table.py</code></td>
+<td><code>TableModalProcessor</code> — LLM 테이블 분석</td>
+</tr>
+<tr>
+<td><code>lightrag/multimodal/processors/equation.py</code></td>
+<td><code>EquationModalProcessor</code> — LLM 수식 분석</td>
+</tr>
+<tr>
+<td><code>lightrag/multimodal/processors/generic.py</code></td>
+<td><code>GenericModalProcessor</code> — 일반 콘텐츠 처리</td>
+</tr>
+<tr>
+<td><code>lightrag/multimodal/parsers/pymupdf_parser.py</code></td>
+<td>PyMuPDF 파서 (이미지 추출, 필터링)</td>
+</tr>
+<tr>
+<td><code>lightrag/multimodal/parsers/docling_parser.py</code></td>
+<td>Docling 파서 (GPU, 캡션/각주 추출)</td>
+</tr>
+<tr>
+<td><code>lightrag/api/routers/multimodal_routes.py</code></td>
+<td>멀티모달 API 엔드포인트, 백그라운드 태스크</td>
+</tr>
+<tr>
+<td><code>lightrag/api/lightrag_server.py</code></td>
+<td>VLM 클라이언트 초기화, VLM/LLM 함수 정의</td>
+</tr>
+<tr>
+<td><code>lightrag/api/utils_s3.py</code></td>
+<td>S3 이미지 업로드 유틸리티</td>
+</tr>
+<tr>
+<td><code>lightrag/api/task_manager.py</code></td>
+<td>비동기 태스크 관리 (진행 상황 스트리밍)</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  맨위로
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\ud074\ub9bd\ubcf4\ub4dc\uc5d0 \ubcf5\uc0ac\ub428", "clipboard.copy": "\ud074\ub9bd\ubcf4\ub4dc\ub85c \ubcf5\uc0ac", "search.result.more.one": "\uc774 \ubb38\uc11c\uc5d0\uc11c 1\uac1c\uc758 \uac80\uc0c9 \uacb0\uacfc \ub354 \ubcf4\uae30", "search.result.more.other": "\uc774 \ubb38\uc11c\uc5d0\uc11c #\uac1c\uc758 \uac80\uc0c9 \uacb0\uacfc \ub354 \ubcf4\uae30", "search.result.none": "\uac80\uc0c9\uc5b4\uc640 \uc77c\uce58\ud558\ub294 \ubb38\uc11c\uac00 \uc5c6\uc2b5\ub2c8\ub2e4", "search.result.one": "1\uac1c\uc758 \uc77c\uce58\ud558\ub294 \ubb38\uc11c", "search.result.other": "#\uac1c\uc758 \uc77c\uce58\ud558\ub294 \ubb38\uc11c", "search.result.placeholder": "\uac80\uc0c9\uc5b4\ub97c \uc785\ub825\ud558\uc138\uc694", "search.result.term.missing": "\ud3ec\ud568\ub418\uc9c0 \uc54a\uc740 \uac80\uc0c9\uc5b4", "select.version": "\ubc84\uc804 \uc120\ud0dd"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

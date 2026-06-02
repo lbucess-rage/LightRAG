@@ -1,0 +1,3359 @@
+
+<!doctype html>
+<html lang="ko" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="LightRAG 프로젝트 기술 분석 및 설계 문서">
+      
+      
+      
+      
+        <link rel="prev" href="../2026-02-10_query-pipeline-analysis/">
+      
+      
+        <link rel="next" href="../2026-02-10_query-api-reference/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>2026-02-10_query-mode-behavior-analysis - LightRAG 기술 문서</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Noto+Sans+KR:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Noto Sans KR";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#lightrag" class="md-skip">
+          콘텐츠로 이동
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="상단/헤더">
+    <a href="../.." title="LightRAG 기술 문서" class="md-header__button md-logo" aria-label="LightRAG 기술 문서" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            LightRAG 기술 문서
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              2026-02-10_query-mode-behavior-analysis
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="다크 모드로 전환"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="다크 모드로 전환" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="라이트 모드로 전환"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="라이트 모드로 전환" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="검색" placeholder="검색" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="검색">
+        
+        <button type="reset" class="md-search__icon md-icon" title="지우기" aria-label="지우기" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            검색 초기화
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="네비게이션" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="LightRAG 기술 문서" class="md-nav__button md-logo" aria-label="LightRAG 기술 문서" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    LightRAG 기술 문서
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    홈
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    코드분석
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    코드분석
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-05-16_feature-capability-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-05-16_feature-capability-analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-13_board-api-ingestion-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-13_board-api-ingestion-guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-11_url-ingestion-pipeline-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-11_url-ingestion-pipeline-analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-10_query-response-structure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-response-structure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-10_query-pipeline-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-pipeline-analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-mode-behavior-analysis
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-mode-behavior-analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="목차">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      목차
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        목차
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. 쿼리 모드 개요
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. 디스패치 아키텍처
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. 디스패치 아키텍처">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 API 진입점
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 핵심 디스패처
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-kg_query-4-stage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 kg_query 내부 4-Stage 파이프라인
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-local" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. LOCAL 모드 상세
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. LOCAL 모드 상세">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 동작 흐름
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 검색 단계
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 검색하지 않는 것
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 청크 선택
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.5 프롬프트
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#36" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.6 적합한 사용 시나리오
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-global" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. GLOBAL 모드 상세
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. GLOBAL 모드 상세">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 동작 흐름
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 검색 단계
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-local" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 Local 모드와의 핵심 차이
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 검색하지 않는 것
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#45" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.5 적합한 사용 시나리오
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-hybrid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. HYBRID 모드 상세
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. HYBRID 모드 상세">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 동작 흐름
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 검색 단계
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 병합 전략
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 검색하지 않는 것
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#55" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.5 적합한 사용 시나리오
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-mix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. MIX 모드 상세
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. MIX 모드 상세">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 동작 흐름 (기본 모드)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-hybrid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 Hybrid와의 핵심 차이: 벡터 청크 직접 검색
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 벡터 청크 직접 검색
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-3-" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 3-소스 청크 병합
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#65-kg" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.5 KG 검색 실패 시 폴백
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#66" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.6 적합한 사용 시나리오
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-naive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. NAIVE 모드 상세
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. NAIVE 모드 상세">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 동작 흐름
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 완전히 독립된 코드 경로
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#73-kg" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.3 KG 모드와의 차이
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#74" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.4 컨텍스트 템플릿
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#77" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.7 적합한 사용 시나리오
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-bypass" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. BYPASS 모드 상세
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. BYPASS 모드 상세">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#81" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.1 동작 흐름
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#82" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.2 코드 경로
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#83" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.3 특징
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#84" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.4 반환 데이터
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#85" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.5 적합한 사용 시나리오
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. 모드 비교 종합표
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. 모드 비교 종합표">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#91" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.1 검색 동작 비교
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#92" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.2 정렬/순위 비교
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#93" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.3 프롬프트/컨텍스트 비교
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. 횡단 관심사
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. 횡단 관심사">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#101-only_need_context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.1 only_need_context 동작
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#102-only_need_prompt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.2 only_need_prompt 동작
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#103-conversation_history" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.3 conversation_history 처리
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#104-vs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.4 스트리밍 vs 비스트리밍
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#105" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.5 캐시 키 구성
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#106" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.6 키워드 추출 폴백
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. API 엔드포인트별 동작
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11. API 엔드포인트별 동작">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#111-post-apiquery-query_text" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.1 POST /api/query (query_text)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#112-post-apiquerystream-query_text_stream" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.2 POST /api/query/stream (query_text_stream)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#113-post-apiquerydata-query_data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.3 POST /api/query/data (query_data)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-queryparam" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. QueryParam 파라미터 참조
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        부록: 모드 선택 가이드
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="부록: 모드 선택 가이드">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#llm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        모드별 비용 (LLM 호출 수)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        부록: 관련 소스 파일 참조
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-10_query-api-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_query-api-reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026-02-10_image-analysis-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-02-10_image-analysis-pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="목차">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      목차
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        목차
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. 쿼리 모드 개요
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. 디스패치 아키텍처
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. 디스패치 아키텍처">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 API 진입점
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 핵심 디스패처
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-kg_query-4-stage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 kg_query 내부 4-Stage 파이프라인
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-local" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. LOCAL 모드 상세
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. LOCAL 모드 상세">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 동작 흐름
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 검색 단계
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 검색하지 않는 것
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 청크 선택
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.5 프롬프트
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#36" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.6 적합한 사용 시나리오
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-global" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. GLOBAL 모드 상세
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. GLOBAL 모드 상세">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 동작 흐름
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 검색 단계
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-local" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 Local 모드와의 핵심 차이
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 검색하지 않는 것
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#45" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.5 적합한 사용 시나리오
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-hybrid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. HYBRID 모드 상세
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. HYBRID 모드 상세">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 동작 흐름
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 검색 단계
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 병합 전략
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 검색하지 않는 것
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#55" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.5 적합한 사용 시나리오
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-mix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. MIX 모드 상세
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. MIX 모드 상세">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 동작 흐름 (기본 모드)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-hybrid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 Hybrid와의 핵심 차이: 벡터 청크 직접 검색
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 벡터 청크 직접 검색
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-3-" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 3-소스 청크 병합
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#65-kg" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.5 KG 검색 실패 시 폴백
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#66" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.6 적합한 사용 시나리오
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-naive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. NAIVE 모드 상세
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. NAIVE 모드 상세">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 동작 흐름
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 완전히 독립된 코드 경로
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#73-kg" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.3 KG 모드와의 차이
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#74" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.4 컨텍스트 템플릿
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#77" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.7 적합한 사용 시나리오
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-bypass" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. BYPASS 모드 상세
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. BYPASS 모드 상세">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#81" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.1 동작 흐름
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#82" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.2 코드 경로
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#83" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.3 특징
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#84" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.4 반환 데이터
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#85" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.5 적합한 사용 시나리오
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. 모드 비교 종합표
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. 모드 비교 종합표">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#91" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.1 검색 동작 비교
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#92" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.2 정렬/순위 비교
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#93" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.3 프롬프트/컨텍스트 비교
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. 횡단 관심사
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. 횡단 관심사">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#101-only_need_context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.1 only_need_context 동작
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#102-only_need_prompt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.2 only_need_prompt 동작
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#103-conversation_history" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.3 conversation_history 처리
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#104-vs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.4 스트리밍 vs 비스트리밍
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#105" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.5 캐시 키 구성
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#106" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.6 키워드 추출 폴백
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. API 엔드포인트별 동작
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11. API 엔드포인트별 동작">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#111-post-apiquery-query_text" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.1 POST /api/query (query_text)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#112-post-apiquerystream-query_text_stream" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.2 POST /api/query/stream (query_text_stream)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#113-post-apiquerydata-query_data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.3 POST /api/query/data (query_data)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-queryparam" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. QueryParam 파라미터 참조
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        부록: 모드 선택 가이드
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="부록: 모드 선택 가이드">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#llm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        모드별 비용 (LLM 호출 수)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        부록: 관련 소스 파일 참조
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="lightrag">LightRAG 쿼리 모드별 동작 방식 분석<a class="headerlink" href="#lightrag" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>분석일: 2026-02-10
+대상: LightRAG Query Modes (local, global, hybrid, mix, naive, bypass)
+분석 범위: <code>operate.py</code>, <code>lightrag.py</code>, <code>prompt.py</code>, <code>base.py</code>, <code>query_routes.py</code></p>
+</blockquote>
+<hr />
+<h2 id="_1">목차<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<ol>
+<li><a href="#1-쿼리-모드-개요">쿼리 모드 개요</a></li>
+<li><a href="#2-디스패치-아키텍처">디스패치 아키텍처</a></li>
+<li><a href="#3-local-모드-상세">LOCAL 모드 상세</a></li>
+<li><a href="#4-global-모드-상세">GLOBAL 모드 상세</a></li>
+<li><a href="#5-hybrid-모드-상세">HYBRID 모드 상세</a></li>
+<li><a href="#6-mix-모드-상세">MIX 모드 상세</a></li>
+<li><a href="#7-naive-모드-상세">NAIVE 모드 상세</a></li>
+<li><a href="#8-bypass-모드-상세">BYPASS 모드 상세</a></li>
+<li><a href="#9-모드-비교-종합표">모드 비교 종합표</a></li>
+<li><a href="#10-횡단-관심사">횡단 관심사 (Cross-Cutting)</a></li>
+<li><a href="#11-api-엔드포인트별-동작">API 엔드포인트별 동작</a></li>
+<li><a href="#12-queryparam-파라미터-참조">QueryParam 파라미터 참조</a></li>
+</ol>
+<hr />
+<h2 id="1">1. 쿼리 모드 개요<a class="headerlink" href="#1" title="Permanent link">&para;</a></h2>
+<p>LightRAG는 6개의 쿼리 모드를 제공하며, 각 모드는 검색 전략과 컨텍스트 구성 방식이 다릅니다.</p>
+<table>
+<thead>
+<tr>
+<th>모드</th>
+<th>핵심 전략</th>
+<th>적합한 질문 유형</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>local</strong></td>
+<td>엔티티 중심 검색 (저수준 키워드)</td>
+<td>"X는 무엇인가?", "X의 특성은?"</td>
+</tr>
+<tr>
+<td><strong>global</strong></td>
+<td>관계 중심 검색 (고수준 키워드)</td>
+<td>"X와 Y의 관계는?", "전반적 동향은?"</td>
+</tr>
+<tr>
+<td><strong>hybrid</strong></td>
+<td>Local + Global 결합</td>
+<td>엔티티와 관계 모두 필요한 복합 질문</td>
+</tr>
+<tr>
+<td><strong>mix</strong></td>
+<td>Hybrid + 벡터 청크 직접 검색</td>
+<td>가장 포괄적, 기본 모드</td>
+</tr>
+<tr>
+<td><strong>naive</strong></td>
+<td>벡터 청크만 검색 (KG 비사용)</td>
+<td>단순 시맨틱 검색, RAG 기본 모드</td>
+</tr>
+<tr>
+<td><strong>bypass</strong></td>
+<td>검색 없이 LLM 직접 호출</td>
+<td>일반 대화, 지식 불필요한 질문</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2">2. 디스패치 아키텍처<a class="headerlink" href="#2" title="Permanent link">&para;</a></h2>
+<h3 id="21-api">2.1 API 진입점<a class="headerlink" href="#21-api" title="Permanent link">&para;</a></h3>
+<p>파일: <code>lightrag/api/routers/query_routes.py</code></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>POST /api/query        → query_text()     → aquery_llm(stream=False)
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>POST /api/query/stream → query_text_stream() → aquery_llm(stream=True)
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>POST /api/query/data   → query_data()     → aquery_data(only_need_context=True)
+</code></pre></div>
+<h3 id="22">2.2 핵심 디스패처<a class="headerlink" href="#22" title="Permanent link">&para;</a></h3>
+<p>파일: <code>lightrag/lightrag.py</code></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>aquery_llm(query, param)
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    │
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    ├── mode ∈ {local, global, hybrid, mix}
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    │   └── kg_query()           ← operate.py
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    │
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    ├── mode == &quot;naive&quot;
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    │   └── naive_query()        ← operate.py
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    │
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>    └── mode == &quot;bypass&quot;
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>        └── LLM 직접 호출        ← lightrag.py 내부
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>aquery_data(query, param)
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    │
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    ├── mode ∈ {local, global, hybrid, mix}
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    │   └── kg_query(only_need_context=True)    ← LLM 호출 생략
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    │
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    ├── mode == &quot;naive&quot;
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    │   └── naive_query(only_need_context=True)  ← LLM 호출 생략
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    │
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    └── mode == &quot;bypass&quot;
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>        └── 빈 데이터 반환
+</code></pre></div>
+<h3 id="23-kg_query-4-stage">2.3 kg_query 내부 4-Stage 파이프라인<a class="headerlink" href="#23-kg_query-4-stage" title="Permanent link">&para;</a></h3>
+<p><code>kg_query()</code> → <code>_build_query_context()</code> 내부:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Stage 1: _perform_kg_search()     ← 검색 (모드별 분기)
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>Stage 2: _apply_token_truncation() ← 토큰 절삭
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>Stage 3: _merge_all_chunks()       ← 청크 수집·병합
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>Stage 4: _build_context_str()      ← 최종 컨텍스트 조립 (리랭킹 포함)
+</code></pre></div>
+<hr />
+<h2 id="3-local">3. LOCAL 모드 상세<a class="headerlink" href="#3-local" title="Permanent link">&para;</a></h2>
+<h3 id="31">3.1 동작 흐름<a class="headerlink" href="#31" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>쿼리 → 키워드 추출 → ll_keywords 사용
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>                       │
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>                       ▼
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>              엔티티 VDB 검색
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>              (ll_keywords, top_k=40, cosine ≥ 0.2)
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>                       │
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>                       ▼
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>              그래프에서 연결된 edge 탐색
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>              (degree합 + weight 내림차순 정렬)
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>                       │
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>                       ▼
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>              엔티티/관계 토큰 절삭
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>              (6,000 / 8,000 토큰)
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>                       │
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>                       ▼
+<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a>              관련 청크 수집 (source_id 기반)
+<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a>              ├── 엔티티 관련 청크 (VECTOR 방식)
+<a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a>              └── 관계 관련 청크 (VECTOR 방식)
+<a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a>                       │
+<a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a>                       ▼
+<a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a>              라운드 로빈 병합 → 리랭킹 → LLM 생성
+</code></pre></div>
+<h3 id="32">3.2 검색 단계<a class="headerlink" href="#32" title="Permanent link">&para;</a></h3>
+<p><strong>함수</strong>: <code>_perform_kg_search()</code> → <code>_get_node_data(ll_keywords)</code></p>
+<ol>
+<li><strong>엔티티 벡터 검색</strong>: <code>entities_vdb.query(ll_keywords, top_k=40)</code></li>
+<li>코사인 유사도 기반, 임계값 ≥ 0.2</li>
+<li>
+<p>결과: 유사도 내림차순 정렬</p>
+</li>
+<li>
+<p><strong>그래프 보강</strong>: 검색된 엔티티의 노드 속성 + degree 일괄 조회</p>
+</li>
+</ol>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">nodes_dict</span><span class="p">,</span> <span class="n">degrees_dict</span> <span class="o">=</span> <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">gather</span><span class="p">(</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>    <span class="n">knowledge_graph_inst</span><span class="o">.</span><span class="n">get_nodes_batch</span><span class="p">(</span><span class="n">node_ids</span><span class="p">),</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    <span class="n">knowledge_graph_inst</span><span class="o">.</span><span class="n">node_degrees_batch</span><span class="p">(</span><span class="n">node_ids</span><span class="p">),</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="p">)</span>
+</code></pre></div>
+<ol>
+<li><strong>관련 edge 탐색</strong>: <code>_find_most_related_edges_from_entities()</code></li>
+<li>검색된 엔티티에 연결된 모든 edge를 수집</li>
+<li><strong>정렬 기준</strong>: <code>(rank, weight)</code> 내림차순</li>
+<li><code>rank</code> = 양쪽 노드의 degree 합 (허브 노드 우선)</li>
+<li><code>weight</code> = edge 가중치</li>
+</ol>
+<h3 id="33">3.3 검색하지 않는 것<a class="headerlink" href="#33" title="Permanent link">&para;</a></h3>
+<ul>
+<li>❌ 관계 VDB 직접 검색 (<code>_get_edge_data</code> 미호출)</li>
+<li>❌ 청크 VDB 직접 검색 (<code>_get_vector_context</code> 미호출)</li>
+<li>❌ hl_keywords 사용하지 않음</li>
+</ul>
+<h3 id="34">3.4 청크 선택<a class="headerlink" href="#34" title="Permanent link">&para;</a></h3>
+<p>엔티티/관계의 <code>source_id</code>에서 원본 청크 ID를 추출하여 선택:
+- <strong>VECTOR 방식</strong> (기본): 쿼리 임베딩과 청크 임베딩의 코사인 유사도 순
+- 엔티티 관련 청크 소스: <code>"E"</code>, 관계 관련 청크 소스: <code>"R"</code></p>
+<h3 id="35">3.5 프롬프트<a class="headerlink" href="#35" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>컨텍스트 템플릿</strong>: <code>PROMPTS["kg_query_context"]</code> (엔티티 + 관계 + 청크 + 레퍼런스)</li>
+<li><strong>LLM 프롬프트</strong>: <code>PROMPTS["rag_response"]</code> (KG 데이터 + 문서 청크 통합 안내)</li>
+</ul>
+<h3 id="36">3.6 적합한 사용 시나리오<a class="headerlink" href="#36" title="Permanent link">&para;</a></h3>
+<ul>
+<li>특정 엔티티에 대한 상세 정보 질문</li>
+<li>"X는 무엇인가?", "X의 정의를 알려줘"</li>
+<li>구체적인 사실 확인 질문</li>
+</ul>
+<hr />
+<h2 id="4-global">4. GLOBAL 모드 상세<a class="headerlink" href="#4-global" title="Permanent link">&para;</a></h2>
+<h3 id="41">4.1 동작 흐름<a class="headerlink" href="#41" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>쿼리 → 키워드 추출 → hl_keywords 사용
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>                       │
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>                       ▼
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>              관계 VDB 검색
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>              (hl_keywords, top_k=40, cosine ≥ 0.2)
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>                       │
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>                       ▼
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>              양쪽 엔티티 자동 탐색
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>              (발견 순서 유지, 정렬 없음)
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>                       │
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>                       ▼
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>              엔티티/관계 토큰 절삭
+<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>              (6,000 / 8,000 토큰)
+<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>                       │
+<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>                       ▼
+<a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>              관련 청크 수집 (source_id 기반)
+<a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>              ├── 엔티티 관련 청크
+<a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a>              └── 관계 관련 청크
+<a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a>                       │
+<a id="__codelineno-6-20" name="__codelineno-6-20" href="#__codelineno-6-20"></a>                       ▼
+<a id="__codelineno-6-21" name="__codelineno-6-21" href="#__codelineno-6-21"></a>              라운드 로빈 병합 → 리랭킹 → LLM 생성
+</code></pre></div>
+<h3 id="42">4.2 검색 단계<a class="headerlink" href="#42" title="Permanent link">&para;</a></h3>
+<p><strong>함수</strong>: <code>_perform_kg_search()</code> → <code>_get_edge_data(hl_keywords)</code></p>
+<ol>
+<li><strong>관계 벡터 검색</strong>: <code>relationships_vdb.query(hl_keywords, top_k=40)</code></li>
+<li>코사인 유사도 기반, 임계값 ≥ 0.2</li>
+<li>
+<p>결과: <strong>코사인 유사도 내림차순</strong> 정렬 (Local 모드와 다름!)</p>
+</li>
+<li>
+<p><strong>양쪽 엔티티 탐색</strong>: <code>_find_most_related_entities_from_relationships()</code></p>
+</li>
+<li>관계의 양쪽 엔티티 이름을 수집</li>
+<li>노드 데이터 일괄 조회</li>
+<li><strong>발견 순서</strong> 유지 (degree 기반 정렬 없음)</li>
+</ol>
+<h3 id="43-local">4.3 Local 모드와의 핵심 차이<a class="headerlink" href="#43-local" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>관점</th>
+<th>LOCAL</th>
+<th>GLOBAL</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>진입점</strong></td>
+<td>엔티티 VDB → edge 탐색</td>
+<td>관계 VDB → 엔티티 탐색</td>
+</tr>
+<tr>
+<td><strong>키워드</strong></td>
+<td>ll_keywords (구체적)</td>
+<td>hl_keywords (추상적)</td>
+</tr>
+<tr>
+<td><strong>관계 정렬</strong></td>
+<td>degree합 + weight 내림차순</td>
+<td>코사인 유사도 내림차순</td>
+</tr>
+<tr>
+<td><strong>엔티티 정렬</strong></td>
+<td>코사인 유사도</td>
+<td>발견 순서 (정렬 없음)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="44">4.4 검색하지 않는 것<a class="headerlink" href="#44" title="Permanent link">&para;</a></h3>
+<ul>
+<li>❌ 엔티티 VDB 직접 검색 (<code>_get_node_data</code> 미호출)</li>
+<li>❌ 청크 VDB 직접 검색 (<code>_get_vector_context</code> 미호출)</li>
+<li>❌ ll_keywords 사용하지 않음</li>
+</ul>
+<h3 id="45">4.5 적합한 사용 시나리오<a class="headerlink" href="#45" title="Permanent link">&para;</a></h3>
+<ul>
+<li>넓은 주제나 개념에 대한 질문</li>
+<li>"X 분야의 전반적인 동향은?", "X와 Y의 관계는?"</li>
+<li>추상적/개념적 질문</li>
+</ul>
+<hr />
+<h2 id="5-hybrid">5. HYBRID 모드 상세<a class="headerlink" href="#5-hybrid" title="Permanent link">&para;</a></h2>
+<h3 id="51">5.1 동작 흐름<a class="headerlink" href="#51" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>쿼리 → 키워드 추출 → ll_keywords + hl_keywords 모두 사용
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>                       │
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>           ┌───────────┴───────────┐
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>           ▼                       ▼
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>    엔티티 VDB 검색          관계 VDB 검색
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>    (ll_keywords)           (hl_keywords)
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>           │                       │
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>           ▼                       ▼
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>    연결된 edge 탐색        양쪽 엔티티 탐색
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>    (degree+weight)        (발견 순서)
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>           │                       │
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>           └───────────┬───────────┘
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>                       ▼
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>              라운드 로빈 병합 (중복 제거)
+<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>              local[0] → global[0] → local[1] → global[1] → ...
+<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a>                       │
+<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a>                       ▼
+<a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a>              엔티티/관계 토큰 절삭 → 청크 수집 → 리랭킹 → LLM 생성
+</code></pre></div>
+<h3 id="52">5.2 검색 단계<a class="headerlink" href="#52" title="Permanent link">&para;</a></h3>
+<p><strong>Local 검색 + Global 검색 동시 실행:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># _perform_kg_search() 내부</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">ll_keywords</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>    <span class="n">local_entities</span><span class="p">,</span> <span class="n">local_relations</span> <span class="o">=</span> <span class="k">await</span> <span class="n">_get_node_data</span><span class="p">(</span><span class="n">ll_keywords</span><span class="p">,</span> <span class="o">...</span><span class="p">)</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">hl_keywords</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>    <span class="n">global_relations</span><span class="p">,</span> <span class="n">global_entities</span> <span class="o">=</span> <span class="k">await</span> <span class="n">_get_edge_data</span><span class="p">(</span><span class="n">hl_keywords</span><span class="p">,</span> <span class="o">...</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="53">5.3 병합 전략<a class="headerlink" href="#53" title="Permanent link">&para;</a></h3>
+<p><strong>엔티티 라운드 로빈 병합:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">max</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">local_entities</span><span class="p">),</span> <span class="nb">len</span><span class="p">(</span><span class="n">global_entities</span><span class="p">))):</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>    <span class="k">if</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">local_entities</span><span class="p">):</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>        <span class="c1"># local 엔티티 추가 (중복 아닌 경우)</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>    <span class="k">if</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">global_entities</span><span class="p">):</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>        <span class="c1"># global 엔티티 추가 (중복 아닌 경우)</span>
+</code></pre></div>
+<ul>
+<li>중복 판별: <code>entity_name</code> 기준</li>
+<li><strong>Local 엔티티가 같은 인덱스에서 우선</strong> (먼저 추가)</li>
+</ul>
+<p><strong>관계 라운드 로빈 병합:</strong>
+- 중복 판별: <code>sorted((src, tgt))</code> 튜플 기준
+- 동일 패턴: Local 관계 우선</p>
+<h3 id="54">5.4 검색하지 않는 것<a class="headerlink" href="#54" title="Permanent link">&para;</a></h3>
+<ul>
+<li>❌ 청크 VDB 직접 검색 (<code>_get_vector_context</code> 미호출)</li>
+<li>벡터 청크 직접 검색 없음 — KG에서 파생된 청크만 사용</li>
+</ul>
+<h3 id="55">5.5 적합한 사용 시나리오<a class="headerlink" href="#55" title="Permanent link">&para;</a></h3>
+<ul>
+<li>엔티티와 관계 정보 모두 필요한 복합 질문</li>
+<li>"X 기관에서 Y 프로젝트를 어떻게 진행했나?"</li>
+<li>구체적 사실 + 맥락적 관계 동시 필요</li>
+</ul>
+<hr />
+<h2 id="6-mix">6. MIX 모드 상세<a class="headerlink" href="#6-mix" title="Permanent link">&para;</a></h2>
+<h3 id="61">6.1 동작 흐름 (기본 모드)<a class="headerlink" href="#61" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>쿼리 → 키워드 추출 → ll_keywords + hl_keywords 모두 사용
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>                       │
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>     ┌─────────────────┼─────────────────┐
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>     ▼                 ▼                 ▼
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>엔티티 VDB 검색   관계 VDB 검색    청크 VDB 검색
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>(ll_keywords)    (hl_keywords)    (원본 쿼리)
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>     │                 │                 │
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>     ▼                 ▼                 │
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>edge 탐색         엔티티 탐색           │
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>     │                 │                 │
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>     └────────┬────────┘                 │
+<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>              ▼                          │
+<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a>   라운드 로빈 병합 (중복 제거)            │
+<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a>              │                          │
+<a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a>              ▼                          │
+<a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a>   엔티티/관계 토큰 절삭                   │
+<a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a>              │                          │
+<a id="__codelineno-10-18" name="__codelineno-10-18" href="#__codelineno-10-18"></a>              ▼                          │
+<a id="__codelineno-10-19" name="__codelineno-10-19" href="#__codelineno-10-19"></a>   KG 관련 청크 수집                      │
+<a id="__codelineno-10-20" name="__codelineno-10-20" href="#__codelineno-10-20"></a>   ├── 엔티티 관련 (source_id)            │
+<a id="__codelineno-10-21" name="__codelineno-10-21" href="#__codelineno-10-21"></a>   └── 관계 관련 (source_id)              │
+<a id="__codelineno-10-22" name="__codelineno-10-22" href="#__codelineno-10-22"></a>              │                          │
+<a id="__codelineno-10-23" name="__codelineno-10-23" href="#__codelineno-10-23"></a>              └──────────┬───────────────┘
+<a id="__codelineno-10-24" name="__codelineno-10-24" href="#__codelineno-10-24"></a>                         ▼
+<a id="__codelineno-10-25" name="__codelineno-10-25" href="#__codelineno-10-25"></a>              3-소스 라운드 로빈 청크 병합
+<a id="__codelineno-10-26" name="__codelineno-10-26" href="#__codelineno-10-26"></a>              vector[0] → entity[0] → relation[0] → ...
+<a id="__codelineno-10-27" name="__codelineno-10-27" href="#__codelineno-10-27"></a>                         │
+<a id="__codelineno-10-28" name="__codelineno-10-28" href="#__codelineno-10-28"></a>                         ▼
+<a id="__codelineno-10-29" name="__codelineno-10-29" href="#__codelineno-10-29"></a>              리랭킹 → 필터링 → 토큰 절삭 → LLM 생성
+</code></pre></div>
+<h3 id="62-hybrid">6.2 Hybrid와의 핵심 차이: 벡터 청크 직접 검색<a class="headerlink" href="#62-hybrid" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># _perform_kg_search() 내부</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="k">if</span> <span class="n">query_param</span><span class="o">.</span><span class="n">mode</span> <span class="o">==</span> <span class="s2">&quot;mix&quot;</span> <span class="ow">and</span> <span class="n">chunks_vdb</span><span class="p">:</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    <span class="n">vector_chunks</span> <span class="o">=</span> <span class="k">await</span> <span class="n">_get_vector_context</span><span class="p">(</span><span class="n">query</span><span class="p">,</span> <span class="n">chunks_vdb</span><span class="p">,</span> <span class="n">query_param</span><span class="p">,</span> <span class="n">query_embedding</span><span class="p">)</span>
+</code></pre></div>
+<ul>
+<li><strong>Hybrid</strong>: KG에서 파생된 청크만 사용 (2-소스 병합)</li>
+<li><strong>Mix</strong>: KG 파생 청크 + 벡터 직접 검색 청크 (3-소스 병합)</li>
+</ul>
+<h3 id="63">6.3 벡터 청크 직접 검색<a class="headerlink" href="#63" title="Permanent link">&para;</a></h3>
+<p><strong>함수</strong>: <code>_get_vector_context()</code></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="n">search_top_k</span> <span class="o">=</span> <span class="n">query_param</span><span class="o">.</span><span class="n">chunk_top_k</span> <span class="ow">or</span> <span class="n">query_param</span><span class="o">.</span><span class="n">top_k</span>  <span class="c1"># 기본 20</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="n">results</span> <span class="o">=</span> <span class="k">await</span> <span class="n">chunks_vdb</span><span class="o">.</span><span class="n">query</span><span class="p">(</span><span class="n">query</span><span class="p">,</span> <span class="n">top_k</span><span class="o">=</span><span class="n">search_top_k</span><span class="p">,</span> <span class="n">query_embedding</span><span class="o">=</span><span class="n">query_embedding</span><span class="p">)</span>
+</code></pre></div>
+<ul>
+<li>원본 쿼리 텍스트로 직접 검색 (키워드가 아님)</li>
+<li><code>structured_content</code>가 있으면 KV 스토어에서 보강</li>
+<li>청크 소스: <code>"C"</code> (Vector Chunk)</li>
+</ul>
+<h3 id="64-3-">6.4 3-소스 청크 병합<a class="headerlink" href="#64-3-" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># _merge_all_chunks() 내부</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">max_len</span><span class="p">):</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>    <span class="k">if</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">vector_chunks</span><span class="p">):</span>    <span class="c1"># 벡터 직접 검색 (Mix 전용)</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>        <span class="o">...</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>    <span class="k">if</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">entity_chunks</span><span class="p">):</span>    <span class="c1"># 엔티티 관련</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>        <span class="o">...</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>    <span class="k">if</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">relation_chunks</span><span class="p">):</span>  <span class="c1"># 관계 관련</span>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>        <span class="o">...</span>
+</code></pre></div>
+<ul>
+<li>중복 제거: <code>chunk_id</code> 기준 (최초 출현만 유지)</li>
+<li>벡터 청크가 라운드 로빈에서 첫 번째 → 직접 관련성 높은 청크 우선</li>
+</ul>
+<h3 id="65-kg">6.5 KG 검색 실패 시 폴백<a class="headerlink" href="#65-kg" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="k">if</span> <span class="ow">not</span> <span class="n">search_result</span><span class="p">[</span><span class="s2">&quot;final_entities&quot;</span><span class="p">]</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">search_result</span><span class="p">[</span><span class="s2">&quot;final_relations&quot;</span><span class="p">]:</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>    <span class="k">if</span> <span class="n">query_param</span><span class="o">.</span><span class="n">mode</span> <span class="o">!=</span> <span class="s2">&quot;mix&quot;</span><span class="p">:</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>        <span class="k">return</span> <span class="kc">None</span>      <span class="c1"># local/global/hybrid: 실패</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>    <span class="k">else</span><span class="p">:</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">search_result</span><span class="p">[</span><span class="s2">&quot;chunk_tracking&quot;</span><span class="p">]:</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>            <span class="k">return</span> <span class="kc">None</span>  <span class="c1"># mix: 벡터 청크도 없으면 실패</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>        <span class="c1"># mix: 벡터 청크만으로도 계속 진행 가능!</span>
+</code></pre></div>
+<p><strong>Mix 모드만의 특별한 동작</strong>: KG 검색 결과가 0이어도 벡터 청크가 있으면 응답 생성 가능.</p>
+<h3 id="66">6.6 적합한 사용 시나리오<a class="headerlink" href="#66" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>기본 모드 (추천)</strong>: 대부분의 질문에 가장 포괄적인 결과</li>
+<li>KG가 충분하지 않아도 벡터 검색으로 보완</li>
+<li>새로운 도메인/문서에서 아직 KG가 완성되지 않은 경우</li>
+</ul>
+<hr />
+<h2 id="7-naive">7. NAIVE 모드 상세<a class="headerlink" href="#7-naive" title="Permanent link">&para;</a></h2>
+<h3 id="71">7.1 동작 흐름<a class="headerlink" href="#71" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>쿼리 → (키워드 추출 없음)
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>         │
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>         ▼
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>  청크 VDB 직접 검색
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>  (원본 쿼리, chunk_top_k=20)
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a>         │
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a>         ▼
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a>  리랭킹 → min_rerank_score 필터 → chunk_top_k 제한
+<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a>         │
+<a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a>         ▼
+<a id="__codelineno-15-11" name="__codelineno-15-11" href="#__codelineno-15-11"></a>  토큰 예산 절삭
+<a id="__codelineno-15-12" name="__codelineno-15-12" href="#__codelineno-15-12"></a>         │
+<a id="__codelineno-15-13" name="__codelineno-15-13" href="#__codelineno-15-13"></a>         ▼
+<a id="__codelineno-15-14" name="__codelineno-15-14" href="#__codelineno-15-14"></a>  naive_query_context 템플릿 조립
+<a id="__codelineno-15-15" name="__codelineno-15-15" href="#__codelineno-15-15"></a>         │
+<a id="__codelineno-15-16" name="__codelineno-15-16" href="#__codelineno-15-16"></a>         ▼
+<a id="__codelineno-15-17" name="__codelineno-15-17" href="#__codelineno-15-17"></a>  naive_rag_response 프롬프트 → LLM 생성
+</code></pre></div>
+<h3 id="72">7.2 완전히 독립된 코드 경로<a class="headerlink" href="#72" title="Permanent link">&para;</a></h3>
+<p><strong>함수</strong>: <code>naive_query()</code> — <code>kg_query()</code>와 완전히 별개</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># operate.py — naive_query()</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="c1"># 1. 키워드 추출 없음</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="c1"># 2. 벡터 청크만 검색</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="n">vector_chunks</span> <span class="o">=</span> <span class="k">await</span> <span class="n">_get_vector_context</span><span class="p">(</span><span class="n">query</span><span class="p">,</span> <span class="n">chunks_vdb</span><span class="p">,</span> <span class="n">query_param</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="73-kg">7.3 KG 모드와의 차이<a class="headerlink" href="#73-kg" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>관점</th>
+<th>KG 모드 (local~mix)</th>
+<th>NAIVE 모드</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>키워드 추출</td>
+<td>LLM 호출</td>
+<td>없음</td>
+</tr>
+<tr>
+<td>엔티티/관계 검색</td>
+<td>있음</td>
+<td>없음</td>
+</tr>
+<tr>
+<td>컨텍스트에 엔티티</td>
+<td>포함</td>
+<td>미포함</td>
+</tr>
+<tr>
+<td>컨텍스트에 관계</td>
+<td>포함</td>
+<td>미포함</td>
+</tr>
+<tr>
+<td>청크 소스</td>
+<td>KG 파생 + (벡터 직접)</td>
+<td>벡터 직접만</td>
+</tr>
+<tr>
+<td>컨텍스트 템플릿</td>
+<td><code>kg_query_context</code></td>
+<td><code>naive_query_context</code></td>
+</tr>
+<tr>
+<td>LLM 프롬프트</td>
+<td><code>rag_response</code></td>
+<td><code>naive_rag_response</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="74">7.4 컨텍스트 템플릿<a class="headerlink" href="#74" title="Permanent link">&para;</a></h3>
+<p><strong><code>naive_query_context</code></strong> (prompt.py):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>Document Chunks (Each entry has a reference_id...):
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>```json
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>{text_chunks_str}
+</code></pre></div>
+<p>Reference Document List:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>{reference_list_str}
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>엔티티/관계 섹션이 **완전히 없음**.
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>### 7.5 LLM 프롬프트 차이
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a>**`rag_response`** (KG 모드):
+<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a>&gt; &quot;integrate relevant facts from the **Knowledge Graph and Document Chunks**&quot;
+<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a>
+<a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a>**`naive_rag_response`** (Naive 모드):
+<a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a>&gt; &quot;integrate relevant facts from the **Document Chunks**&quot;
+<a id="__codelineno-19-10" name="__codelineno-19-10" href="#__codelineno-19-10"></a>
+<a id="__codelineno-19-11" name="__codelineno-19-11" href="#__codelineno-19-11"></a>Knowledge Graph에 대한 언급이 완전히 제거됨.
+<a id="__codelineno-19-12" name="__codelineno-19-12" href="#__codelineno-19-12"></a>
+<a id="__codelineno-19-13" name="__codelineno-19-13" href="#__codelineno-19-13"></a>### 7.6 반환 데이터
+<a id="__codelineno-19-14" name="__codelineno-19-14" href="#__codelineno-19-14"></a>
+<a id="__codelineno-19-15" name="__codelineno-19-15" href="#__codelineno-19-15"></a>```python
+<a id="__codelineno-19-16" name="__codelineno-19-16" href="#__codelineno-19-16"></a>raw_data = convert_to_user_format(
+<a id="__codelineno-19-17" name="__codelineno-19-17" href="#__codelineno-19-17"></a>    [],   # 엔티티 없음
+<a id="__codelineno-19-18" name="__codelineno-19-18" href="#__codelineno-19-18"></a>    [],   # 관계 없음
+<a id="__codelineno-19-19" name="__codelineno-19-19" href="#__codelineno-19-19"></a>    processed_chunks_with_ref_ids,
+<a id="__codelineno-19-20" name="__codelineno-19-20" href="#__codelineno-19-20"></a>    reference_list,
+<a id="__codelineno-19-21" name="__codelineno-19-21" href="#__codelineno-19-21"></a>    &quot;naive&quot;,
+<a id="__codelineno-19-22" name="__codelineno-19-22" href="#__codelineno-19-22"></a>)
+</code></pre></div></p>
+<h3 id="77">7.7 적합한 사용 시나리오<a class="headerlink" href="#77" title="Permanent link">&para;</a></h3>
+<ul>
+<li>전통적인 RAG 방식이 필요한 경우</li>
+<li>KG 구축 전 초기 단계</li>
+<li>벡터 유사도 기반의 단순 검색</li>
+<li>KG 품질이 낮아서 노이즈가 많을 때 우회</li>
+</ul>
+<hr />
+<h2 id="8-bypass">8. BYPASS 모드 상세<a class="headerlink" href="#8-bypass" title="Permanent link">&para;</a></h2>
+<h3 id="81">8.1 동작 흐름<a class="headerlink" href="#81" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>쿼리 → LLM 직접 호출 (검색 없음)
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>         │
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>         ▼
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a>  LLM(query, system_prompt, conversation_history)
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a>         │
+<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a>         ▼
+<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a>  응답 반환 (데이터 없음)
+</code></pre></div>
+<h3 id="82">8.2 코드 경로<a class="headerlink" href="#82" title="Permanent link">&para;</a></h3>
+<p><strong><code>aquery_llm()</code> 내부에서 직접 처리</strong> (lightrag.py):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="k">elif</span> <span class="n">param</span><span class="o">.</span><span class="n">mode</span> <span class="o">==</span> <span class="s2">&quot;bypass&quot;</span><span class="p">:</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>    <span class="n">use_llm_func</span> <span class="o">=</span> <span class="n">param</span><span class="o">.</span><span class="n">model_func</span> <span class="ow">or</span> <span class="n">global_config</span><span class="p">[</span><span class="s2">&quot;llm_model_func&quot;</span><span class="p">]</span>
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>    <span class="n">use_llm_func</span> <span class="o">=</span> <span class="n">partial</span><span class="p">(</span><span class="n">use_llm_func</span><span class="p">,</span> <span class="n">_priority</span><span class="o">=</span><span class="mi">8</span><span class="p">)</span>  <span class="c1"># 최고 우선순위</span>
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a>    <span class="n">response</span> <span class="o">=</span> <span class="k">await</span> <span class="n">use_llm_func</span><span class="p">(</span>
+<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a>        <span class="n">query</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a>        <span class="n">system_prompt</span><span class="o">=</span><span class="n">system_prompt</span><span class="p">,</span>
+<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a>        <span class="n">history_messages</span><span class="o">=</span><span class="n">param</span><span class="o">.</span><span class="n">conversation_history</span><span class="p">,</span>
+<a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a>        <span class="n">enable_cot</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a>        <span class="n">stream</span><span class="o">=</span><span class="n">param</span><span class="o">.</span><span class="n">stream</span><span class="p">,</span>
+<a id="__codelineno-21-10" name="__codelineno-21-10" href="#__codelineno-21-10"></a>    <span class="p">)</span>
+</code></pre></div>
+<h3 id="83">8.3 특징<a class="headerlink" href="#83" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>검색 없음</strong>: 벡터 검색, KG 검색 모두 생략</li>
+<li><strong>키워드 추출 없음</strong>: LLM 키워드 추출 호출 없음</li>
+<li><strong>컨텍스트 없음</strong>: 외부 지식 주입 없음</li>
+<li><strong>최고 LLM 우선순위</strong>: <code>_priority=8</code> (다른 모드는 5)</li>
+<li><strong>chain-of-thought 활성화</strong>: <code>enable_cot=True</code></li>
+</ul>
+<h3 id="84">8.4 반환 데이터<a class="headerlink" href="#84" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="c1"># aquery_data()에서 bypass 처리</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="n">empty_raw_data</span> <span class="o">=</span> <span class="n">convert_to_user_format</span><span class="p">([],</span> <span class="p">[],</span> <span class="p">[],</span> <span class="p">[],</span> <span class="s2">&quot;bypass&quot;</span><span class="p">)</span>
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="c1"># → 모든 데이터가 비어있음</span>
+</code></pre></div>
+<h3 id="85">8.5 적합한 사용 시나리오<a class="headerlink" href="#85" title="Permanent link">&para;</a></h3>
+<ul>
+<li>LLM의 내장 지식만으로 충분한 질문</li>
+<li>일반 대화 (인사, 간단한 설명)</li>
+<li>검색이 불필요한 창의적 작업</li>
+<li>시스템 테스트 (LLM 응답 확인)</li>
+</ul>
+<hr />
+<h2 id="9">9. 모드 비교 종합표<a class="headerlink" href="#9" title="Permanent link">&para;</a></h2>
+<h3 id="91">9.1 검색 동작 비교<a class="headerlink" href="#91" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>관점</th>
+<th style="text-align: center;">LOCAL</th>
+<th style="text-align: center;">GLOBAL</th>
+<th style="text-align: center;">HYBRID</th>
+<th style="text-align: center;">MIX</th>
+<th style="text-align: center;">NAIVE</th>
+<th style="text-align: center;">BYPASS</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>키워드 추출</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>ll_keywords 사용</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>hl_keywords 사용</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>엔티티 VDB 검색</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>관계 VDB 검색</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>청크 VDB 직접 검색</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+</tr>
+<tr>
+<td>KG 관련 청크 수집</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">✅</td>
+<td style="text-align: center;">❌</td>
+<td style="text-align: center;">❌</td>
+</tr>
+</tbody>
+</table>
+<h3 id="92">9.2 정렬/순위 비교<a class="headerlink" href="#92" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>관점</th>
+<th>LOCAL</th>
+<th>GLOBAL</th>
+<th>HYBRID</th>
+<th>MIX</th>
+<th>NAIVE</th>
+<th>BYPASS</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>엔티티 정렬</td>
+<td>cosine sim</td>
+<td>발견 순서</td>
+<td>라운드 로빈</td>
+<td>라운드 로빈</td>
+<td>N/A</td>
+<td>N/A</td>
+</tr>
+<tr>
+<td>관계 정렬</td>
+<td>degree+weight</td>
+<td>cosine sim</td>
+<td>라운드 로빈</td>
+<td>라운드 로빈</td>
+<td>N/A</td>
+<td>N/A</td>
+</tr>
+<tr>
+<td>청크 병합</td>
+<td>E+R 라운드로빈</td>
+<td>E+R 라운드로빈</td>
+<td>E+R 라운드로빈</td>
+<td>V+E+R 라운드로빈</td>
+<td>단일 소스</td>
+<td>N/A</td>
+</tr>
+</tbody>
+</table>
+<h3 id="93">9.3 프롬프트/컨텍스트 비교<a class="headerlink" href="#93" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>관점</th>
+<th>LOCAL</th>
+<th>GLOBAL</th>
+<th>HYBRID</th>
+<th>MIX</th>
+<th>NAIVE</th>
+<th>BYPASS</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>디스패처 함수</td>
+<td><code>kg_query()</code></td>
+<td><code>kg_query()</code></td>
+<td><code>kg_query()</code></td>
+<td><code>kg_query()</code></td>
+<td><code>naive_query()</code></td>
+<td>직접 호출</td>
+</tr>
+<tr>
+<td>컨텍스트 템플릿</td>
+<td><code>kg_query_context</code></td>
+<td><code>kg_query_context</code></td>
+<td><code>kg_query_context</code></td>
+<td><code>kg_query_context</code></td>
+<td><code>naive_query_context</code></td>
+<td>없음</td>
+</tr>
+<tr>
+<td>LLM 프롬프트</td>
+<td><code>rag_response</code></td>
+<td><code>rag_response</code></td>
+<td><code>rag_response</code></td>
+<td><code>rag_response</code></td>
+<td><code>naive_rag_response</code></td>
+<td>없음</td>
+</tr>
+<tr>
+<td>컨텍스트에 엔티티</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+<td>❌</td>
+<td>❌</td>
+</tr>
+<tr>
+<td>컨텍스트에 관계</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+<td>❌</td>
+<td>❌</td>
+</tr>
+<tr>
+<td>KG 빈 상태에서 동작</td>
+<td>❌</td>
+<td>❌</td>
+<td>❌</td>
+<td>✅*</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>LLM 우선순위</td>
+<td>5</td>
+<td>5</td>
+<td>5</td>
+<td>5</td>
+<td>5</td>
+<td>8</td>
+</tr>
+</tbody>
+</table>
+<p>* Mix 모드는 벡터 청크가 있으면 KG가 비어도 동작 가능</p>
+<hr />
+<h2 id="10">10. 횡단 관심사<a class="headerlink" href="#10" title="Permanent link">&para;</a></h2>
+<h3 id="101-only_need_context">10.1 only_need_context 동작<a class="headerlink" href="#101-only_need_context" title="Permanent link">&para;</a></h3>
+<p><strong>KG 모드 (local~mix):</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="c1"># kg_query() 내부</span>
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="k">if</span> <span class="n">query_param</span><span class="o">.</span><span class="n">only_need_context</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">query_param</span><span class="o">.</span><span class="n">only_need_prompt</span><span class="p">:</span>
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a>    <span class="k">return</span> <span class="n">QueryResult</span><span class="p">(</span><span class="n">content</span><span class="o">=</span><span class="n">context_result</span><span class="o">.</span><span class="n">context</span><span class="p">,</span> <span class="n">raw_data</span><span class="o">=</span><span class="n">context_result</span><span class="o">.</span><span class="n">raw_data</span><span class="p">)</span>
+<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a>    <span class="c1"># → LLM 호출 생략, 컨텍스트 문자열 반환</span>
+</code></pre></div>
+<p><strong>Naive 모드:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="c1"># naive_query() 내부</span>
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="k">if</span> <span class="n">query_param</span><span class="o">.</span><span class="n">only_need_context</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">query_param</span><span class="o">.</span><span class="n">only_need_prompt</span><span class="p">:</span>
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a>    <span class="k">return</span> <span class="n">QueryResult</span><span class="p">(</span><span class="n">content</span><span class="o">=</span><span class="n">context_content</span><span class="p">,</span> <span class="n">raw_data</span><span class="o">=</span><span class="n">raw_data</span><span class="p">)</span>
+</code></pre></div>
+<p><strong>Bypass 모드:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="c1"># aquery_data() 내부</span>
+<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="n">empty_raw_data</span> <span class="o">=</span> <span class="n">convert_to_user_format</span><span class="p">([],</span> <span class="p">[],</span> <span class="p">[],</span> <span class="p">[],</span> <span class="s2">&quot;bypass&quot;</span><span class="p">)</span>
+<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="c1"># → 빈 데이터 반환 (검색할 컨텍스트 없음)</span>
+</code></pre></div>
+<h3 id="102-only_need_prompt">10.2 only_need_prompt 동작<a class="headerlink" href="#102-only_need_prompt" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="c1"># kg_query(), naive_query() 공통</span>
+<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="k">if</span> <span class="n">query_param</span><span class="o">.</span><span class="n">only_need_prompt</span><span class="p">:</span>
+<a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a>    <span class="n">prompt_content</span> <span class="o">=</span> <span class="s2">&quot;</span><span class="se">\n\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="n">sys_prompt</span><span class="p">,</span> <span class="s2">&quot;---User Query---&quot;</span><span class="p">,</span> <span class="n">user_query</span><span class="p">])</span>
+<a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a>    <span class="k">return</span> <span class="n">QueryResult</span><span class="p">(</span><span class="n">content</span><span class="o">=</span><span class="n">prompt_content</span><span class="p">,</span> <span class="n">raw_data</span><span class="o">=...</span><span class="p">)</span>
+<a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a>    <span class="c1"># → LLM에 보낼 전체 프롬프트 반환 (LLM 호출 생략)</span>
+</code></pre></div>
+<p><strong>우선순위:</strong></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: center;">only_need_context</th>
+<th style="text-align: center;">only_need_prompt</th>
+<th>결과</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: center;">False</td>
+<td style="text-align: center;">False</td>
+<td>전체 실행 (검색 + LLM)</td>
+</tr>
+<tr>
+<td style="text-align: center;">True</td>
+<td style="text-align: center;">False</td>
+<td>컨텍스트만 반환</td>
+</tr>
+<tr>
+<td style="text-align: center;">False</td>
+<td style="text-align: center;">True</td>
+<td>프롬프트만 반환</td>
+</tr>
+<tr>
+<td style="text-align: center;">True</td>
+<td style="text-align: center;">True</td>
+<td>컨텍스트만 반환 (context 우선)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="103-conversation_history">10.3 conversation_history 처리<a class="headerlink" href="#103-conversation_history" title="Permanent link">&para;</a></h3>
+<p><strong>모든 모드 공통:</strong>
+- LLM 호출 시 <code>history_messages=param.conversation_history</code>으로 전달
+- <strong>키워드 추출에는 사용되지 않음</strong> → 대화 맥락이 검색에 반영되지 않음
+- <strong>캐시 키에 포함되지 않음</strong> → 같은 쿼리는 대화 이력이 달라도 같은 캐시 결과 반환</p>
+<h3 id="104-vs">10.4 스트리밍 vs 비스트리밍<a class="headerlink" href="#104-vs" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>관점</th>
+<th>비스트리밍 (<code>/query</code>)</th>
+<th>스트리밍 (<code>/query/stream</code>)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>파라미터</td>
+<td><code>stream=False</code></td>
+<td><code>stream=True</code></td>
+</tr>
+<tr>
+<td>LLM 반환</td>
+<td><code>str</code></td>
+<td><code>AsyncIterator</code></td>
+</tr>
+<tr>
+<td>QueryResult</td>
+<td><code>content=response</code></td>
+<td><code>response_iterator=response</code></td>
+</tr>
+<tr>
+<td>API 응답</td>
+<td>JSON 단일 응답</td>
+<td>NDJSON 스트림</td>
+</tr>
+<tr>
+<td>레퍼런스 전달</td>
+<td>응답 JSON에 포함</td>
+<td>스트림 첫 번째 라인</td>
+</tr>
+<tr>
+<td>캐시 히트 시</td>
+<td>문자열 반환</td>
+<td>비스트리밍으로 폴백</td>
+</tr>
+</tbody>
+</table>
+<h3 id="105">10.5 캐시 키 구성<a class="headerlink" href="#105" title="Permanent link">&para;</a></h3>
+<p><strong>키워드 캐시:</strong>
+- 키: <code>hash(mode, text)</code>
+- 타입: <code>"keywords"</code></p>
+<p><strong>쿼리 응답 캐시:</strong>
+- 키: <code>hash(mode, query, response_type, top_k, chunk_top_k, max_entity_tokens, max_relation_tokens, max_total_tokens, hl_keywords_str, ll_keywords_str, user_prompt, enable_rerank)</code>
+- 타입: <code>"query"</code>
+- <strong>주의</strong>: <code>conversation_history</code>는 캐시 키에 미포함</p>
+<h3 id="106">10.6 키워드 추출 폴백<a class="headerlink" href="#106" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="c1"># kg_query() 내부</span>
+<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="k">if</span> <span class="n">hl_keywords</span> <span class="o">==</span> <span class="p">[]</span> <span class="ow">and</span> <span class="n">ll_keywords</span> <span class="o">==</span> <span class="p">[]:</span>
+<a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a>    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">query</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">50</span><span class="p">:</span>
+<a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a>        <span class="n">ll_keywords</span> <span class="o">=</span> <span class="p">[</span><span class="n">query</span><span class="p">]</span>   <span class="c1"># 짧은 쿼리: 전체를 ll_keyword로 사용</span>
+<a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a>    <span class="k">else</span><span class="p">:</span>
+<a id="__codelineno-27-6" name="__codelineno-27-6" href="#__codelineno-27-6"></a>        <span class="k">return</span> <span class="n">QueryResult</span><span class="p">(</span><span class="n">content</span><span class="o">=</span><span class="n">PROMPTS</span><span class="p">[</span><span class="s2">&quot;fail_response&quot;</span><span class="p">])</span>  <span class="c1"># 긴 쿼리: 실패 응답</span>
+</code></pre></div>
+<ul>
+<li>50자 미만 쿼리: 쿼리 전체를 저수준 키워드로 사용</li>
+<li>50자 이상 쿼리: 키워드 추출 실패 시 에러 응답 반환</li>
+</ul>
+<hr />
+<h2 id="11-api">11. API 엔드포인트별 동작<a class="headerlink" href="#11-api" title="Permanent link">&para;</a></h2>
+<h3 id="111-post-apiquery-query_text">11.1 POST /api/query (query_text)<a class="headerlink" href="#111-post-apiquery-query_text" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a>요청: { query, mode, top_k, ... }
+<a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a>처리: aquery_llm(stream=False)
+<a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a>응답: { response: &quot;LLM 답변&quot;, references: [...] }  (선택적)
+</code></pre></div>
+<ul>
+<li><code>include_references=True</code>일 때만 레퍼런스 포함</li>
+<li>단일 JSON 응답</li>
+</ul>
+<h3 id="112-post-apiquerystream-query_text_stream">11.2 POST /api/query/stream (query_text_stream)<a class="headerlink" href="#112-post-apiquerystream-query_text_stream" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a>요청: { query, mode, stream: true, ... }
+<a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a>처리: aquery_llm(stream=True)
+<a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a>응답: NDJSON 스트림
+<a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a>  Line 1: { type: &quot;references&quot;, data: [...] }    (레퍼런스 먼저)
+<a id="__codelineno-29-5" name="__codelineno-29-5" href="#__codelineno-29-5"></a>  Line 2+: { type: &quot;chunk&quot;, data: &quot;텍스트...&quot; }   (응답 청크)
+<a id="__codelineno-29-6" name="__codelineno-29-6" href="#__codelineno-29-6"></a>  Last:    { type: &quot;done&quot; }                        (종료 신호)
+</code></pre></div>
+<h3 id="113-post-apiquerydata-query_data">11.3 POST /api/query/data (query_data)<a class="headerlink" href="#113-post-apiquerydata-query_data" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a>요청: { query, mode, top_k, ... }
+<a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a>처리: aquery_data(only_need_context=True, stream=False)
+<a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a>응답: {
+<a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a>  status: &quot;success&quot;,
+<a id="__codelineno-30-5" name="__codelineno-30-5" href="#__codelineno-30-5"></a>  data: {
+<a id="__codelineno-30-6" name="__codelineno-30-6" href="#__codelineno-30-6"></a>    entities: [...],
+<a id="__codelineno-30-7" name="__codelineno-30-7" href="#__codelineno-30-7"></a>    relationships: [...],
+<a id="__codelineno-30-8" name="__codelineno-30-8" href="#__codelineno-30-8"></a>    chunks: [...],
+<a id="__codelineno-30-9" name="__codelineno-30-9" href="#__codelineno-30-9"></a>    references: [...]
+<a id="__codelineno-30-10" name="__codelineno-30-10" href="#__codelineno-30-10"></a>  },
+<a id="__codelineno-30-11" name="__codelineno-30-11" href="#__codelineno-30-11"></a>  metadata: { mode, ... }
+<a id="__codelineno-30-12" name="__codelineno-30-12" href="#__codelineno-30-12"></a>}
+</code></pre></div>
+<ul>
+<li>LLM 호출 없음 — 검색 데이터만 반환</li>
+<li>Bypass 모드: 빈 데이터 반환</li>
+</ul>
+<hr />
+<h2 id="12-queryparam">12. QueryParam 파라미터 참조<a class="headerlink" href="#12-queryparam" title="Permanent link">&para;</a></h2>
+<p>파일: <code>lightrag/base.py</code></p>
+<table>
+<thead>
+<tr>
+<th>파라미터</th>
+<th>타입</th>
+<th>기본값</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mode</code></td>
+<td>Literal</td>
+<td><code>"mix"</code></td>
+<td>쿼리 모드</td>
+</tr>
+<tr>
+<td><code>only_need_context</code></td>
+<td>bool</td>
+<td><code>False</code></td>
+<td>컨텍스트만 반환 (LLM 생략)</td>
+</tr>
+<tr>
+<td><code>only_need_prompt</code></td>
+<td>bool</td>
+<td><code>False</code></td>
+<td>프롬프트만 반환 (LLM 생략)</td>
+</tr>
+<tr>
+<td><code>response_type</code></td>
+<td>str</td>
+<td><code>"Multiple Paragraphs"</code></td>
+<td>응답 형식 지시</td>
+</tr>
+<tr>
+<td><code>stream</code></td>
+<td>bool</td>
+<td><code>False</code></td>
+<td>스트리밍 여부</td>
+</tr>
+<tr>
+<td><code>top_k</code></td>
+<td>int</td>
+<td><code>40</code></td>
+<td>엔티티/관계 VDB 검색 수</td>
+</tr>
+<tr>
+<td><code>chunk_top_k</code></td>
+<td>int</td>
+<td><code>20</code></td>
+<td>청크 VDB 검색 수 + 리랭킹 후 상한</td>
+</tr>
+<tr>
+<td><code>max_entity_tokens</code></td>
+<td>int</td>
+<td><code>6,000</code></td>
+<td>엔티티 컨텍스트 토큰 한도</td>
+</tr>
+<tr>
+<td><code>max_relation_tokens</code></td>
+<td>int</td>
+<td><code>8,000</code></td>
+<td>관계 컨텍스트 토큰 한도</td>
+</tr>
+<tr>
+<td><code>max_total_tokens</code></td>
+<td>int</td>
+<td><code>30,000</code></td>
+<td>전체 컨텍스트 토큰 한도</td>
+</tr>
+<tr>
+<td><code>hl_keywords</code></td>
+<td>list[str]</td>
+<td><code>[]</code></td>
+<td>사용자 지정 고수준 키워드</td>
+</tr>
+<tr>
+<td><code>ll_keywords</code></td>
+<td>list[str]</td>
+<td><code>[]</code></td>
+<td>사용자 지정 저수준 키워드</td>
+</tr>
+<tr>
+<td><code>conversation_history</code></td>
+<td>list[dict]</td>
+<td><code>[]</code></td>
+<td>대화 이력</td>
+</tr>
+<tr>
+<td><code>model_func</code></td>
+<td>Callable|None</td>
+<td><code>None</code></td>
+<td>커스텀 LLM 함수</td>
+</tr>
+<tr>
+<td><code>user_prompt</code></td>
+<td>str|None</td>
+<td><code>None</code></td>
+<td>커스텀 시스템 프롬프트</td>
+</tr>
+<tr>
+<td><code>enable_rerank</code></td>
+<td>bool</td>
+<td><code>True</code></td>
+<td>리랭킹 활성화</td>
+</tr>
+<tr>
+<td><code>include_references</code></td>
+<td>bool</td>
+<td><code>False</code></td>
+<td>레퍼런스 포함 여부</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="_2">부록: 모드 선택 가이드<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a>질문 유형 분석
+<a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a>    │
+<a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a>    ├── 특정 엔티티에 대한 질문? ──── Yes ──→ LOCAL
+<a id="__codelineno-31-4" name="__codelineno-31-4" href="#__codelineno-31-4"></a>    │
+<a id="__codelineno-31-5" name="__codelineno-31-5" href="#__codelineno-31-5"></a>    ├── 관계/동향/개념적 질문? ──── Yes ──→ GLOBAL
+<a id="__codelineno-31-6" name="__codelineno-31-6" href="#__codelineno-31-6"></a>    │
+<a id="__codelineno-31-7" name="__codelineno-31-7" href="#__codelineno-31-7"></a>    ├── 엔티티+관계 복합 질문? ──── Yes ──→ HYBRID
+<a id="__codelineno-31-8" name="__codelineno-31-8" href="#__codelineno-31-8"></a>    │
+<a id="__codelineno-31-9" name="__codelineno-31-9" href="#__codelineno-31-9"></a>    ├── 확실하지 않음? ──── Yes ──→ MIX (기본값, 추천)
+<a id="__codelineno-31-10" name="__codelineno-31-10" href="#__codelineno-31-10"></a>    │
+<a id="__codelineno-31-11" name="__codelineno-31-11" href="#__codelineno-31-11"></a>    ├── KG 품질이 낮음/없음? ──── Yes ──→ NAIVE
+<a id="__codelineno-31-12" name="__codelineno-31-12" href="#__codelineno-31-12"></a>    │
+<a id="__codelineno-31-13" name="__codelineno-31-13" href="#__codelineno-31-13"></a>    └── 검색 불필요? ──── Yes ──→ BYPASS
+</code></pre></div>
+<h3 id="llm">모드별 비용 (LLM 호출 수)<a class="headerlink" href="#llm" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>모드</th>
+<th style="text-align: center;">키워드 추출</th>
+<th style="text-align: center;">쿼리 응답</th>
+<th style="text-align: center;">합계</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>LOCAL</td>
+<td style="text-align: center;">1회 (캐싱)</td>
+<td style="text-align: center;">1회</td>
+<td style="text-align: center;">2회</td>
+</tr>
+<tr>
+<td>GLOBAL</td>
+<td style="text-align: center;">1회 (캐싱)</td>
+<td style="text-align: center;">1회</td>
+<td style="text-align: center;">2회</td>
+</tr>
+<tr>
+<td>HYBRID</td>
+<td style="text-align: center;">1회 (캐싱)</td>
+<td style="text-align: center;">1회</td>
+<td style="text-align: center;">2회</td>
+</tr>
+<tr>
+<td>MIX</td>
+<td style="text-align: center;">1회 (캐싱)</td>
+<td style="text-align: center;">1회</td>
+<td style="text-align: center;">2회</td>
+</tr>
+<tr>
+<td>NAIVE</td>
+<td style="text-align: center;">0회</td>
+<td style="text-align: center;">1회</td>
+<td style="text-align: center;">1회</td>
+</tr>
+<tr>
+<td>BYPASS</td>
+<td style="text-align: center;">0회</td>
+<td style="text-align: center;">1회</td>
+<td style="text-align: center;">1회</td>
+</tr>
+</tbody>
+</table>
+<p>Naive와 Bypass는 키워드 추출이 없어 LLM 호출이 1회 적음.</p>
+<hr />
+<h2 id="_3">부록: 관련 소스 파일 참조<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>파일</th>
+<th>주요 함수/영역</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>lightrag/operate.py</code></td>
+<td><code>kg_query()</code>, <code>naive_query()</code>, <code>_perform_kg_search()</code>, <code>_build_query_context()</code>, <code>_get_node_data()</code>, <code>_get_edge_data()</code>, <code>_get_vector_context()</code>, <code>_merge_all_chunks()</code>, <code>_build_context_str()</code>, <code>_apply_token_truncation()</code>, <code>_find_related_text_unit_from_entities()</code>, <code>_find_related_text_unit_from_relations()</code>, <code>get_keywords_from_query()</code>, <code>extract_keywords_only()</code></td>
+</tr>
+<tr>
+<td><code>lightrag/lightrag.py</code></td>
+<td><code>aquery_llm()</code>, <code>aquery_data()</code></td>
+</tr>
+<tr>
+<td><code>lightrag/prompt.py</code></td>
+<td><code>keywords_extraction</code>, <code>kg_query_context</code>, <code>naive_query_context</code>, <code>rag_response</code>, <code>naive_rag_response</code>, <code>fail_response</code></td>
+</tr>
+<tr>
+<td><code>lightrag/base.py</code></td>
+<td><code>QueryParam</code>, <code>QueryResult</code></td>
+</tr>
+<tr>
+<td><code>lightrag/utils.py</code></td>
+<td><code>process_chunks_unified()</code>, <code>apply_rerank_if_enabled()</code>, <code>pick_by_vector_similarity()</code>, <code>pick_by_weighted_polling()</code>, <code>truncate_list_by_token_size()</code></td>
+</tr>
+<tr>
+<td><code>lightrag/constants.py</code></td>
+<td><code>DEFAULT_TOP_K</code>, <code>DEFAULT_CHUNK_TOP_K</code>, <code>DEFAULT_MAX_ENTITY_TOKENS</code>, <code>DEFAULT_MAX_RELATION_TOKENS</code>, <code>DEFAULT_MAX_TOTAL_TOKENS</code>, <code>DEFAULT_COSINE_THRESHOLD</code></td>
+</tr>
+<tr>
+<td><code>lightrag/api/routers/query_routes.py</code></td>
+<td><code>query_text()</code>, <code>query_text_stream()</code>, <code>query_data()</code>, <code>QueryRequest</code>, <code>QueryResponse</code></td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  맨위로
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\ud074\ub9bd\ubcf4\ub4dc\uc5d0 \ubcf5\uc0ac\ub428", "clipboard.copy": "\ud074\ub9bd\ubcf4\ub4dc\ub85c \ubcf5\uc0ac", "search.result.more.one": "\uc774 \ubb38\uc11c\uc5d0\uc11c 1\uac1c\uc758 \uac80\uc0c9 \uacb0\uacfc \ub354 \ubcf4\uae30", "search.result.more.other": "\uc774 \ubb38\uc11c\uc5d0\uc11c #\uac1c\uc758 \uac80\uc0c9 \uacb0\uacfc \ub354 \ubcf4\uae30", "search.result.none": "\uac80\uc0c9\uc5b4\uc640 \uc77c\uce58\ud558\ub294 \ubb38\uc11c\uac00 \uc5c6\uc2b5\ub2c8\ub2e4", "search.result.one": "1\uac1c\uc758 \uc77c\uce58\ud558\ub294 \ubb38\uc11c", "search.result.other": "#\uac1c\uc758 \uc77c\uce58\ud558\ub294 \ubb38\uc11c", "search.result.placeholder": "\uac80\uc0c9\uc5b4\ub97c \uc785\ub825\ud558\uc138\uc694", "search.result.term.missing": "\ud3ec\ud568\ub418\uc9c0 \uc54a\uc740 \uac80\uc0c9\uc5b4", "select.version": "\ubc84\uc804 \uc120\ud0dd"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
