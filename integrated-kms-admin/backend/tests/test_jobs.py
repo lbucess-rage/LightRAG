@@ -96,6 +96,84 @@ def test_immediate_doc_refs_are_created_from_direct_lightrag_response(monkeypatc
     assert any("UPDATE KMS_ADMIN_KNOWLEDGE_ITEMS SET status = 'ready'" in query for query, _ in calls)
 
 
+def test_existing_lightrag_refs_are_normalized_for_admin_ledger():
+    doc_ref = knowledge._document_ref_from_lightrag(
+        {
+            "id": "doc-1",
+            "file_path": "manual.pdf",
+            "content_summary": "PC 고장 조치",
+            "status": "PROCESSED",
+            "chunks_count": 3,
+        }
+    )
+    faq_ref = knowledge._faq_ref_from_lightrag(
+        {
+            "answer_id": "ANS-1",
+            "title": "카드 인증 실패",
+            "approved_summary": "카드 인증 실패 조치",
+            "status": "published",
+            "tags": ["카드", "인증"],
+        }
+    )
+
+    assert doc_ref.id == "doc-1"
+    assert doc_ref.title == "manual.pdf"
+    assert doc_ref.summary == "PC 고장 조치"
+    assert doc_ref.metadata["chunks_count"] == 3
+    assert faq_ref.id == "ANS-1"
+    assert faq_ref.title == "카드 인증 실패"
+    assert faq_ref.metadata["tags"] == ["카드", "인증"]
+    assert [ref.id for ref in knowledge._dedupe_refs([doc_ref, doc_ref])] == ["doc-1"]
+
+
+def test_link_existing_ref_creates_ready_item_ref_and_completed_job(monkeypatch):
+    calls = []
+
+    class FakeDb:
+        async def fetchrow(self, query, *params):
+            if "SELECT tenant_id FROM KMS_ADMIN_KNOWLEDGE_ITEMS" in query:
+                return {"tenant_id": "default"}
+            return None
+
+        async def execute(self, query, *params):
+            calls.append((query, params))
+
+    monkeypatch.setattr(knowledge, "db", FakeDb())
+
+    item_id = asyncio.run(
+        knowledge._link_existing_ref(
+            payload=knowledge.ExistingKnowledgeLinkRequest(
+                tenant_id="default",
+                kms_workspace="kevcs",
+                faq_workspace="faq",
+                enabled=True,
+            ),
+            user={"user_id": "admin", "role": "admin"},
+            ref=knowledge.ExistingKnowledgeRefRequest(
+                id="doc-1",
+                title="manual.pdf",
+                summary="PC 고장 조치",
+                status="FAILED",
+            ),
+            workspace_type="kms",
+            workspace="kevcs",
+            ref_type="doc_id",
+        )
+    )
+
+    assert item_id
+    item_insert = next(params for query, params in calls if "INSERT INTO KMS_ADMIN_KNOWLEDGE_ITEMS" in query)
+    ref_insert = next(params for query, params in calls if "INSERT INTO KMS_ADMIN_KNOWLEDGE_REFS" in query)
+    job_insert = next(params for query, params in calls if "INSERT INTO KMS_ADMIN_JOBS" in query)
+    assert item_insert[3] == "manual.pdf"
+    assert item_insert[6] is False
+    assert item_insert[11] == "ready"
+    assert ref_insert[3] == "kms"
+    assert ref_insert[5] == "doc-1"
+    assert job_insert[4] == "completed"
+    assert job_insert[6] == 100.0
+
+
 def test_sync_file_label_ref_finds_url_document_without_track(monkeypatch):
     calls = []
 

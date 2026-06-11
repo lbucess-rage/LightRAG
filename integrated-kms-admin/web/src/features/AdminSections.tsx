@@ -194,6 +194,7 @@ type KnowledgeListRow = {
   document?: KmsDocument
   answer?: FaqAnswer
   ledgerItem?: any
+  linked?: boolean
 }
 
 type Job = {
@@ -380,6 +381,17 @@ const initialKnowledgeForm = {
   guidance: '',
   tags: '',
   priority: '0'
+}
+
+const initialExistingLinkForm = {
+  category_id: '',
+  enabled: true,
+  valid_from: '',
+  valid_until: '',
+  include_kms: true,
+  include_faq: true,
+  link_all: true,
+  max_items: '1000'
 }
 
 function parseJsonField(value: string, label: string) {
@@ -2738,6 +2750,166 @@ function FaqAnswerSettings({
   )
 }
 
+function ExistingKnowledgeLinkModal({
+  form,
+  updateForm,
+  categories,
+  unlinkedDocumentCount,
+  unlinkedFaqCount,
+  submitting,
+  error,
+  result,
+  onSubmit,
+  onClose
+}: {
+  form: typeof initialExistingLinkForm
+  updateForm: (patch: Partial<typeof initialExistingLinkForm>) => void
+  categories: Category[]
+  unlinkedDocumentCount: number
+  unlinkedFaqCount: number
+  submitting: boolean
+  error: string
+  result: any
+  onSubmit: (event: FormEvent) => void
+  onClose: () => void
+}) {
+  const targetCount =
+    (form.include_kms ? unlinkedDocumentCount : 0) +
+    (form.include_faq ? unlinkedFaqCount : 0)
+  const canSubmit = form.link_all
+    ? form.include_kms || form.include_faq
+    : targetCount > 0
+  return (
+    <Modal
+      lg
+      title="기존 지식 연결"
+      icon={LinkIcon}
+      onClose={onClose}
+      footer={
+        <>
+          <Button type="button" variant="outline" onClick={onClose}>닫기</Button>
+          <Button type="submit" form="existing-link-form" disabled={submitting || !canSubmit}>
+            <LinkIcon className={submitting ? 'spin size-4' : 'size-4'} /> 원장에 연결
+          </Button>
+        </>
+      }
+    >
+      <form id="existing-link-form" className="col" style={{ gap: 16 }} onSubmit={onSubmit}>
+        <div style={{ display: 'flex', gap: 10, padding: 13, borderRadius: 'var(--radius-md)', background: 'var(--accent-soft)', border: '1px solid #c9d8f7', color: 'var(--fg-primary-soft)', fontSize: 12.5, lineHeight: 1.55 }}>
+          <ShieldIcon className="size-4" style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 1 }} />
+          <span>
+            기존 LightRAG 문서와 FAQ 답변을 재지식화하지 않고 어드민 원장에 연결합니다.
+            연결 후 카테고리, 유효기간, 사용 여부가 통합 검색 후보 선정에 적용됩니다.
+          </span>
+        </div>
+
+        <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <label
+            className="row"
+            style={{
+              gap: 10,
+              padding: 12,
+              border: '1px solid var(--border-default)',
+              borderRadius: 'var(--radius-md)',
+              background: form.link_all ? 'var(--accent-soft)' : '#fff',
+              cursor: 'pointer'
+            }}
+          >
+            <input type="radio" checked={form.link_all} onChange={() => updateForm({ link_all: true })} />
+            <span className="col" style={{ gap: 3 }}>
+              <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--fg-primary)' }}>워크스페이스 전체</span>
+              <span className="muted" style={{ fontSize: 11.5 }}>LightRAG API에서 전체 페이지를 조회해 미연결 항목만 연결합니다.</span>
+            </span>
+          </label>
+          <label
+            className="row"
+            style={{
+              gap: 10,
+              padding: 12,
+              border: '1px solid var(--border-default)',
+              borderRadius: 'var(--radius-md)',
+              background: !form.link_all ? 'var(--accent-soft)' : '#fff',
+              cursor: 'pointer'
+            }}
+          >
+            <input type="radio" checked={!form.link_all} onChange={() => updateForm({ link_all: false })} />
+            <span className="col" style={{ gap: 3 }}>
+              <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--fg-primary)' }}>현재 목록</span>
+              <span className="muted" style={{ fontSize: 11.5 }}>현재 화면에 불러온 미연결 항목만 연결합니다.</span>
+            </span>
+          </label>
+        </div>
+
+        <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <label className="row" style={{ gap: 10, padding: 12, border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)' }}>
+            <input type="checkbox" checked={form.include_kms} onChange={(event) => updateForm({ include_kms: event.target.checked })} />
+            <FileTextIcon className="size-4" style={{ color: 'var(--accent)' }} />
+            <span className="grow">
+              <span style={{ display: 'block', fontSize: 13.5, fontWeight: 700, color: 'var(--fg-primary)' }}>KMS 문서</span>
+              <span className="muted" style={{ fontSize: 11.5 }}>현재 목록 미연결 {unlinkedDocumentCount.toLocaleString()}건</span>
+            </span>
+          </label>
+          <label className="row" style={{ gap: 10, padding: 12, border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)' }}>
+            <input type="checkbox" checked={form.include_faq} onChange={(event) => updateForm({ include_faq: event.target.checked })} />
+            <BookOpenIcon className="size-4" style={{ color: 'var(--accent)' }} />
+            <span className="grow">
+              <span style={{ display: 'block', fontSize: 13.5, fontWeight: 700, color: 'var(--fg-primary)' }}>FAQ 답변</span>
+              <span className="muted" style={{ fontSize: 11.5 }}>현재 목록 미연결 {unlinkedFaqCount.toLocaleString()}건</span>
+            </span>
+          </label>
+        </div>
+
+        <div className="grid" style={{ gridTemplateColumns: 'minmax(0,1fr) 160px', gap: 12 }}>
+          <label className="field">
+            <span>기본 카테고리</span>
+            <select className={selectClass} value={form.category_id} onChange={(event) => updateForm({ category_id: event.target.value })}>
+              <option value="">카테고리 없음</option>
+              {categories.map((category) => (
+                <option key={category.category_id} value={category.category_id}>
+                  {'　'.repeat(categoryDepth(category))}{category.name}
+                </option>
+              ))}
+            </select>
+            <FieldHelp>연결 후 개별 지식의 카테고리는 목록에서 다시 수정할 수 있습니다.</FieldHelp>
+          </label>
+          <label className="field">
+            <span>최대 연결 수</span>
+            <Input
+              type="number"
+              min="1"
+              max="5000"
+              value={form.max_items}
+              onChange={(event) => updateForm({ max_items: event.target.value })}
+            />
+            <FieldHelp>전체 연결 시 API 페이지 조회 상한입니다.</FieldHelp>
+          </label>
+        </div>
+
+        <div className="form-section">
+          <div className="form-section-title">
+            <CalendarIcon className="size-4" /> 검색 사용 조건
+          </div>
+          <DateRangeTimePicker validFrom={form.valid_from} validUntil={form.valid_until} onChange={updateForm} />
+          <label className="check" style={{ marginTop: 10 }}>
+            <input type="checkbox" checked={form.enabled} onChange={(event) => updateForm({ enabled: event.target.checked })} />
+            답변 후보에 사용
+          </label>
+          <FieldHelp>실패 문서나 보관/만료 FAQ는 연결되더라도 자동으로 미사용 처리됩니다.</FieldHelp>
+        </div>
+
+        {error && <div className="badge red" style={{ justifyContent: 'flex-start', whiteSpace: 'normal', borderRadius: 'var(--radius-md)', padding: 10 }}>{error}</div>}
+        {result && (
+          <div className="row wrap" style={{ gap: 8, padding: 12, borderRadius: 'var(--radius-md)', border: '1px solid var(--border-default)', background: 'var(--bg-subtle)' }}>
+            <span className="badge green">연결 {Number(result.summary?.linked_count || 0).toLocaleString()}건</span>
+            <span className="badge gray">기존 연결 {Number(result.summary?.skipped_count || 0).toLocaleString()}건</span>
+            {Number(result.summary?.error_count || 0) > 0 && <span className="badge red">오류 {Number(result.summary?.error_count || 0).toLocaleString()}건</span>}
+          </div>
+        )}
+      </form>
+    </Modal>
+  )
+}
+
 export function KnowledgeManagement() {
   const user = useAuthStore((state) => state.user)
   const [sourceType, setSourceType] = useState<KnowledgeSourceType>('faq')
@@ -2753,6 +2925,11 @@ export function KnowledgeManagement() {
   const [faqAnswers, setFaqAnswers] = useState<FaqAnswer[]>([])
   const [jobs, setJobs] = useState<Job[]>([])
   const [adding, setAdding] = useState(false)
+  const [linkingExisting, setLinkingExisting] = useState(false)
+  const [existingLinkForm, setExistingLinkForm] = useState(initialExistingLinkForm)
+  const [existingLinkSubmitting, setExistingLinkSubmitting] = useState(false)
+  const [existingLinkError, setExistingLinkError] = useState('')
+  const [existingLinkResult, setExistingLinkResult] = useState<any>(null)
   const [view, setView] = useState<'table' | 'card'>('table')
   const [activeKnowledgeTab, setActiveKnowledgeTab] = useState<'all' | 'faq' | 'document'>('all')
   const [documentStatus, setDocumentStatus] = useState('all')
@@ -3039,6 +3216,7 @@ export function KnowledgeManagement() {
         summary: item.body || answer?.approved_summary || answer?.body || document?.content_summary || item.description || '',
         job,
         ledgerItem: item,
+        linked: true,
         answer,
         document
       }
@@ -3050,7 +3228,7 @@ export function KnowledgeManagement() {
       kind: 'document',
       source: 'LightRAG 문서',
       status: doc.status || 'unknown',
-      category: '문서 원장',
+      category: '원장 미연결',
       enabled: String(doc.status || '').toLowerCase() === 'processed',
       validFrom: null,
       validUntil: null,
@@ -3059,6 +3237,7 @@ export function KnowledgeManagement() {
       updated: doc.updated_at || doc.created_at,
       workspace: effectiveKmsWorkspace,
       summary: doc.content_summary || doc.track_id || '',
+      linked: false,
       document: doc
     }))
 
@@ -3068,7 +3247,7 @@ export function KnowledgeManagement() {
       kind: 'faq',
       source: 'FAQ 답변 API',
       status: answer.status,
-      category: 'FAQ 원장',
+      category: '원장 미연결',
       enabled: !['archived', 'expired'].includes(String(answer.status || '').toLowerCase()),
       validFrom: answer.valid_from,
       validUntil: answer.valid_until,
@@ -3077,6 +3256,7 @@ export function KnowledgeManagement() {
       updated: answer.update_time,
       workspace: effectiveFaqWorkspace,
       summary: answer.approved_summary || answer.body || '',
+      linked: false,
       answer
     }))
 
@@ -3123,10 +3303,95 @@ export function KnowledgeManagement() {
     }
   }, [jobs, knowledgeRows])
 
+  const unlinkedDocumentRows = useMemo(
+    () => knowledgeRows.filter((row) => !row.linked && row.document),
+    [knowledgeRows]
+  )
+  const unlinkedFaqRows = useMemo(
+    () => knowledgeRows.filter((row) => !row.linked && row.answer),
+    [knowledgeRows]
+  )
+  const unlinkedKnowledgeCount = unlinkedDocumentRows.length + unlinkedFaqRows.length
+
   const openSourceCreate = (type: KnowledgeSourceType) => {
     setSourceType(type)
     setFormError('')
     setAdding(true)
+  }
+
+  const openExistingLink = () => {
+    setExistingLinkForm({
+      ...initialExistingLinkForm,
+      include_kms: unlinkedDocumentRows.length > 0,
+      include_faq: unlinkedFaqRows.length > 0
+    })
+    setExistingLinkError('')
+    setExistingLinkResult(null)
+    setLinkingExisting(true)
+  }
+
+  const documentLinkPayload = (doc: KmsDocument) => ({
+    id: doc.id,
+    title: doc.file_path || doc.doc_nm || doc.id,
+    summary: doc.content_summary || doc.track_id || '',
+    status: doc.status || null,
+    metadata: {
+      file_path: doc.file_path || null,
+      doc_nm: doc.doc_nm || null,
+      track_id: doc.track_id || null,
+      content_length: doc.content_length || null,
+      chunks_count: doc.chunks_count || 0,
+      created_at: doc.created_at || null,
+      updated_at: doc.updated_at || null,
+      error_msg: doc.error_msg || null
+    }
+  })
+
+  const faqLinkPayload = (answer: FaqAnswer) => ({
+    id: answer.answer_id,
+    title: answer.title || answer.answer_id,
+    summary: answer.approved_summary || answer.body || '',
+    status: answer.status || null,
+    metadata: {
+      version: answer.version || 1,
+      valid_from: answer.valid_from || null,
+      valid_until: answer.valid_until || null,
+      priority: answer.priority || 0,
+      tags: answer.tags || [],
+      update_time: answer.update_time || null
+    }
+  })
+
+  const submitExistingLink = async (event: FormEvent) => {
+    event.preventDefault()
+    setExistingLinkSubmitting(true)
+    setExistingLinkError('')
+    try {
+      const response = await api.post('/api/knowledge/link-existing', {
+        category_id: existingLinkForm.category_id || null,
+        enabled: existingLinkForm.enabled,
+        valid_from: existingLinkForm.valid_from ? new Date(existingLinkForm.valid_from).toISOString() : null,
+        valid_until: existingLinkForm.valid_until ? new Date(existingLinkForm.valid_until).toISOString() : null,
+        kms_workspace: effectiveKmsWorkspace,
+        faq_workspace: effectiveFaqWorkspace,
+        link_all: existingLinkForm.link_all,
+        include_kms: existingLinkForm.include_kms,
+        include_faq: existingLinkForm.include_faq,
+        max_items: Number(existingLinkForm.max_items || 1000),
+        documents: existingLinkForm.link_all
+          ? []
+          : unlinkedDocumentRows.map((row) => documentLinkPayload(row.document!)),
+        faq_answers: existingLinkForm.link_all
+          ? []
+          : unlinkedFaqRows.map((row) => faqLinkPayload(row.answer!))
+      })
+      setExistingLinkResult(response.data)
+      await load()
+    } catch (error) {
+      setExistingLinkError(apiErrorMessage(error, '기존 지식 연결 중 오류가 발생했습니다.'))
+    } finally {
+      setExistingLinkSubmitting(false)
+    }
   }
 
   const syncRunningJobs = async () => {
@@ -3368,6 +3633,9 @@ export function KnowledgeManagement() {
         <Button type="button" variant="outline" onClick={syncRunningJobs} disabled={syncing}>
           <RefreshCwIcon className={syncing ? 'spin size-4' : 'size-4'} /> 진행 상태 동기화
         </Button>
+        <Button type="button" variant="outline" onClick={openExistingLink}>
+          <LinkIcon className="size-4" /> 기존 지식 연결
+        </Button>
         <div className="seg">
           <button className={view === 'table' ? 'on' : ''} type="button" onClick={() => setView('table')}>
             테이블
@@ -3385,6 +3653,7 @@ export function KnowledgeManagement() {
         {[
           ['전체 지식', knowledgeCounts.all, '건', DatabaseIcon],
           ['답변 후보 사용', knowledgeSummary.activeCount, '건', CheckCircleIcon],
+          ['원장 미연결', unlinkedKnowledgeCount, '건', LinkIcon],
           ['지식화 진행', knowledgeSummary.processingCount, '건', RefreshCwIcon],
           ['실패·롤백', knowledgeSummary.failedCount + knowledgeSummary.rollbackCount, '건', RotateCwIcon]
         ].map(([label, value, unit, Icon]) => (
@@ -3640,6 +3909,19 @@ export function KnowledgeManagement() {
             KMS <span className="mono">{effectiveKmsWorkspace}</span> · FAQ <span className="mono">{effectiveFaqWorkspace}</span>
           </span>
         </div>
+        {unlinkedKnowledgeCount > 0 && (
+          <div style={{ margin: '0 14px 14px', display: 'flex', gap: 10, padding: 12, borderRadius: 'var(--radius-md)', background: 'var(--warning-soft)', color: '#8a5a0a', fontSize: 12.5, lineHeight: 1.5 }}>
+            <LinkIcon className="size-4" style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>
+              현재 목록에 어드민 원장과 연결되지 않은 기존 LightRAG 지식이 {unlinkedKnowledgeCount.toLocaleString()}건 있습니다.
+              연결해야 통합 검색의 카테고리·유효기간 필터 대상에 포함됩니다.
+            </span>
+            <div className="grow" />
+            <Button type="button" size="sm" variant="outline" onClick={openExistingLink}>
+              연결하기
+            </Button>
+          </div>
+        )}
 
         {view === 'table' ? (
           <table className="tbl">
@@ -3661,7 +3943,10 @@ export function KnowledgeManagement() {
               {visibleKnowledgeRows.map((row) => (
                 <tr key={`${row.kind}-${row.id}`}>
                   <td>
-                    <div className="ttl">{row.title}</div>
+                    <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+                      <div className="ttl">{row.title}</div>
+                      {!row.linked && <span className="badge amber">미연결</span>}
+                    </div>
                     <div className="muted mono" style={{ fontSize: 11 }}>{row.id} · {row.workspace}</div>
                     {row.summary && <div className="muted" style={{ maxWidth: 460, marginTop: 4, fontSize: 11.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.summary}</div>}
                     {row.job && (
@@ -3747,6 +4032,7 @@ export function KnowledgeManagement() {
                 <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--fg-primary)', lineHeight: 1.45 }}>{row.title}</div>
                 <div className="row" style={{ gap: 8, marginTop: 6 }}>
                   <span className="muted" style={{ fontSize: 12 }}><FolderIcon className="size-3" /> {row.category}</span>
+                  {!row.linked && <span className="badge amber">미연결</span>}
                   <div className="grow" />
                   <span className="badge outline" style={{ fontSize: 10.5 }}>{row.source}</span>
                 </div>
@@ -3816,6 +4102,20 @@ export function KnowledgeManagement() {
             setAdding(false)
             setFormError('')
           }}
+        />
+      )}
+      {linkingExisting && (
+        <ExistingKnowledgeLinkModal
+          form={existingLinkForm}
+          updateForm={(patch) => setExistingLinkForm((value) => ({ ...value, ...patch }))}
+          categories={categories}
+          unlinkedDocumentCount={unlinkedDocumentRows.length}
+          unlinkedFaqCount={unlinkedFaqRows.length}
+          submitting={existingLinkSubmitting}
+          error={existingLinkError}
+          result={existingLinkResult}
+          onSubmit={submitExistingLink}
+          onClose={() => setLinkingExisting(false)}
         />
       )}
       {documentDetail && <KmsDocumentExplorer detail={documentDetail} onClose={() => setDocumentDetail(null)} />}

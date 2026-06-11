@@ -450,11 +450,11 @@
 }
 
 .date-range-popover {
-  position: absolute;
-  left: 0;
-  bottom: calc(100% + 8px);
-  z-index: 20;
-  width: min(100%, 420px);
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 520px;
+  margin-top: 2px;
   padding: 14px;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-lg);

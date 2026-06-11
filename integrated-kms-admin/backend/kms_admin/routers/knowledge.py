@@ -163,6 +163,30 @@ class FaqCandidateSearchRequest(BaseModel):
     include_candidates: bool = True
 
 
+class ExistingKnowledgeRefRequest(BaseModel):
+    id: str = Field(min_length=1)
+    title: str | None = None
+    summary: str | None = None
+    status: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExistingKnowledgeLinkRequest(BaseModel):
+    tenant_id: str | None = None
+    category_id: str | None = None
+    enabled: bool = True
+    valid_from: datetime | None = None
+    valid_until: datetime | None = None
+    kms_workspace: str | None = None
+    faq_workspace: str | None = None
+    link_all: bool = False
+    include_kms: bool = True
+    include_faq: bool = True
+    documents: list[ExistingKnowledgeRefRequest] = Field(default_factory=list)
+    faq_answers: list[ExistingKnowledgeRefRequest] = Field(default_factory=list)
+    max_items: int = Field(default=1000, ge=1, le=5000)
+
+
 class DocumentDeleteRequest(BaseModel):
     delete_file: bool = False
     delete_llm_cache: bool = False
@@ -535,6 +559,335 @@ async def _create_immediate_doc_refs(item_id: str, workspace: str, response: dic
             item_id,
         )
     return bool(unique_doc_ids)
+
+
+async def _linked_external_ids(
+    *,
+    tenant_id: str,
+    workspace_type: str,
+    workspace: str,
+    ref_type: str,
+) -> set[str]:
+    rows = await db.fetch(
+        """
+        SELECT DISTINCT r.external_id
+        FROM KMS_ADMIN_KNOWLEDGE_ITEMS i
+        JOIN KMS_ADMIN_KNOWLEDGE_REFS r ON r.item_id = i.item_id
+        WHERE i.tenant_id = $1
+          AND r.workspace_type = $2
+          AND r.workspace = $3
+          AND r.ref_type = $4
+        """,
+        tenant_id,
+        workspace_type,
+        workspace,
+        ref_type,
+    )
+    return {str(row["external_id"]) for row in rows if row.get("external_id")}
+
+
+def _document_ref_from_lightrag(doc: dict[str, Any]) -> ExistingKnowledgeRefRequest | None:
+    doc_id = doc.get("id") or doc.get("doc_id")
+    if not doc_id:
+        return None
+    title = doc.get("file_path") or doc.get("doc_nm") or doc.get("title") or str(doc_id)
+    return ExistingKnowledgeRefRequest(
+        id=str(doc_id),
+        title=str(title),
+        summary=doc.get("content_summary") or doc.get("track_id") or "",
+        status=doc.get("status"),
+        metadata={
+            "file_path": doc.get("file_path"),
+            "doc_nm": doc.get("doc_nm"),
+            "track_id": doc.get("track_id"),
+            "content_length": doc.get("content_length"),
+            "chunks_count": doc.get("chunks_count"),
+            "created_at": doc.get("created_at"),
+            "updated_at": doc.get("updated_at"),
+            "error_msg": doc.get("error_msg"),
+        },
+    )
+
+
+def _faq_ref_from_lightrag(answer: dict[str, Any]) -> ExistingKnowledgeRefRequest | None:
+    answer_id = answer.get("answer_id") or answer.get("id")
+    if not answer_id:
+        return None
+    title = answer.get("title") or answer.get("question") or str(answer_id)
+    return ExistingKnowledgeRefRequest(
+        id=str(answer_id),
+        title=str(title),
+        summary=answer.get("approved_summary") or answer.get("body") or answer.get("summary") or "",
+        status=answer.get("status"),
+        metadata={
+            "version": answer.get("version"),
+            "valid_from": answer.get("valid_from"),
+            "valid_until": answer.get("valid_until"),
+            "priority": answer.get("priority"),
+            "tags": answer.get("tags"),
+            "update_time": answer.get("update_time"),
+        },
+    )
+
+
+async def _fetch_existing_kms_documents(workspace: str, max_items: int) -> list[ExistingKnowledgeRefRequest]:
+    page = 1
+    page_size = min(100, max_items)
+    documents: list[ExistingKnowledgeRefRequest] = []
+    while len(documents) < max_items:
+        response = await lightrag_client.request_json(
+            "POST",
+            "/documents/paginated",
+            workspace=workspace,
+            json_body={
+                "page": page,
+                "page_size": page_size,
+                "sort_field": "updated_at",
+                "sort_direction": "desc",
+                "status_filter": None,
+            },
+            timeout=120.0,
+        )
+        refs = [
+            ref
+            for doc in response.get("documents") or []
+            if (ref := _document_ref_from_lightrag(doc)) is not None
+        ]
+        if not refs:
+            break
+        documents.extend(refs[: max_items - len(documents)])
+        pagination = response.get("pagination") or {}
+        total_pages = int(pagination.get("total_pages") or 0)
+        if total_pages and page >= total_pages:
+            break
+        if not total_pages and len(refs) < page_size:
+            break
+        page += 1
+    return documents
+
+
+async def _fetch_existing_faq_answers(workspace: str, max_items: int) -> list[ExistingKnowledgeRefRequest]:
+    page = 1
+    page_size = min(100, max_items)
+    answers: list[ExistingKnowledgeRefRequest] = []
+    while len(answers) < max_items:
+        response = await lightrag_client.request_json(
+            "GET",
+            "/api/answers",
+            workspace=workspace,
+            params={"page": page, "page_size": page_size},
+            timeout=120.0,
+        )
+        refs = [
+            ref
+            for answer in response.get("answers") or []
+            if (ref := _faq_ref_from_lightrag(answer)) is not None
+        ]
+        if not refs:
+            break
+        answers.extend(refs[: max_items - len(answers)])
+        total = int(response.get("total") or 0)
+        if total and page * page_size >= total:
+            break
+        if not total and len(refs) < page_size:
+            break
+        page += 1
+    return answers
+
+
+def _dedupe_refs(refs: list[ExistingKnowledgeRefRequest]) -> list[ExistingKnowledgeRefRequest]:
+    seen: set[str] = set()
+    deduped: list[ExistingKnowledgeRefRequest] = []
+    for ref in refs:
+        if ref.id in seen:
+            continue
+        seen.add(ref.id)
+        deduped.append(ref)
+    return deduped
+
+
+async def _link_existing_ref(
+    *,
+    payload: ExistingKnowledgeLinkRequest,
+    user: dict,
+    ref: ExistingKnowledgeRefRequest,
+    workspace_type: str,
+    workspace: str,
+    ref_type: str,
+) -> str:
+    source_type = "existing_kms_document" if workspace_type == "kms" else "existing_faq_answer"
+    source_status = str(ref.status or "").lower()
+    enabled = payload.enabled
+    if workspace_type == "kms" and source_status and source_status not in {"processed", "ready"}:
+        enabled = False
+    if workspace_type == "faq" and source_status in {"archived", "expired"}:
+        enabled = False
+    item_payload = KnowledgeMetadataRequest(
+        title=ref.title or ref.id,
+        body=ref.summary or "",
+        tenant_id=payload.tenant_id,
+        category_id=payload.category_id,
+        enabled=enabled,
+        valid_from=payload.valid_from,
+        valid_until=payload.valid_until,
+        kms_workspace=payload.kms_workspace,
+        faq_workspace=payload.faq_workspace,
+        metadata={
+            "source_type": source_type,
+            "linked_from_existing_workspace": True,
+            "linked_workspace_type": workspace_type,
+            "linked_workspace": workspace,
+            "linked_external_id": ref.id,
+            "linked_status": ref.status,
+            **(ref.metadata or {}),
+        },
+    )
+    item_id = await _create_item(
+        payload=item_payload,
+        knowledge_type="existing_kms_document" if workspace_type == "kms" else "existing_faq_answer",
+        user=user,
+        status="ready",
+    )
+    await _create_ref(
+        item_id=item_id,
+        ref_type=ref_type,
+        workspace_type=workspace_type,
+        workspace=workspace,
+        external_id=ref.id,
+        metadata={
+            "source_type": source_type,
+            "linked_status": ref.status,
+            **(ref.metadata or {}),
+        },
+    )
+    await _create_job(
+        item_id=item_id,
+        job_type="link_existing_kms_document" if workspace_type == "kms" else "link_existing_faq_answer",
+        response={
+            "message": "Existing LightRAG knowledge linked to admin ledger",
+            "workspace_type": workspace_type,
+            "workspace": workspace,
+            "external_id": ref.id,
+            "source_status": ref.status,
+        },
+        status="completed",
+        progress=100.0,
+    )
+    return item_id
+
+
+@router.post("/link-existing")
+async def link_existing_knowledge(
+    payload: ExistingKnowledgeLinkRequest,
+    request: Request,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    tenant_id = _effective_tenant_id(user, payload.tenant_id)
+    kms_workspace = _effective_kms_workspace(user, payload.kms_workspace)
+    faq_workspace = _effective_faq_workspace(user, payload.faq_workspace)
+    link_payload = payload.model_copy(
+        update={
+            "tenant_id": tenant_id,
+            "kms_workspace": kms_workspace,
+            "faq_workspace": faq_workspace,
+        }
+    )
+    linked: list[dict[str, str]] = []
+    skipped: list[dict[str, str]] = []
+    errors: list[dict[str, str]] = []
+
+    if link_payload.include_kms:
+        document_refs = (
+            await _fetch_existing_kms_documents(kms_workspace, link_payload.max_items)
+            if link_payload.link_all
+            else _dedupe_refs(link_payload.documents)
+        )
+        existing_doc_ids = await _linked_external_ids(
+            tenant_id=tenant_id,
+            workspace_type="kms",
+            workspace=kms_workspace,
+            ref_type="doc_id",
+        )
+        for ref in document_refs:
+            if ref.id in existing_doc_ids:
+                skipped.append({"type": "kms", "id": ref.id, "reason": "already_linked"})
+                continue
+            try:
+                item_id = await _link_existing_ref(
+                    payload=link_payload,
+                    user=user,
+                    ref=ref,
+                    workspace_type="kms",
+                    workspace=kms_workspace,
+                    ref_type="doc_id",
+                )
+            except Exception as exc:
+                errors.append({"type": "kms", "id": ref.id, "reason": str(exc)})
+                continue
+            existing_doc_ids.add(ref.id)
+            linked.append({"type": "kms", "id": ref.id, "item_id": item_id})
+
+    if link_payload.include_faq:
+        answer_refs = (
+            await _fetch_existing_faq_answers(faq_workspace, link_payload.max_items)
+            if link_payload.link_all
+            else _dedupe_refs(link_payload.faq_answers)
+        )
+        existing_answer_ids = await _linked_external_ids(
+            tenant_id=tenant_id,
+            workspace_type="faq",
+            workspace=faq_workspace,
+            ref_type="answer_id",
+        )
+        for ref in answer_refs:
+            if ref.id in existing_answer_ids:
+                skipped.append({"type": "faq", "id": ref.id, "reason": "already_linked"})
+                continue
+            try:
+                item_id = await _link_existing_ref(
+                    payload=link_payload,
+                    user=user,
+                    ref=ref,
+                    workspace_type="faq",
+                    workspace=faq_workspace,
+                    ref_type="answer_id",
+                )
+            except Exception as exc:
+                errors.append({"type": "faq", "id": ref.id, "reason": str(exc)})
+                continue
+            existing_answer_ids.add(ref.id)
+            linked.append({"type": "faq", "id": ref.id, "item_id": item_id})
+
+    await audit_log(
+        request,
+        actor_type="user",
+        actor_id=user["user_id"],
+        action="link_existing_knowledge",
+        tenant_id=tenant_id,
+        target_type="knowledge",
+        target_id=None,
+        detail={
+            "kms_workspace": kms_workspace,
+            "faq_workspace": faq_workspace,
+            "link_all": link_payload.link_all,
+            "linked_count": len(linked),
+            "skipped_count": len(skipped),
+            "error_count": len(errors),
+        },
+    )
+    return {
+        "tenant_id": tenant_id,
+        "kms_workspace": kms_workspace,
+        "faq_workspace": faq_workspace,
+        "linked": linked,
+        "skipped": skipped,
+        "errors": errors,
+        "summary": {
+            "linked_count": len(linked),
+            "skipped_count": len(skipped),
+            "error_count": len(errors),
+        },
+    }
 
 
 @router.get("")
