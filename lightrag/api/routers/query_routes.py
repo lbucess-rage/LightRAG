@@ -156,6 +156,11 @@ class QueryRequest(BaseModel):
         description="If True, includes actual chunk text content in references. Only applies when include_references=True. Useful for evaluation and debugging.",
     )
 
+    allowed_doc_ids: Optional[list[str]] = Field(
+        default=None,
+        description="Optional list of LightRAG document IDs allowed for retrieval. Omitted means unrestricted.",
+    )
+
     highlight_entities: Optional[bool] = Field(
         default=None,
         description="If True, instructs the LLM to highlight entity names in **bold** and relation keywords in *italics* for improved readability.",

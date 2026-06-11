@@ -168,6 +168,12 @@ class QueryParam:
     containing citation information for the retrieved content.
     """
 
+    allowed_doc_ids: list[str] | None = None
+    """Optional list of document IDs allowed for retrieval.
+    When provided, retrieved text chunks outside these full document IDs are removed
+    before building query context. None preserves the existing unrestricted behavior.
+    """
+
     highlight_entities: bool = False
     """If True, instructs the LLM to highlight entity names in bold and relation keywords in italics
     within the response for improved readability."""

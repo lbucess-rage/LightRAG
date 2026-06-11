@@ -1,0 +1,268 @@
+/* =========================================================================
+   LBUCESS Design System — Tokens
+   colors_and_type.css
+
+   사용 방법:
+     <link rel="stylesheet" href="colors_and_type.css" />
+   또는 빌드된 디자인 산출물의 루트 <style> 안에 인라인.
+
+   모든 토큰은 CSS 변수로만 노출하며, 컴포넌트별 스타일은 별도 파일로
+   분리합니다. (ui_kits/<product>/*.css)
+   ========================================================================= */
+
+/* -------------------------------------------------------------------------
+   Webfont — Noto Sans KR (브랜드 지정 / 맑은 고딕 웹 대체)
+   사용자가 업로드한 .ttf 파일을 직접 참조합니다. 9 weights.
+   ------------------------------------------------------------------------- */
+@font-face { font-family: 'Noto Sans KR'; font-style: normal; font-weight: 100; font-display: swap;
+  src: url('fonts/NotoSansKR-Thin.ttf') format('truetype'); }
+@font-face { font-family: 'Noto Sans KR'; font-style: normal; font-weight: 200; font-display: swap;
+  src: url('fonts/NotoSansKR-ExtraLight.ttf') format('truetype'); }
+@font-face { font-family: 'Noto Sans KR'; font-style: normal; font-weight: 300; font-display: swap;
+  src: url('fonts/NotoSansKR-Light.ttf') format('truetype'); }
+@font-face { font-family: 'Noto Sans KR'; font-style: normal; font-weight: 400; font-display: swap;
+  src: url('fonts/NotoSansKR-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Noto Sans KR'; font-style: normal; font-weight: 500; font-display: swap;
+  src: url('fonts/NotoSansKR-Medium.ttf') format('truetype'); }
+@font-face { font-family: 'Noto Sans KR'; font-style: normal; font-weight: 600; font-display: swap;
+  src: url('fonts/NotoSansKR-SemiBold.ttf') format('truetype'); }
+@font-face { font-family: 'Noto Sans KR'; font-style: normal; font-weight: 700; font-display: swap;
+  src: url('fonts/NotoSansKR-Bold.ttf') format('truetype'); }
+@font-face { font-family: 'Noto Sans KR'; font-style: normal; font-weight: 800; font-display: swap;
+  src: url('fonts/NotoSansKR-ExtraBold.ttf') format('truetype'); }
+@font-face { font-family: 'Noto Sans KR'; font-style: normal; font-weight: 900; font-display: swap;
+  src: url('fonts/NotoSansKR-Black.ttf') format('truetype'); }
+
+:root {
+  /* =========================================================
+     1. COLOR — Palette (사용자 지정 10색)
+     ========================================================= */
+  --c-canvas:        #f4f6fa;  /* 화면 베이스 */
+  --c-elevated:      #fafbfd;  /* 카드 표면 */
+  --c-subtle:        #edf0f7;  /* 부드러운 강조 영역 */
+  --c-border:        #dde3ee;  /* 기본 보더 */
+  --c-muted:         #bcc6da;  /* 비활성 / 보조 선 */
+  --c-secondary:     #7a8ba0;  /* 보조 텍스트 */
+  --c-primary-soft:  #3a4560;  /* 본문 텍스트 */
+  --c-primary:       #0f1520;  /* 헤딩 / 핵심 */
+  --c-accent:        #2563eb;  /* 시그니처 블루 */
+  --c-accent-soft:   #eef3ff;  /* 액센트 톤 배경 */
+
+  /* =========================================================
+     2. COLOR — Semantic aliases
+     ========================================================= */
+  /* Surface */
+  --bg-canvas:      var(--c-canvas);
+  --bg-elevated:    var(--c-elevated);
+  --bg-subtle:      var(--c-subtle);
+  --bg-overlay:     rgba(15, 21, 32, 0.40);
+
+  /* Foreground */
+  --fg-primary:      var(--c-primary);
+  --fg-primary-soft: var(--c-primary-soft);
+  --fg-secondary:    var(--c-secondary);
+  --fg-muted:        var(--c-muted);
+  --fg-on-accent:    #ffffff;
+
+  /* Border */
+  --border-default: var(--c-border);
+  --border-subtle:  var(--c-subtle);
+  --border-strong:  var(--c-secondary);
+
+  /* Accent */
+  --accent:         var(--c-accent);
+  --accent-hover:   #1d4fd6;
+  --accent-active:  #1947c0;
+  --accent-soft:    var(--c-accent-soft);
+
+  /* Semantic — 시그니처 팔레트 톤에 맞춰 채도-조정 */
+  --success:        #16a34a;
+  --success-soft:   #e8f6ee;
+  --warning:        #d97706;
+  --warning-soft:   #fdf1de;
+  --danger:         #dc2626;
+  --danger-soft:    #fbe9e9;
+  --info:           var(--c-accent);
+  --info-soft:      var(--c-accent-soft);
+
+  /* =========================================================
+     3. TYPOGRAPHY
+     ========================================================= */
+  --font-sans:
+      'Noto Sans KR',
+      '맑은 고딕', 'Malgun Gothic',
+      'Apple SD Gothic Neo',
+      system-ui, -apple-system, 'Segoe UI', Roboto,
+      'Helvetica Neue', Arial, sans-serif;
+
+  --font-mono:
+      'JetBrains Mono', 'SF Mono', 'Menlo', 'Consolas',
+      'Liberation Mono', monospace;
+
+  /* Type scale (modular, base 16) */
+  --fs-xs:    12px;
+  --fs-sm:    13px;
+  --fs-base:  14px;   /* 운영 툴 기본 (정보 밀도 ↑) */
+  --fs-md:    16px;   /* 마케팅 본문 기본 */
+  --fs-lg:    18px;
+  --fs-xl:    20px;
+  --fs-2xl:   24px;
+  --fs-3xl:   30px;
+  --fs-4xl:   36px;
+  --fs-5xl:   48px;
+  --fs-6xl:   64px;
+
+  /* Line height */
+  --lh-tight:   1.2;
+  --lh-snug:    1.35;
+  --lh-normal:  1.5;
+  --lh-relaxed: 1.65;
+
+  /* Weight */
+  --fw-regular:  400;
+  --fw-medium:   500;
+  --fw-semibold: 600;
+  --fw-bold:     700;
+
+  /* Letter spacing — 한글 가독을 위해 약한 음수 트래킹 */
+  --ls-tight:    -0.02em;
+  --ls-snug:     -0.01em;
+  --ls-normal:    0;
+  --ls-wide:      0.02em;
+  --ls-eyebrow:   0.08em;  /* uppercase eyebrow label */
+
+  /* =========================================================
+     4. SPACING (4px grid)
+     ========================================================= */
+  --space-0:  0;
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-7:  32px;
+  --space-8:  48px;
+  --space-9:  64px;
+  --space-10: 96px;
+
+  /* =========================================================
+     5. RADIUS — slight rounding (사용자 선호)
+     ========================================================= */
+  --radius-xs:   4px;
+  --radius-sm:   6px;
+  --radius-md:   8px;
+  --radius-lg:  12px;
+  --radius-xl:  16px;
+  --radius-2xl: 20px;
+  --radius-pill: 999px;
+
+  /* =========================================================
+     6. SHADOW / ELEVATION (얕은 2-레벨)
+     ========================================================= */
+  --shadow-1:
+      0 1px 2px rgba(15, 21, 32, 0.04),
+      0 1px 1px rgba(15, 21, 32, 0.03);
+  --shadow-2:
+      0 8px 24px rgba(15, 21, 32, 0.08),
+      0 2px 6px  rgba(15, 21, 32, 0.04);
+  --shadow-3:
+      0 24px 56px rgba(15, 21, 32, 0.14),
+      0 4px 12px  rgba(15, 21, 32, 0.06);
+  --shadow-focus: 0 0 0 3px rgba(37, 99, 235, 0.20);
+  --shadow-inset-border: inset 0 0 0 1px var(--border-default);
+
+  /* =========================================================
+     7. MOTION
+     ========================================================= */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.3, 0, 0, 1);
+  --dur-micro:  120ms;
+  --dur-base:   200ms;
+  --dur-modal:  320ms;
+
+  /* =========================================================
+     8. LAYOUT
+     ========================================================= */
+  --container-marketing: 1200px;
+  --container-admin:     1440px;
+  --gnb-height:           64px;
+  --sidebar-width:       240px;
+  --sidebar-collapsed:    64px;
+}
+
+/* =========================================================================
+   GLOBAL / RESET-LITE (의도적 minimal — 디자인 산출물의 root <style>에서 활용)
+   ========================================================================= */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg-canvas);
+  color: var(--fg-primary-soft);
+  font-family: var(--font-sans);
+  font-size: var(--fs-md);
+  line-height: var(--lh-normal);
+  letter-spacing: var(--ls-snug);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--fg-primary);
+}
+
+/* =========================================================================
+   SEMANTIC TYPE CLASSES — utility tier
+   필요할 때 클래스로 적용하거나, 컴포넌트 CSS에서 직접 값 참조.
+   ========================================================================= */
+
+.h1, h1.lb {
+  font-size: var(--fs-5xl);
+  line-height: var(--lh-tight);
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--ls-tight);
+  color: var(--fg-primary);
+  text-wrap: balance;
+}
+.h2, h2.lb {
+  font-size: var(--fs-4xl);
+  line-height: var(--lh-tight);
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--ls-tight);
+  color: var(--fg-primary);
+  text-wrap: balance;
+}
+.h3, h3.lb {
+  font-size: var(--fs-2xl);
+  line-height: var(--lh-snug);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--ls-snug);
+  color: var(--fg-primary);
+}
+.h4, h4.lb {
+  font-size: var(--fs-xl);
+  line-height: var(--lh-snug);
+  font-weight: var(--fw-semibold);
+  color: var(--fg-primary);
+}
+.h5, h5.lb {
+  font-size: var(--fs-lg);
+  line-height: var(--lh-snug);
+  font-weight: var(--fw-semibold);
+  color: var(--fg-primary);
+}
+.body  { font-size: var(--fs-md); line-height: var(--lh-normal); color: var(--fg-primary-soft); }
+.small { font-size: var(--fs-sm); line-height: var(--lh-normal); color: var(--fg-secondary); }
+.micro { font-size: var(--fs-xs); line-height: var(--lh-normal); color: var(--fg-secondary); }
+.code  { font-family: var(--font-mono); font-size: var(--fs-sm); }
+.num   { font-variant-numeric: tabular-nums; }
+.eyebrow {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
+  color: var(--c-secondary);
+}

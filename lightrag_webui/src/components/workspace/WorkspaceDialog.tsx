@@ -91,8 +91,8 @@ export default function WorkspaceDialog({ mode, open, onOpenChange }: WorkspaceD
           workspace_id: workspaceId,
           name,
           description: description || undefined,
+          workspace_mode: workspaceMode,
           metadata: {
-            workspace_mode: workspaceMode,
             ...(workspaceMode !== 'kms'
               ? {
                 answer_catalog: {
@@ -116,23 +116,20 @@ export default function WorkspaceDialog({ mode, open, onOpenChange }: WorkspaceD
       }
 
       try {
-        const nextMetadata = {
-          ...(selectedWorkspace?.metadata || {}),
-          workspace_mode: workspaceMode,
-          ...(workspaceMode !== 'kms'
-            ? {
-              answer_catalog: {
-                ...(selectedWorkspace?.metadata?.answer_catalog || {}),
-                default_lookup_mode: selectedWorkspace?.metadata?.answer_catalog?.default_lookup_mode || 'hybrid_fast',
-                structured_lookup_enabled: selectedWorkspace?.metadata?.answer_catalog?.structured_lookup_enabled ?? true,
-                default_display_policy: selectedWorkspace?.metadata?.answer_catalog?.default_display_policy || 'both',
-              },
-            }
-            : {}),
+        const nextMetadata = { ...(selectedWorkspace?.metadata || {}) }
+        delete nextMetadata.workspace_mode
+        if (workspaceMode !== 'kms') {
+          nextMetadata.answer_catalog = {
+            ...(selectedWorkspace?.metadata?.answer_catalog || {}),
+            default_lookup_mode: selectedWorkspace?.metadata?.answer_catalog?.default_lookup_mode || 'hybrid_fast',
+            structured_lookup_enabled: selectedWorkspace?.metadata?.answer_catalog?.structured_lookup_enabled ?? true,
+            default_display_policy: selectedWorkspace?.metadata?.answer_catalog?.default_display_policy || 'both',
+          }
         }
         await updateExistingWorkspace(selectedWorkspace!.workspace_id, {
           name,
           description: description || undefined,
+          workspace_mode: workspaceMode,
           metadata: nextMetadata,
         })
         toast.success(t('workspace.updated'))
