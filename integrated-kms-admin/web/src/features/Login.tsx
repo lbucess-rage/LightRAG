@@ -3,6 +3,7 @@ import { LockIcon, UsersIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
+import { publicAsset } from '@/lib/assets'
 import { useAuthStore } from '@/stores/auth'
 
 export default function Login() {
@@ -33,7 +34,7 @@ export default function Login() {
     >
       <div className="fadein" style={{ width: '100%', maxWidth: 400 }}>
         <div className="col" style={{ alignItems: 'center', marginBottom: 22 }}>
-          <img src="/assets/logo-lbucess.png" alt="LBUCESS" style={{ height: 38 }} />
+          <img src={publicAsset('assets/logo-lbucess.png')} alt="LBUCESS" style={{ height: 38 }} />
         </div>
         <div className="card" style={{ padding: 30, boxShadow: 'var(--shadow-2)' }}>
           <div style={{ textAlign: 'center', marginBottom: 22 }}>

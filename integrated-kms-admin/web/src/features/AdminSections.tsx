@@ -556,6 +556,12 @@ function shortKoreanDateTime(value?: string) {
   return `${date.getFullYear()}.${pad2(date.getMonth() + 1)}.${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`
 }
 
+function formatFileSize(size: number) {
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / 1024 / 1024).toFixed(1)} MB`
+}
+
 function FormSection({
   title,
   description,
@@ -1077,6 +1083,7 @@ function KnowledgeCreateModal({
   setSourceType,
   form,
   updateForm,
+  file,
   setFile,
   categories,
   formError,
@@ -1091,6 +1098,16 @@ function KnowledgeCreateModal({
   const activeSource = knowledgeSources.find((source) => source.type === sourceType) || knowledgeSources[0]
   const ActiveIcon = activeSource.icon
   const showPromptFields = ['url', 'url_batch', 'board', 'quick_image', 'multimodal'].includes(sourceType)
+  const fileAccept = sourceType === 'quick_image'
+    ? 'image/*'
+    : sourceType === 'multimodal'
+      ? '.pdf,.doc,.docx,.ppt,.pptx,.png,.jpg,.jpeg,.webp,.tif,.tiff'
+      : '.pdf,.doc,.docx,.txt,.md,.csv,.xlsx,.ppt,.pptx'
+  const fileHelp = sourceType === 'quick_image'
+    ? '이미지 1장을 VLM 기반 quick image 지식으로 등록합니다.'
+    : sourceType === 'multimodal'
+      ? '이미지, 표, 수식이 포함된 문서를 멀티모달 지식으로 처리합니다.'
+      : '문서 파일을 선택하면 LightRAG 문서 업로드 작업이 생성됩니다.'
 
   return (
     <Modal
@@ -1398,10 +1415,35 @@ function KnowledgeCreateModal({
         )}
 
         {requiresFile && (
-          <label className="field">
+          <div className="field">
             <span>파일</span>
-            <Input type="file" onChange={(event) => setFile(event.target.files?.[0] || null)} />
-          </label>
+            <label className={`file-picker${file ? ' has-file' : ''}`}>
+              <input
+                key={file ? `${file.name}-${file.size}-${file.lastModified}` : 'empty-file'}
+                className="file-picker-input"
+                type="file"
+                aria-label="파일 선택"
+                accept={fileAccept}
+                onChange={(event) => setFile(event.target.files?.[0] || null)}
+              />
+              <span className="file-picker-icon">
+                <UploadIcon className="size-5" />
+              </span>
+              <span className="file-picker-body">
+                <b>{file ? file.name : '파일 선택'}</b>
+                <small>{file ? `${formatFileSize(file.size)} · 다시 선택하려면 클릭` : '클릭해서 로컬 파일을 선택하세요.'}</small>
+              </span>
+              <span className="file-picker-action">찾아보기</span>
+            </label>
+            <div className="row" style={{ justifyContent: 'space-between', gap: 8 }}>
+              <FieldHelp>{fileHelp}</FieldHelp>
+              {file && (
+                <Button type="button" size="sm" variant="ghost" onClick={() => setFile(null)}>
+                  선택 해제
+                </Button>
+              )}
+            </div>
+          </div>
         )}
 
         {showPromptFields && (

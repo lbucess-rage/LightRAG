@@ -11,4 +11,6 @@ test('knowledge create modal explains prompts and validity settings', () => {
   expect(source).toContain('title="검색 사용 조건"')
   expect(source).toContain('필드 매핑 JSON')
   expect(source).toContain('Header JSON')
+  expect(source).toContain('className={`file-picker')
+  expect(source).toContain('파일 선택')
 })

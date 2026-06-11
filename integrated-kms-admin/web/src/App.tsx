@@ -18,6 +18,7 @@ import { Toaster } from 'sonner'
 import Login from '@/features/Login'
 import IntegratedSearch from '@/features/IntegratedSearch'
 import { Categories, ExternalClients, Jobs, KnowledgeManagement, Stats, SystemStatus, Tenants, Users } from '@/features/AdminSections'
+import { publicAsset } from '@/lib/assets'
 import { useAuthStore } from '@/stores/auth'
 import { NavKey, canSeeNav, navGroups, navItems } from '@/navigation'
 
@@ -154,8 +155,8 @@ export default function App() {
     <div className="app" data-collapsed={collapsed}>
       <aside className="sidebar">
         <div className="sb-brand">
-          <img src="/assets/logo-lbucess.png" alt="LBUCESS" className="sb-logo" />
-          <img src="/assets/logo-lbucess-mark.png" alt="LBUCESS" className="sb-mark-only" />
+          <img src={publicAsset('assets/logo-lbucess.png')} alt="LBUCESS" className="sb-logo" />
+          <img src={publicAsset('assets/logo-lbucess-mark.png')} alt="LBUCESS" className="sb-mark-only" />
         </div>
         <nav className="sb-nav">
           {navGroups.map((group) => (
