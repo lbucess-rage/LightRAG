@@ -1620,6 +1620,7 @@ export type WorkspaceInfo = {
   document_count: number
   entity_count: number
   relation_count: number
+  workspace_mode?: WorkspaceMode
   metadata?: Record<string, any>
   create_time?: number
   update_time?: number
@@ -1629,7 +1630,7 @@ export type WorkspaceInfo = {
 export type WorkspaceMode = 'kms' | 'answer_catalog' | 'hybrid'
 
 export const getWorkspaceMode = (workspace?: WorkspaceInfo | null): WorkspaceMode => {
-  const mode = workspace?.metadata?.workspace_mode
+  const mode = workspace?.workspace_mode || workspace?.metadata?.workspace_mode
   if (mode === 'answer_catalog' || mode === 'hybrid' || mode === 'kms') return mode
   return 'kms'
 }
@@ -1645,13 +1646,21 @@ export type WorkspaceCreateRequest = {
   workspace_id: string
   name: string
   description?: string
+  workspace_mode?: WorkspaceMode
   metadata?: Record<string, any>
 }
 
 export type WorkspaceUpdateRequest = {
   name?: string
   description?: string
+  workspace_mode?: WorkspaceMode
   metadata?: Record<string, any>
+}
+
+export type WorkspaceListFilters = {
+  search?: string
+  workspace_mode?: WorkspaceMode | 'all'
+  metadata_filters?: Record<string, unknown>
 }
 
 export type WorkspaceStatsResponse = {
@@ -1686,28 +1695,43 @@ export type CopyDataRequest = {
  */
 const WORKSPACE_LIST_DEDUPE_MS = 1500
 const WORKSPACE_API_TIMEOUT_MS = 10000
-let workspaceListPromise: Promise<WorkspaceListResponse> | null = null
+let workspaceListPromise: { key: string; promise: Promise<WorkspaceListResponse> } | null = null
 let workspaceListCache: { key: string; timestamp: number; data: WorkspaceListResponse } | null = null
 
 export const getWorkspaces = async (
   page: number = 1,
   pageSize: number = 50,
-  force: boolean = false
+  force: boolean = false,
+  filters: WorkspaceListFilters = {}
 ): Promise<WorkspaceListResponse> => {
-  const key = `${page}:${pageSize}`
+  const params = new URLSearchParams()
+  params.set('page', String(page))
+  params.set('page_size', String(pageSize))
+  if (filters.search?.trim()) {
+    params.set('search', filters.search.trim())
+  }
+  if (filters.workspace_mode && filters.workspace_mode !== 'all') {
+    params.set('workspace_mode', filters.workspace_mode)
+  }
+  Object.entries(filters.metadata_filters || {}).forEach(([key, value]) => {
+    const serializedValue = typeof value === 'string' ? value : JSON.stringify(value)
+    params.append('metadata_filter', `${key}=${serializedValue}`)
+  })
+
+  const key = params.toString()
   const now = Date.now()
 
   if (!force && workspaceListCache?.key === key && now - workspaceListCache.timestamp < WORKSPACE_LIST_DEDUPE_MS) {
     return workspaceListCache.data
   }
 
-  if (!force && workspaceListPromise) {
-    return workspaceListPromise
+  if (!force && workspaceListPromise?.key === key) {
+    return workspaceListPromise.promise
   }
 
-  workspaceListPromise = axiosInstance
+  const promise = axiosInstance
     .get('/workspaces', {
-      params: { page, page_size: pageSize },
+      params,
       timeout: WORKSPACE_API_TIMEOUT_MS,
     })
     .then((response) => {
@@ -1715,10 +1739,13 @@ export const getWorkspaces = async (
       return response.data
     })
     .finally(() => {
-      workspaceListPromise = null
+      if (workspaceListPromise?.key === key) {
+        workspaceListPromise = null
+      }
     })
 
-  return workspaceListPromise
+  workspaceListPromise = { key, promise }
+  return promise
 }
 
 /**

@@ -1,9 +1,8 @@
-"""
-This module contains all workspace-related routes for the LightRAG API.
-Allows managing workspaces for multi-tenant data isolation.
-"""
+"""Workspace management routes for multi-tenant data isolation."""
 
-from typing import Optional
+import json
+import re
+from typing import Any, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
@@ -15,6 +14,10 @@ router = APIRouter(
     prefix="/workspaces",
     tags=["workspaces"],
 )
+
+WorkspaceMode = Literal["kms", "answer_catalog", "hybrid"]
+VALID_WORKSPACE_MODES = {"kms", "answer_catalog", "hybrid"}
+METADATA_FILTER_KEY_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 # =====================================================
@@ -43,9 +46,13 @@ class WorkspaceCreate(BaseModel):
         max_length=1000,
         description="Optional description of the workspace",
     )
+    workspace_mode: Optional[WorkspaceMode] = Field(
+        default=None,
+        description="Workspace mode. Stored as a first-class column.",
+    )
     metadata: Optional[dict] = Field(
         default=None,
-        description="Optional JSON metadata for the workspace",
+        description="Optional JSON metadata for the workspace. Do not include workspace_mode.",
     )
 
 
@@ -63,9 +70,13 @@ class WorkspaceUpdate(BaseModel):
         max_length=1000,
         description="New description of the workspace",
     )
+    workspace_mode: Optional[WorkspaceMode] = Field(
+        default=None,
+        description="New workspace mode",
+    )
     metadata: Optional[dict] = Field(
         default=None,
-        description="New JSON metadata for the workspace",
+        description="New JSON metadata for the workspace. Do not include workspace_mode.",
     )
 
 
@@ -79,6 +90,7 @@ class WorkspaceResponse(BaseModel):
     document_count: int = 0
     entity_count: int = 0
     relation_count: int = 0
+    workspace_mode: WorkspaceMode = "kms"
     metadata: Optional[dict] = None
     create_time: Optional[int] = None
     update_time: Optional[int] = None
@@ -225,6 +237,100 @@ ANSWER_CATALOG_COPY_TABLES = [
 ANSWER_CATALOG_TABLE_NAMES = [item["table"] for item in ANSWER_CATALOG_COPY_TABLES]
 
 
+def _normalize_workspace_mode(value: Any, metadata: dict | None = None) -> WorkspaceMode:
+    if value in VALID_WORKSPACE_MODES:
+        return value
+    metadata_mode = metadata.get("workspace_mode") if metadata else None
+    if metadata_mode in VALID_WORKSPACE_MODES:
+        return metadata_mode
+    return "kms"
+
+
+def _split_workspace_metadata(
+    metadata: Optional[dict], workspace_mode: Optional[WorkspaceMode] = None
+) -> tuple[WorkspaceMode, dict]:
+    next_metadata = dict(metadata or {})
+    next_mode = _normalize_workspace_mode(workspace_mode, next_metadata)
+    next_metadata.pop("workspace_mode", None)
+    return next_mode, next_metadata
+
+
+def _clean_workspace_metadata(metadata: Any) -> dict:
+    if not isinstance(metadata, dict):
+        return {}
+    next_metadata = dict(metadata)
+    next_metadata.pop("workspace_mode", None)
+    return next_metadata
+
+
+def _workspace_response(row: dict, *, is_busy: bool = False) -> WorkspaceResponse:
+    metadata = _clean_workspace_metadata(row.get("metadata"))
+    return WorkspaceResponse(
+        workspace_id=row["workspace_id"],
+        name=row["name"],
+        description=row.get("description"),
+        is_default=row.get("is_default", False),
+        document_count=row.get("document_count", 0),
+        entity_count=row.get("entity_count", 0),
+        relation_count=row.get("relation_count", 0),
+        workspace_mode=_normalize_workspace_mode(row.get("workspace_mode"), metadata),
+        metadata=metadata,
+        create_time=row.get("create_time"),
+        update_time=row.get("update_time"),
+        is_busy=is_busy,
+    )
+
+
+def _parse_metadata_filter_value(value: str) -> Any:
+    trimmed = value.strip()
+    if not trimmed:
+        return ""
+    try:
+        return json.loads(trimmed)
+    except json.JSONDecodeError:
+        return trimmed
+
+
+def _merge_metadata_filter(target: dict, dotted_key: str, value: Any) -> None:
+    if not METADATA_FILTER_KEY_PATTERN.match(dotted_key):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid metadata filter key '{dotted_key}'",
+        )
+    current = target
+    parts = [part for part in dotted_key.split(".") if part]
+    if not parts:
+        raise HTTPException(status_code=422, detail="Metadata filter key is required")
+    for part in parts[:-1]:
+        existing = current.get(part)
+        if existing is not None and not isinstance(existing, dict):
+            raise HTTPException(
+                status_code=422,
+                detail=f"Conflicting metadata filter path '{dotted_key}'",
+            )
+        current = current.setdefault(part, {})
+    current[parts[-1]] = value
+
+
+def _parse_metadata_filters(metadata_filter: Optional[list[str]]) -> dict | None:
+    if not metadata_filter:
+        return None
+
+    filters: dict[str, Any] = {}
+    for raw_filter in metadata_filter:
+        if "=" in raw_filter:
+            key, value = raw_filter.split("=", 1)
+        elif ":" in raw_filter:
+            key, value = raw_filter.split(":", 1)
+        else:
+            raise HTTPException(
+                status_code=422,
+                detail="metadata_filter must use key=value format",
+            )
+        _merge_metadata_filter(filters, key.strip(), _parse_metadata_filter_value(value))
+    return filters or None
+
+
 # =====================================================
 # Route Factory
 # =====================================================
@@ -303,31 +409,24 @@ def create_workspace_routes(rag, api_key: Optional[str] = None):
                     detail=f"Workspace '{request.workspace_id}' already exists",
                 )
 
+            workspace_mode, metadata = _split_workspace_metadata(
+                request.metadata, request.workspace_mode
+            )
+
             # Create workspace
             result = await db.create_workspace(
                 workspace_id=request.workspace_id,
                 name=request.name,
                 description=request.description,
                 is_default=False,
-                metadata=request.metadata,
+                workspace_mode=workspace_mode,
+                metadata=metadata,
             )
 
             if not result:
                 raise HTTPException(status_code=500, detail="Failed to create workspace")
 
-            return WorkspaceResponse(
-                workspace_id=result["workspace_id"],
-                name=result["name"],
-                description=result.get("description"),
-                is_default=result.get("is_default", False),
-                document_count=result.get("document_count", 0),
-                entity_count=result.get("entity_count", 0),
-                relation_count=result.get("relation_count", 0),
-                metadata=result.get("metadata"),
-                create_time=result.get("create_time"),
-                update_time=result.get("update_time"),
-                is_busy=False,
-            )
+            return _workspace_response(result, is_busy=False)
         except HTTPException:
             raise
         except Exception as e:
@@ -344,6 +443,18 @@ def create_workspace_routes(rag, api_key: Optional[str] = None):
     async def list_workspaces(
         page: int = Query(default=1, ge=1, description="Page number"),
         page_size: int = Query(default=20, ge=1, le=100, description="Items per page"),
+        search: Optional[str] = Query(
+            default=None,
+            description="Search workspace ID, name, or description",
+        ),
+        workspace_mode: Optional[WorkspaceMode] = Query(
+            default=None,
+            description="Filter by workspace mode",
+        ),
+        metadata_filter: Optional[list[str]] = Query(
+            default=None,
+            description="Metadata filters in key=value format. Repeat for AND conditions. Dot paths are supported.",
+        ),
     ):
         """List all workspaces with pagination."""
         db = await get_db()
@@ -352,27 +463,20 @@ def create_workspace_routes(rag, api_key: Optional[str] = None):
 
         try:
             offset = (page - 1) * page_size
-            workspaces, total = await db.list_workspaces(limit=page_size, offset=offset)
+            metadata_filters = _parse_metadata_filters(metadata_filter)
+            workspaces, total = await db.list_workspaces(
+                limit=page_size,
+                offset=offset,
+                search=search,
+                workspace_mode=workspace_mode,
+                metadata_filters=metadata_filters,
+            )
 
             # Add busy status for each workspace
             workspace_responses = []
             for ws in workspaces:
                 is_busy, _ = await get_workspace_busy_status(ws["workspace_id"])
-                workspace_responses.append(
-                    WorkspaceResponse(
-                        workspace_id=ws["workspace_id"],
-                        name=ws["name"],
-                        description=ws.get("description"),
-                        is_default=ws.get("is_default", False),
-                        document_count=ws.get("document_count", 0),
-                        entity_count=ws.get("entity_count", 0),
-                        relation_count=ws.get("relation_count", 0),
-                        metadata=ws.get("metadata"),
-                        create_time=ws.get("create_time"),
-                        update_time=ws.get("update_time"),
-                        is_busy=is_busy,
-                    )
-                )
+                workspace_responses.append(_workspace_response(ws, is_busy=is_busy))
 
             return WorkspaceListResponse(
                 workspaces=workspace_responses,
@@ -380,6 +484,8 @@ def create_workspace_routes(rag, api_key: Optional[str] = None):
                 page=page,
                 page_size=page_size,
             )
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Failed to list workspaces: {e}")
             raise HTTPException(status_code=500, detail=str(e))
@@ -407,19 +513,7 @@ def create_workspace_routes(rag, api_key: Optional[str] = None):
 
             is_busy, _ = await get_workspace_busy_status(workspace_id)
 
-            return WorkspaceResponse(
-                workspace_id=result["workspace_id"],
-                name=result["name"],
-                description=result.get("description"),
-                is_default=result.get("is_default", False),
-                document_count=result.get("document_count", 0),
-                entity_count=result.get("entity_count", 0),
-                relation_count=result.get("relation_count", 0),
-                metadata=result.get("metadata"),
-                create_time=result.get("create_time"),
-                update_time=result.get("update_time"),
-                is_busy=is_busy,
-            )
+            return _workspace_response(result, is_busy=is_busy)
         except HTTPException:
             raise
         except Exception as e:
@@ -447,12 +541,23 @@ def create_workspace_routes(rag, api_key: Optional[str] = None):
                     detail=f"Workspace '{workspace_id}' not found",
                 )
 
+            current_workspace = await db.get_workspace(workspace_id)
+            workspace_mode = request.workspace_mode or (
+                current_workspace.get("workspace_mode") if current_workspace else None
+            )
+            metadata = request.metadata
+            if metadata is not None:
+                workspace_mode, metadata = _split_workspace_metadata(
+                    metadata, workspace_mode
+                )
+
             # Update workspace
             result = await db.update_workspace(
                 workspace_id=workspace_id,
                 name=request.name,
                 description=request.description,
-                metadata=request.metadata,
+                workspace_mode=workspace_mode,
+                metadata=metadata,
             )
 
             if not result:
@@ -460,19 +565,7 @@ def create_workspace_routes(rag, api_key: Optional[str] = None):
 
             is_busy, _ = await get_workspace_busy_status(workspace_id)
 
-            return WorkspaceResponse(
-                workspace_id=result["workspace_id"],
-                name=result["name"],
-                description=result.get("description"),
-                is_default=result.get("is_default", False),
-                document_count=result.get("document_count", 0),
-                entity_count=result.get("entity_count", 0),
-                relation_count=result.get("relation_count", 0),
-                metadata=result.get("metadata"),
-                create_time=result.get("create_time"),
-                update_time=result.get("update_time"),
-                is_busy=is_busy,
-            )
+            return _workspace_response(result, is_busy=is_busy)
         except HTTPException:
             raise
         except Exception as e:
@@ -661,19 +754,8 @@ def create_workspace_routes(rag, api_key: Optional[str] = None):
 
             is_busy, _ = await get_workspace_busy_status(default_ws["workspace_id"])
 
-            return WorkspaceResponse(
-                workspace_id=default_ws["workspace_id"],
-                name=default_ws["name"],
-                description=default_ws.get("description"),
-                is_default=True,
-                document_count=default_ws.get("document_count", 0),
-                entity_count=default_ws.get("entity_count", 0),
-                relation_count=default_ws.get("relation_count", 0),
-                metadata=default_ws.get("metadata"),
-                create_time=default_ws.get("create_time"),
-                update_time=default_ws.get("update_time"),
-                is_busy=is_busy,
-            )
+            default_ws["is_default"] = True
+            return _workspace_response(default_ws, is_busy=is_busy)
         except HTTPException:
             raise
         except Exception as e:

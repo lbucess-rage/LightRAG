@@ -128,7 +128,7 @@ async def _workspace_mode_from_db(db, workspace: str) -> str:
         workspace_row = await db.get_workspace(workspace)
     else:
         workspace_row = await db.query(
-            "SELECT metadata FROM LIGHTRAG_WORKSPACES WHERE workspace_id = $1",
+            "SELECT workspace_mode, metadata FROM LIGHTRAG_WORKSPACES WHERE workspace_id = $1",
             [workspace],
         )
 
@@ -138,7 +138,7 @@ async def _workspace_mode_from_db(db, workspace: str) -> str:
     metadata = _coerce_json(workspace_row.get("metadata"), {})
     if not isinstance(metadata, dict):
         metadata = {}
-    mode = metadata.get("workspace_mode") or "kms"
+    mode = workspace_row.get("workspace_mode") or metadata.get("workspace_mode") or "kms"
     return mode if mode in VALID_WORKSPACE_MODES else "kms"
 
 
@@ -450,6 +450,10 @@ class ResolveRequest(BaseModel):
     )
     vector_top_k: int = Field(default=8, ge=1, le=50)
     llm_candidate_count: int = Field(default=5, ge=1, le=10)
+    allowed_answer_ids: Optional[list[str]] = Field(
+        default=None,
+        description="Optional answer IDs allowed for candidate selection. Omitted means unrestricted.",
+    )
 
 
 class ResolveCandidate(BaseModel):
@@ -480,6 +484,7 @@ class AnswerSearchRequest(BaseModel):
     retrieval_mode: RetrievalMode = "keyword"
     vector_top_k: int = Field(default=8, ge=1, le=50)
     llm_candidate_count: int = Field(default=5, ge=1, le=10)
+    allowed_answer_ids: Optional[list[str]] = None
     response_policy: Optional[DisplayPolicy] = None
     include_candidates: bool = True
 
@@ -4381,6 +4386,11 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
     ) -> ResolveResponse:
         started = time.time()
         status_filter = ["published"] if not payload.include_drafts else ["draft", "published"]
+        allowed_answer_ids = (
+            [str(answer_id) for answer_id in payload.allowed_answer_ids if str(answer_id).strip()]
+            if payload.allowed_answer_ids is not None
+            else None
+        )
         rows = await db.query(
             """
             SELECT workspace, answer_id, title, body, approved_summary, content_format,
@@ -4391,10 +4401,11 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
               AND status = ANY($2::text[])
               AND (valid_from IS NULL OR valid_from <= NOW())
               AND (valid_until IS NULL OR valid_until >= NOW())
+              AND ($3::text[] IS NULL OR answer_id = ANY($3::text[]))
             ORDER BY priority DESC, update_time DESC
             LIMIT 500
             """,
-            [workspace, status_filter],
+            [workspace, status_filter, allowed_answer_ids],
             multirows=True,
         )
         guidance_rows = await db.query(
@@ -4571,6 +4582,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 retrieval_mode=payload.retrieval_mode,
                 vector_top_k=payload.vector_top_k,
                 llm_candidate_count=payload.llm_candidate_count,
+                allowed_answer_ids=payload.allowed_answer_ids,
             ),
             event_type="search",
             event_metadata={

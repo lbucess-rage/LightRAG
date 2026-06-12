@@ -3361,6 +3361,7 @@ async def kg_query(
         ll_keywords_str,
         query_param.user_prompt or "",
         query_param.enable_rerank,
+        json.dumps(sorted(_allowed_doc_id_set(query_param) or []), ensure_ascii=False),
     )
 
     cached_result = await handle_cache(
@@ -3395,6 +3396,7 @@ async def kg_query(
                 "ll_keywords": ll_keywords_str,
                 "user_prompt": query_param.user_prompt or "",
                 "enable_rerank": query_param.enable_rerank,
+                "allowed_doc_ids": sorted(_allowed_doc_id_set(query_param) or []),
             }
             await save_to_cache(
                 hashing_kv,
@@ -3597,6 +3599,9 @@ async def _get_vector_context(
     try:
         # Use chunk_top_k if specified, otherwise fall back to top_k
         search_top_k = query_param.chunk_top_k or query_param.top_k
+        allowed_doc_ids = _allowed_doc_id_set(query_param)
+        if allowed_doc_ids is not None:
+            search_top_k = max(search_top_k, min(search_top_k * 5, 200))
         cosine_threshold = chunks_vdb.cosine_better_than_threshold
 
         results = await chunks_vdb.query(
@@ -3610,6 +3615,8 @@ async def _get_vector_context(
 
         valid_chunks = []
         for result in results:
+            if allowed_doc_ids is not None and result.get("full_doc_id") not in allowed_doc_ids:
+                continue
             if "content" in result:
                 chunk_with_metadata = {
                     "content": result["content"],
@@ -3635,6 +3642,19 @@ async def _get_vector_context(
     except Exception as e:
         logger.error(f"Error in _get_vector_context: {e}")
         return []
+
+
+def _allowed_doc_id_set(query_param: QueryParam | None) -> set[str] | None:
+    if not query_param or query_param.allowed_doc_ids is None:
+        return None
+    return {str(doc_id) for doc_id in query_param.allowed_doc_ids if str(doc_id).strip()}
+
+
+def _chunk_allowed_for_query(chunk: dict, query_param: QueryParam | None) -> bool:
+    allowed_doc_ids = _allowed_doc_id_set(query_param)
+    if allowed_doc_ids is None:
+        return True
+    return chunk.get("full_doc_id") in allowed_doc_ids
 
 
 async def _perform_kg_search(
@@ -4073,7 +4093,7 @@ async def _merge_all_chunks(
         if i < len(vector_chunks):
             chunk = vector_chunks[i]
             chunk_id = chunk.get("chunk_id") or chunk.get("id")
-            if chunk_id and chunk_id not in seen_chunk_ids:
+            if chunk_id and chunk_id not in seen_chunk_ids and _chunk_allowed_for_query(chunk, query_param):
                 seen_chunk_ids.add(chunk_id)
                 chunk_data = {
                     "content": chunk["content"],
@@ -4092,7 +4112,7 @@ async def _merge_all_chunks(
         if i < len(entity_chunks):
             chunk = entity_chunks[i]
             chunk_id = chunk.get("chunk_id") or chunk.get("id")
-            if chunk_id and chunk_id not in seen_chunk_ids:
+            if chunk_id and chunk_id not in seen_chunk_ids and _chunk_allowed_for_query(chunk, query_param):
                 seen_chunk_ids.add(chunk_id)
                 chunk_data = {
                     "content": chunk["content"],
@@ -4111,7 +4131,7 @@ async def _merge_all_chunks(
         if i < len(relation_chunks):
             chunk = relation_chunks[i]
             chunk_id = chunk.get("chunk_id") or chunk.get("id")
-            if chunk_id and chunk_id not in seen_chunk_ids:
+            if chunk_id and chunk_id not in seen_chunk_ids and _chunk_allowed_for_query(chunk, query_param):
                 seen_chunk_ids.add(chunk_id)
                 chunk_data = {
                     "content": chunk["content"],
@@ -5234,6 +5254,7 @@ async def naive_query(
         query_param.max_total_tokens,
         query_param.user_prompt or "",
         query_param.enable_rerank,
+        json.dumps(sorted(_allowed_doc_id_set(query_param) or []), ensure_ascii=False),
     )
     cached_result = await handle_cache(
         hashing_kv, args_hash, user_query, query_param.mode, cache_type="query"
@@ -5264,6 +5285,7 @@ async def naive_query(
                 "max_total_tokens": query_param.max_total_tokens,
                 "user_prompt": query_param.user_prompt or "",
                 "enable_rerank": query_param.enable_rerank,
+                "allowed_doc_ids": sorted(_allowed_doc_id_set(query_param) or []),
             }
             await save_to_cache(
                 hashing_kv,

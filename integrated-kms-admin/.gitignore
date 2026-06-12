@@ -1,0 +1,13 @@
+backend/.pytest_cache/
+backend/.ruff_cache/
+backend/.venv/
+backend/*.egg-info/
+**/__pycache__/
+.DS_Store
+/screenshots/
+logs/
+web/dist/
+web/node_modules/
+web/public/admin/prototype/
+
+/*-verified.png

@@ -1501,17 +1501,45 @@ class PostgreSQLDB:
             try:
                 await self.execute(TABLES[table_name]["ddl"])
                 logger.info(f"Successfully created {table_name} table")
-
-                # Create index
-                try:
-                    index_sql = f"CREATE INDEX idx_{table_name.lower()}_is_default ON {table_name}(is_default)"
-                    await self.execute(index_sql)
-                    logger.info(f"Created index on {table_name}")
-                except Exception as e:
-                    logger.warning(f"Failed to create index on {table_name}: {e}")
             except Exception as e:
                 logger.error(f"Failed to create {table_name} table: {e}")
                 return
+
+        # Ensure new workspace metadata columns/indexes exist for older deployments.
+        try:
+            await self.execute(
+                f"""
+                ALTER TABLE {table_name}
+                ADD COLUMN IF NOT EXISTS workspace_mode VARCHAR(32) NOT NULL DEFAULT 'kms'
+                """
+            )
+            await self.execute(
+                f"""
+                UPDATE {table_name}
+                SET workspace_mode = CASE
+                        WHEN metadata->>'workspace_mode' IN ('kms', 'answer_catalog', 'hybrid')
+                            THEN metadata->>'workspace_mode'
+                        WHEN workspace_mode IN ('kms', 'answer_catalog', 'hybrid')
+                            THEN workspace_mode
+                        ELSE 'kms'
+                    END,
+                    metadata = COALESCE(metadata, '{{}}'::jsonb) - 'workspace_mode',
+                    update_time = CURRENT_TIMESTAMP
+                WHERE metadata ? 'workspace_mode'
+                   OR workspace_mode NOT IN ('kms', 'answer_catalog', 'hybrid')
+                """
+            )
+            await self.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_{table_name.lower()}_is_default ON {table_name}(is_default)"
+            )
+            await self.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_{table_name.lower()}_workspace_mode ON {table_name}(workspace_mode)"
+            )
+            await self.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_{table_name.lower()}_metadata_gin ON {table_name} USING GIN (metadata jsonb_path_ops)"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to migrate/index {table_name}: {e}")
 
         # Discover and register existing workspaces from data tables
         try:
@@ -1766,12 +1794,47 @@ class PostgreSQLDB:
     # Workspace Management Methods
     # =====================================================
 
+    _VALID_WORKSPACE_MODES = {"kms", "answer_catalog", "hybrid"}
+
+    @classmethod
+    def _normalize_workspace_mode(
+        cls, workspace_mode: Any, metadata: dict[str, Any] | None = None
+    ) -> str:
+        if workspace_mode in cls._VALID_WORKSPACE_MODES:
+            return str(workspace_mode)
+        metadata_mode = metadata.get("workspace_mode") if metadata else None
+        if metadata_mode in cls._VALID_WORKSPACE_MODES:
+            return str(metadata_mode)
+        return "kms"
+
+    @staticmethod
+    def _parse_workspace_metadata(metadata: Any) -> dict[str, Any]:
+        if isinstance(metadata, dict):
+            return metadata
+        if isinstance(metadata, str):
+            try:
+                parsed = json.loads(metadata)
+                return parsed if isinstance(parsed, dict) else {}
+            except (json.JSONDecodeError, TypeError):
+                return {}
+        return {}
+
+    @classmethod
+    def _prepare_workspace_metadata(
+        cls, metadata: dict[str, Any] | None, workspace_mode: str | None = None
+    ) -> tuple[str, dict[str, Any]]:
+        next_metadata = dict(metadata or {})
+        next_mode = cls._normalize_workspace_mode(workspace_mode, next_metadata)
+        next_metadata.pop("workspace_mode", None)
+        return next_mode, next_metadata
+
     async def create_workspace(
         self,
         workspace_id: str,
         name: str,
         description: str | None = None,
         is_default: bool = False,
+        workspace_mode: str | None = None,
         metadata: dict | None = None,
     ) -> dict | None:
         """Create a new workspace.
@@ -1781,28 +1844,28 @@ class PostgreSQLDB:
             name: Display name for the workspace
             description: Optional description
             is_default: Whether this is the default workspace
+            workspace_mode: Workspace type/mode
             metadata: Optional JSON metadata
 
         Returns:
             Created workspace data or None if failed
         """
-        import json
-
         try:
             sql = SQL_TEMPLATES["create_workspace"]
-            metadata_json = json.dumps(metadata) if metadata else "{}"
+            next_mode, next_metadata = self._prepare_workspace_metadata(
+                metadata, workspace_mode
+            )
+            metadata_json = json.dumps(next_metadata)
             result = await self.query(
                 sql,
-                [workspace_id, name, description, is_default, metadata_json],
+                [workspace_id, name, description, is_default, next_mode, metadata_json],
             )
             if result:
                 # Parse metadata JSON string back to dict
-                result_metadata = result.get("metadata", {})
-                if isinstance(result_metadata, str):
-                    try:
-                        result_metadata = json.loads(result_metadata)
-                    except (json.JSONDecodeError, TypeError):
-                        result_metadata = {}
+                result_metadata = self._parse_workspace_metadata(result.get("metadata", {}))
+                result["workspace_mode"] = self._normalize_workspace_mode(
+                    result.get("workspace_mode"), result_metadata
+                )
                 result["metadata"] = result_metadata
                 logger.info(f"Created workspace: {workspace_id}")
             return result
@@ -1822,19 +1885,15 @@ class PostgreSQLDB:
         Returns:
             Workspace data or None if not found
         """
-        import json
-
         try:
             sql = SQL_TEMPLATES["get_workspace"]
             result = await self.query(sql, [workspace_id])
             if result:
                 # Parse metadata JSON string back to dict
-                metadata = result.get("metadata", {})
-                if isinstance(metadata, str):
-                    try:
-                        metadata = json.loads(metadata)
-                    except (json.JSONDecodeError, TypeError):
-                        metadata = {}
+                metadata = self._parse_workspace_metadata(result.get("metadata", {}))
+                result["workspace_mode"] = self._normalize_workspace_mode(
+                    result.get("workspace_mode"), metadata
+                )
                 result["metadata"] = metadata
             return result
         except Exception as e:
@@ -1845,40 +1904,83 @@ class PostgreSQLDB:
         self,
         limit: int | None = None,
         offset: int = 0,
+        search: str | None = None,
+        workspace_mode: str | None = None,
+        metadata_filters: dict[str, Any] | None = None,
     ) -> tuple[list[dict], int]:
         """List all workspaces with pagination.
 
         Args:
             limit: Maximum number of workspaces to return (None for all)
             offset: Number of workspaces to skip
+            search: Optional text search across ID, name, and description
+            workspace_mode: Optional workspace mode filter
+            metadata_filters: Optional JSONB containment filter
 
         Returns:
             Tuple of (list of workspaces, total count)
         """
-        import json
-
         try:
+            where_clauses: list[str] = []
+            params: list[Any] = []
+
+            if workspace_mode:
+                normalized_mode = self._normalize_workspace_mode(workspace_mode)
+                params.append(normalized_mode)
+                where_clauses.append(f"w.workspace_mode = ${len(params)}")
+
+            if search and search.strip():
+                params.append(f"%{search.strip()}%")
+                search_param = f"${len(params)}"
+                where_clauses.append(
+                    "("
+                    f"w.workspace_id ILIKE {search_param} OR "
+                    f"w.name ILIKE {search_param} OR "
+                    f"COALESCE(w.description, '') ILIKE {search_param}"
+                    ")"
+                )
+
+            if metadata_filters:
+                params.append(json.dumps(metadata_filters))
+                where_clauses.append(f"w.metadata @> ${len(params)}::jsonb")
+
+            where_sql = (
+                f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+            )
+
             # Get total count
-            count_result = await self.query(SQL_TEMPLATES["count_workspaces"])
+            count_sql = f"SELECT COUNT(*) as total FROM LIGHTRAG_WORKSPACES w {where_sql}"
+            count_result = await self.query(count_sql, params)
             total = count_result["total"] if count_result else 0
 
             # Get workspaces with pagination
+            select_sql = f"""
+                SELECT w.workspace_id, w.name, w.description, w.is_default,
+                       w.workspace_mode,
+                       (SELECT COUNT(*) FROM LIGHTRAG_DOC_STATUS WHERE workspace=w.workspace_id AND status='processed') as document_count,
+                       (SELECT COUNT(*) FROM LIGHTRAG_VDB_ENTITY WHERE workspace=w.workspace_id) as entity_count,
+                       (SELECT COUNT(*) FROM LIGHTRAG_VDB_RELATION WHERE workspace=w.workspace_id) as relation_count,
+                       w.metadata,
+                       EXTRACT(EPOCH FROM w.create_time)::BIGINT as create_time,
+                       EXTRACT(EPOCH FROM w.update_time)::BIGINT as update_time
+                FROM LIGHTRAG_WORKSPACES w
+                {where_sql}
+                ORDER BY w.is_default DESC, w.create_time ASC
+            """
+            select_params = list(params)
             if limit is not None:
-                sql = SQL_TEMPLATES["list_workspaces"]
-                workspaces = await self.query(sql, [limit, offset], multirows=True)
-            else:
-                sql = SQL_TEMPLATES["list_workspaces_all"]
-                workspaces = await self.query(sql, multirows=True)
+                select_params.extend([limit, offset])
+                select_sql += f" LIMIT ${len(select_params) - 1} OFFSET ${len(select_params)}"
+
+            workspaces = await self.query(select_sql, select_params, multirows=True)
 
             # Parse metadata JSON string back to dict for each workspace
             if workspaces:
                 for ws in workspaces:
-                    metadata = ws.get("metadata", {})
-                    if isinstance(metadata, str):
-                        try:
-                            metadata = json.loads(metadata)
-                        except (json.JSONDecodeError, TypeError):
-                            metadata = {}
+                    metadata = self._parse_workspace_metadata(ws.get("metadata", {}))
+                    ws["workspace_mode"] = self._normalize_workspace_mode(
+                        ws.get("workspace_mode"), metadata
+                    )
                     ws["metadata"] = metadata
 
             return workspaces or [], total
@@ -1891,6 +1993,7 @@ class PostgreSQLDB:
         workspace_id: str,
         name: str | None = None,
         description: str | None = None,
+        workspace_mode: str | None = None,
         metadata: dict | None = None,
     ) -> dict | None:
         """Update workspace information.
@@ -1899,25 +2002,32 @@ class PostgreSQLDB:
             workspace_id: Workspace identifier
             name: New name (optional)
             description: New description (optional)
+            workspace_mode: New workspace mode (optional)
             metadata: New metadata (optional)
 
         Returns:
             Updated workspace data or None if not found
         """
-        import json
-
         try:
             sql = SQL_TEMPLATES["update_workspace"]
-            metadata_json = json.dumps(metadata) if metadata is not None else None
-            result = await self.query(sql, [workspace_id, name, description, metadata_json])
+            next_mode = workspace_mode
+            metadata_json = None
+            if metadata is not None:
+                next_mode, next_metadata = self._prepare_workspace_metadata(
+                    metadata, workspace_mode
+                )
+                metadata_json = json.dumps(next_metadata)
+            elif workspace_mode is not None:
+                next_mode = self._normalize_workspace_mode(workspace_mode)
+            result = await self.query(
+                sql, [workspace_id, name, description, next_mode, metadata_json]
+            )
             if result:
                 # Parse metadata JSON string back to dict
-                result_metadata = result.get("metadata", {})
-                if isinstance(result_metadata, str):
-                    try:
-                        result_metadata = json.loads(result_metadata)
-                    except (json.JSONDecodeError, TypeError):
-                        result_metadata = {}
+                result_metadata = self._parse_workspace_metadata(result.get("metadata", {}))
+                result["workspace_mode"] = self._normalize_workspace_mode(
+                    result.get("workspace_mode"), result_metadata
+                )
                 result["metadata"] = result_metadata
                 logger.info(f"Updated workspace: {workspace_id}")
             return result
@@ -5834,6 +5944,7 @@ TABLES = {
                     document_count INTEGER DEFAULT 0,
                     entity_count INTEGER DEFAULT 0,
                     relation_count INTEGER DEFAULT 0,
+                    workspace_mode VARCHAR(32) NOT NULL DEFAULT 'kms',
                     metadata JSONB DEFAULT '{}'::jsonb,
                     create_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
                     update_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
@@ -6111,14 +6222,15 @@ SQL_TEMPLATES = {
     "delete_prompt": """DELETE FROM LIGHTRAG_PROMPTS WHERE workspace=$1 AND prompt_key=$2""",
     # SQL for Workspaces
     "create_workspace": """INSERT INTO LIGHTRAG_WORKSPACES
-                           (workspace_id, name, description, is_default, metadata)
-                           VALUES ($1, $2, $3, $4, $5)
+                           (workspace_id, name, description, is_default, workspace_mode, metadata)
+                           VALUES ($1, $2, $3, $4, $5, $6)
                            RETURNING workspace_id, name, description, is_default, document_count,
-                                     entity_count, relation_count, metadata,
+                                     entity_count, relation_count, workspace_mode, metadata,
                                      EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
                                      EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
                           """,
     "get_workspace": """SELECT w.workspace_id, w.name, w.description, w.is_default,
+                        w.workspace_mode,
                         (SELECT COUNT(*) FROM LIGHTRAG_DOC_STATUS WHERE workspace=w.workspace_id AND status='processed') as document_count,
                         (SELECT COUNT(*) FROM LIGHTRAG_VDB_ENTITY WHERE workspace=w.workspace_id) as entity_count,
                         (SELECT COUNT(*) FROM LIGHTRAG_VDB_RELATION WHERE workspace=w.workspace_id) as relation_count,
@@ -6128,6 +6240,7 @@ SQL_TEMPLATES = {
                         FROM LIGHTRAG_WORKSPACES w WHERE w.workspace_id=$1
                        """,
     "list_workspaces": """SELECT w.workspace_id, w.name, w.description, w.is_default,
+                          w.workspace_mode,
                           (SELECT COUNT(*) FROM LIGHTRAG_DOC_STATUS WHERE workspace=w.workspace_id AND status='processed') as document_count,
                           (SELECT COUNT(*) FROM LIGHTRAG_VDB_ENTITY WHERE workspace=w.workspace_id) as entity_count,
                           (SELECT COUNT(*) FROM LIGHTRAG_VDB_RELATION WHERE workspace=w.workspace_id) as relation_count,
@@ -6136,9 +6249,10 @@ SQL_TEMPLATES = {
                           EXTRACT(EPOCH FROM w.update_time)::BIGINT as update_time
                           FROM LIGHTRAG_WORKSPACES w
                           ORDER BY w.is_default DESC, w.create_time ASC
-                          LIMIT $1 OFFSET $2
+                         LIMIT $1 OFFSET $2
                          """,
     "list_workspaces_all": """SELECT w.workspace_id, w.name, w.description, w.is_default,
+                              w.workspace_mode,
                               (SELECT COUNT(*) FROM LIGHTRAG_DOC_STATUS WHERE workspace=w.workspace_id AND status='processed') as document_count,
                               (SELECT COUNT(*) FROM LIGHTRAG_VDB_ENTITY WHERE workspace=w.workspace_id) as entity_count,
                               (SELECT COUNT(*) FROM LIGHTRAG_VDB_RELATION WHERE workspace=w.workspace_id) as relation_count,
@@ -6152,11 +6266,12 @@ SQL_TEMPLATES = {
     "update_workspace": """UPDATE LIGHTRAG_WORKSPACES
                            SET name = COALESCE($2, name),
                                description = COALESCE($3, description),
-                               metadata = COALESCE($4, metadata),
+                               workspace_mode = COALESCE($4, workspace_mode),
+                               metadata = COALESCE($5, metadata),
                                update_time = CURRENT_TIMESTAMP
                            WHERE workspace_id = $1
                            RETURNING workspace_id, name, description, is_default,
-                                     document_count, entity_count, relation_count, metadata,
+                                     document_count, entity_count, relation_count, workspace_mode, metadata,
                                      EXTRACT(EPOCH FROM create_time)::BIGINT as create_time,
                                      EXTRACT(EPOCH FROM update_time)::BIGINT as update_time
                           """,

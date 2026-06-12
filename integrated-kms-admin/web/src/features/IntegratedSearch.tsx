@@ -1,0 +1,1191 @@
+import { FormEvent, useEffect, useMemo, useState } from 'react'
+import {
+  BookOpenIcon,
+  CheckIcon,
+  DownloadIcon,
+  ExternalLinkIcon,
+  FilterIcon,
+  ImageIcon,
+  InfoIcon,
+  RotateCcwIcon,
+  SearchIcon,
+  SlidersHorizontalIcon,
+  SparklesIcon,
+  TagIcon,
+  XIcon
+} from 'lucide-react'
+import { api } from '@/api/client'
+import WorkspaceSelect from '@/components/WorkspaceSelect'
+import Button from '@/components/ui/Button'
+import { canChooseWorkspace, resolveEffectiveWorkspaceScope } from '@/lib/workspaceAccess'
+import { useAuthStore } from '@/stores/auth'
+import { useWorkspaceScopeStore } from '@/stores/workspaceScope'
+
+type Category = {
+  category_id: string
+  parent_id?: string | null
+  name: string
+  path: string
+  is_active: boolean
+  total_knowledge_count?: number
+}
+
+type QueryMode = 'naive' | 'local' | 'global' | 'hybrid' | 'mix' | 'bypass'
+
+type KmsSearchOptions = {
+  mode: QueryMode
+  response_type: string
+  top_k: number
+  chunk_top_k: number
+  include_references: boolean
+  include_chunk_content: boolean
+  highlight_entities: boolean
+  enable_rerank: boolean
+}
+
+const BRIEF_ANSWER_RESPONSE_TYPE = "Brief answer: MAXIMUM 5 bullet points using '- ' (hyphen+space). Each point is one concise line. Fewer is better."
+
+const DEFAULT_KMS_OPTIONS: KmsSearchOptions = {
+  mode: 'mix',
+  response_type: BRIEF_ANSWER_RESPONSE_TYPE,
+  top_k: 40,
+  chunk_top_k: 20,
+  include_references: true,
+  include_chunk_content: true,
+  highlight_entities: true,
+  enable_rerank: true
+}
+
+const queryModeOptions: Array<{ value: QueryMode; label: string }> = [
+  { value: 'mix', label: 'Mix' },
+  { value: 'hybrid', label: 'Hybrid' },
+  { value: 'global', label: 'Global' },
+  { value: 'local', label: 'Local' },
+  { value: 'naive', label: 'Naive' },
+  { value: 'bypass', label: 'Bypass' }
+]
+
+const responseFormatOptions = [
+  { value: BRIEF_ANSWER_RESPONSE_TYPE, label: '간단한 답변' },
+  { value: "A single short paragraph, maximum 3 sentences. No bullet points.", label: '단일 단락' },
+  { value: "Multiple paragraphs using markdown '- ' bullet lists. Each paragraph covers one subtopic with a bold heading.", label: '여러 단락' },
+  { value: "Markdown bullet list using '- ' (hyphen+space). One fact per line. Maximum 10 items.", label: '글머리 기호' },
+  { value: "Numbered list using '1. ', '2. ', etc. One fact per line.", label: '번호 목록' },
+  { value: "Executive summary: 2-3 sentences covering the most critical points only.", label: '요약 보고서' }
+]
+
+function responseFormatLabel(value: string) {
+  return responseFormatOptions.find((option) => option.value === value)?.label || value
+}
+
+function categoryLabel(category: Category) {
+  return category.path.split('/').filter(Boolean).join(' > ') || category.name
+}
+
+function textFromGenerative(result: any) {
+  return (
+    result?.generative_answer?.response ||
+    result?.generative_answer?.answer ||
+    result?.generative_answer?.result ||
+    '생성형 답변 결과가 없습니다.'
+  )
+}
+
+function faqTitle(item: any) {
+  return item.title || item.answer?.title || item.question || 'FAQ 후보'
+}
+
+function faqBody(item: any) {
+  return item.response || item.body || item.answer?.body || item.answer?.approved_summary || item.approved_summary || '본문이 없습니다.'
+}
+
+function scorePercent(item: any) {
+  const score = Number(item.score ?? item.confidence ?? item.similarity ?? 0)
+  if (!Number.isFinite(score) || score <= 0) return null
+  return Math.round(score <= 1 ? score * 100 : score)
+}
+
+function safeString(value: unknown) {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'string') return value
+  if (typeof value === 'object') {
+    const objectValue = value as Record<string, unknown>
+    for (const key of ['description', 'summary', 'text', 'raw']) {
+      const field = objectValue[key]
+      if (typeof field === 'string') return field
+    }
+  }
+  return String(value)
+}
+
+function referenceId(reference: any, index: number) {
+  return String(reference.reference_id || reference.id || index + 1)
+}
+
+function referenceAnchorId(refId: string) {
+  return `kms-reference-${refId.replace(/[^a-zA-Z0-9_-]/g, '-')}`
+}
+
+function referenceTitle(reference: any) {
+  return reference.title || reference.doc_nm || reference.file_name || reference.file_path || reference.doc_id || '참조 문서'
+}
+
+function referenceOpenUrl(reference: any) {
+  const downloadUrl = typeof reference.download_url === 'string' ? reference.download_url.trim() : ''
+  if (downloadUrl) return downloadUrl
+  const filePath = typeof reference.file_path === 'string' ? reference.file_path.trim() : ''
+  return /^https?:\/\//.test(filePath) ? filePath : ''
+}
+
+function imageSource(image: any) {
+  if (!image) return ''
+  if (typeof image === 'object') {
+    return image.s3_url || image.url || image.path || ''
+  }
+  const value = String(image)
+  if (value.startsWith('data:') || value.startsWith('http')) return value
+  return value ? `data:image/png;base64,${value}` : ''
+}
+
+function visualCaption(item: any) {
+  return (
+    safeString(item.analysis?.description) ||
+    safeString(item.entity?.summary) ||
+    (Array.isArray(item.image?.captions) ? item.image.captions.join(' ') : '')
+  )
+}
+
+function visualPageLabel(item: any) {
+  const pageIndex = item.source?.page_idx
+  return Number.isFinite(Number(pageIndex)) ? `페이지 ${Number(pageIndex) + 1}` : ''
+}
+
+function referenceImages(reference: any) {
+  const structured = Array.isArray(reference.structured_content) ? reference.structured_content : []
+  const scores = Array.isArray(reference.scores) ? reference.scores : []
+  const seen = new Set<string>()
+  return structured
+    .map((item: any, index: number) => ({
+      item,
+      index,
+      src: item?.type === 'image' ? imageSource(item.image) : '',
+      score: Number.isFinite(Number(item?.score)) ? Number(item.score) : Number.isFinite(Number(scores[index])) ? Number(scores[index]) : null,
+      caption: visualCaption(item),
+      page: visualPageLabel(item)
+    }))
+    .filter((visual) => {
+      if (!visual.src || seen.has(visual.src)) return false
+      seen.add(visual.src)
+      return true
+    })
+    .sort((a, b) => {
+      if (a.score === null && b.score === null) return 0
+      if (a.score === null) return 1
+      if (b.score === null) return -1
+      return b.score - a.score
+    })
+}
+
+function ReferenceImages({ reference }: { reference: any }) {
+  const images = referenceImages(reference)
+  if (!images.length) return null
+
+  return (
+    <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border-subtle)' }}>
+      <div className="row" style={{ gap: 6, marginBottom: 8, color: 'var(--fg-secondary)', fontSize: 12.5, fontWeight: 700 }}>
+        <ImageIcon className="size-4" /> 이미지 근거 {images.length}건
+      </div>
+      <div className="reference-image-grid">
+        {images.map((visual) => (
+          <div key={visual.src} className="reference-image-card">
+            <div className="reference-image-meta">
+              <span className="row" style={{ gap: 5 }}>
+                <ImageIcon className="size-3" />
+                {visual.score !== null && <span className="num">{visual.score.toFixed(4)}</span>}
+              </span>
+              {visual.page && <span>{visual.page}</span>}
+            </div>
+            <a href={visual.src} target="_blank" rel="noopener noreferrer" title="이미지 원본 보기">
+              <img src={visual.src} alt={visual.caption || referenceTitle(reference)} loading="lazy" />
+            </a>
+            {visual.caption && <div className="reference-image-caption">{visual.caption}</div>}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function scrollToReference(refId: string) {
+  const target = document.getElementById(referenceAnchorId(refId))
+  if (!target) return
+  target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  window.history.replaceState(null, '', `#${referenceAnchorId(refId)}`)
+}
+
+function CitationText({ text, references }: { text: string; references: any[] }) {
+  const refsById = new Map(references.map((reference, index) => [referenceId(reference, index), reference]))
+  const parts = text.split(/(\[\d{1,3}\])/g)
+
+  return (
+    <>
+      {parts.map((part, index) => {
+        const match = part.match(/^\[(\d{1,3})\]$/)
+        if (!match) return <span key={`${part}-${index}`}>{part}</span>
+        const ref = refsById.get(match[1])
+        if (!ref) return <span key={`${part}-${index}`}>{part}</span>
+        return (
+          <a
+            key={`${match[1]}-${index}`}
+            className="citation-link"
+            href={`#${referenceAnchorId(match[1])}`}
+            title={`${referenceTitle(ref)} 근거로 이동`}
+            onClick={(event) => {
+              event.preventDefault()
+              scrollToReference(match[1])
+            }}
+          >
+            [{match[1]}]
+          </a>
+        )
+      })}
+    </>
+  )
+}
+
+const exclusionReasonLabels: Record<string, string> = {
+  expired: '유효기간 만료',
+  inactive: '사용 안 함',
+  not_started: '유효 시작 전'
+}
+
+function eligibilityMessages(result: any) {
+  const eligibility = result?.trace?.eligibility
+  if (!eligibility) return []
+  return (['kms', 'faq'] as const).flatMap((section) => {
+    const summary = eligibility[section]
+    if (!summary?.excluded_count) return []
+    const label = section === 'kms' ? '생성형 KMS' : 'FAQ KMS'
+    const reasonTexts = Object.entries(summary.excluded_by_reason || {})
+      .filter(([, count]) => Number(count) > 0)
+      .map(([reason, count]) => `${exclusionReasonLabels[reason] || reason} ${count}건`)
+    return [
+      {
+        key: section,
+        label,
+        count: Number(summary.excluded_count),
+        reasons: reasonTexts.join(', '),
+        items: (summary.excluded_items || []).slice(0, 3)
+      }
+    ]
+  })
+}
+
+function EligibilityNotice({ result }: { result: any }) {
+  const messages = eligibilityMessages(result)
+  if (!messages.length) return null
+
+  return (
+    <div className="card" style={{ padding: 14, marginBottom: 14, borderColor: '#f3d89a', background: '#fffaf0' }}>
+      <div className="row" style={{ gap: 9, alignItems: 'flex-start' }}>
+        <InfoIcon className="size-4" style={{ color: '#b7791f', marginTop: 2, flexShrink: 0 }} />
+        <div className="col" style={{ gap: 7, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-primary)' }}>
+            유효하지 않은 지식은 답변 후보에서 제외되었습니다.
+          </div>
+          <div className="row wrap" style={{ gap: 7 }}>
+            {messages.map((message) => (
+              <span key={message.key} className="badge amber">
+                {message.label} 제외 {message.count}건{message.reasons ? ` · ${message.reasons}` : ''}
+              </span>
+            ))}
+          </div>
+          <div className="muted" style={{ fontSize: 12, lineHeight: 1.55 }}>
+            선택한 고객센터, 워크스페이스, 카테고리 범위에는 있었지만 유효기간 또는 사용 여부 조건을 통과하지 못해 LightRAG 검색 후보로 전달하지 않았습니다.
+          </div>
+          {messages.some((message) => message.items.length > 0) && (
+            <div className="row wrap" style={{ gap: 6 }}>
+              {messages.flatMap((message) =>
+                message.items.map((item: any) => (
+                  <span key={`${message.key}-${item.item_id}`} className="badge outline" title={item.title}>
+                    {message.label}: {item.title}
+                  </span>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AiAnswer({ result }: { result: any }) {
+  const answerText = textFromGenerative(result)
+  const references = result?.references || result?.generative_answer?.references || []
+  const keywords = result?.keywords || []
+
+  return (
+    <div className="card" style={{ overflow: 'hidden', borderColor: '#c9d8f7' }}>
+      <div style={{ background: 'linear-gradient(180deg, var(--accent-soft), #fff)', padding: 'var(--pad-card)' }}>
+        <div className="row" style={{ gap: 9, marginBottom: 12 }}>
+          <span className="row" style={{ gap: 7, color: 'var(--accent)', fontWeight: 700, fontSize: 13 }}>
+            <SparklesIcon className="size-4" /> AI 생성형 답변
+          </span>
+          <span className="badge green">
+            <CheckIcon className="size-3" /> 완료
+          </span>
+          <div className="grow" />
+          <span className="badge outline">생성형 KMS</span>
+        </div>
+
+        <div className="rich">
+          <p style={{ whiteSpace: 'pre-wrap' }}>
+            <CitationText text={answerText} references={references} />
+          </p>
+        </div>
+
+        {keywords.length > 0 && (
+          <div style={{ marginTop: 16 }}>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>
+              주요 키워드
+            </div>
+            <div className="row wrap" style={{ gap: 7 }}>
+              {keywords.map((keyword: string) => (
+                <span key={keyword} className="badge blue">
+                  <TagIcon className="size-3" /> {keyword}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div style={{ marginTop: 16 }}>
+          <div className="eyebrow" style={{ marginBottom: 8 }}>
+            근거 지식 {references.length}건
+          </div>
+          {references.length ? (
+            <div className="col" style={{ gap: 7 }}>
+              {references.map((reference: any, index: number) => {
+                const refId = referenceId(reference, index)
+                const openUrl = referenceOpenUrl(reference)
+                const downloadUrl = typeof reference.download_url === 'string' ? reference.download_url.trim() : ''
+                return (
+                <div
+                  id={referenceAnchorId(refId)}
+                  key={reference.id || reference.doc_id || refId}
+                  className="reference-card"
+                  style={{
+                    padding: '9px 11px',
+                    background: '#fff',
+                    border: '1px solid var(--border-default)',
+                    borderRadius: 'var(--radius-md)',
+                    scrollMarginTop: 90
+                  }}
+                >
+                  <div className="row" style={{ gap: 10 }}>
+                    <span
+                      style={{
+                        width: 22,
+                        height: 22,
+                        borderRadius: 6,
+                        background: 'var(--accent-soft)',
+                        color: 'var(--accent)',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: 11,
+                        fontWeight: 700,
+                        flexShrink: 0
+                      }}
+                    >
+                      {refId}
+                    </span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-primary)' }}>
+                      {referenceTitle(reference)}
+                    </span>
+                    <span className="muted" style={{ fontSize: 12 }}>
+                      · {reference.workspace || reference.category || 'KMS'}
+                    </span>
+                    <div className="grow" />
+                    {openUrl ? (
+                      <a
+                        className="btn btn-ghost btn-sm"
+                        href={openUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="원본 문서 열기"
+                        style={{ whiteSpace: 'nowrap' }}
+                      >
+                        <ExternalLinkIcon className="size-4" /> 원본 보기
+                      </a>
+                    ) : (
+                      <span className="muted" style={{ fontSize: 12 }}>
+                        원본 링크 없음
+                      </span>
+                    )}
+                    {downloadUrl && (
+                      <a
+                        className="btn btn-ghost btn-sm"
+                        href={downloadUrl}
+                        download
+                        title="원본 문서 다운로드"
+                        style={{ whiteSpace: 'nowrap' }}
+                      >
+                        <DownloadIcon className="size-4" /> 다운로드
+                      </a>
+                    )}
+                  </div>
+                  <ReferenceImages reference={reference} />
+                </div>
+                )
+              })}
+            </div>
+          ) : (
+            <div className="empty" style={{ padding: '12px 0', textAlign: 'left' }}>
+              연결된 근거 지식이 없습니다.
+            </div>
+          )}
+        </div>
+
+        <div className="row" style={{ gap: 6, marginTop: 14, fontSize: 11.5, color: 'var(--fg-muted)' }}>
+          <InfoIcon className="size-3" /> AI 생성형 답변은 등록된 지식을 바탕으로 작성되며, 정확성 검토가 필요할 수 있습니다.
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function FaqResult({ item, rank }: { item: any; rank: number }) {
+  const pct = scorePercent(item)
+  const keywords = item.keywords || item.tags || []
+
+  return (
+    <div className="card" style={{ padding: 'var(--pad-card)' }}>
+      <div className="row" style={{ gap: 10, alignItems: 'flex-start' }}>
+        <span
+          style={{
+            width: 26,
+            height: 26,
+            borderRadius: 7,
+            background: 'var(--bg-subtle)',
+            color: 'var(--fg-secondary)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 12,
+            fontWeight: 700,
+            flexShrink: 0
+          }}
+        >
+          {rank}
+        </span>
+        <div className="grow" style={{ minWidth: 0 }}>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--accent)' }}>{faqTitle(item)}</span>
+            <span className="badge gray">{item.category || item.cat || 'FAQ'}</span>
+          </div>
+          <div className="rich" style={{ marginTop: 8 }}>
+            <p>{faqBody(item)}</p>
+          </div>
+          <div className="row wrap" style={{ gap: 12, marginTop: 12 }}>
+            {pct !== null && (
+              <div className="row" style={{ gap: 8 }}>
+                <div className={`bar ${pct >= 85 ? 'green' : pct >= 70 ? '' : 'amber'}`} style={{ width: 64 }}>
+                  <i style={{ width: `${pct}%` }} />
+                </div>
+                <span className="num" style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg-secondary)' }}>
+                  {pct}%
+                </span>
+              </div>
+            )}
+            <div className="row wrap" style={{ gap: 6 }}>
+              {keywords.slice(0, 6).map((keyword: string) => (
+                <span key={keyword} className="badge outline">
+                  {keyword}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SearchReadyPreview({ includeGenerative, includeFaq }: { includeGenerative: boolean; includeFaq: boolean }) {
+  return (
+    <div className="col" style={{ gap: 'var(--gap)' }}>
+      {includeGenerative && (
+        <div className="card" style={{ overflow: 'hidden', borderColor: '#c9d8f7' }}>
+          <div style={{ background: 'linear-gradient(180deg, var(--accent-soft), #fff)', padding: 'var(--pad-card)' }}>
+            <div className="row" style={{ gap: 9, marginBottom: 12 }}>
+              <span className="row" style={{ gap: 7, color: 'var(--accent)', fontWeight: 700, fontSize: 13 }}>
+                <SparklesIcon className="size-4" /> AI 생성형 답변
+              </span>
+              <span className="badge gray">대기</span>
+              <div className="grow" />
+              <span className="badge outline">생성형 KMS</span>
+            </div>
+            <div className="rich">
+              <p>검색을 실행하면 선택한 KMS 워크스페이스의 유효한 문서를 기준으로 AI 답변이 이 영역에 표시됩니다.</p>
+            </div>
+            <div style={{ marginTop: 16 }}>
+              <div className="eyebrow" style={{ marginBottom: 8 }}>
+                근거 지식
+              </div>
+              <div className="empty" style={{ padding: '12px 0', textAlign: 'left' }}>
+                검색 결과의 참조 문서, 청크 본문, 엔티티 강조 정보가 함께 표시됩니다.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {includeFaq && (
+        <div className="col" style={{ gap: 'var(--gap)' }}>
+          <div className="row" style={{ gap: 8 }}>
+            <BookOpenIcon className="size-4" style={{ color: 'var(--fg-secondary)' }} />
+            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-primary)' }}>FAQ 답변</span>
+            <span className="badge gray">대기</span>
+          </div>
+          <div className="card" style={{ padding: 'var(--pad-card)' }}>
+            <div className="empty" style={{ padding: 18 }}>
+              검색을 실행하면 FAQ 워크스페이스의 후보 답변이 점수와 주요 키워드 기준으로 표시됩니다.
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DisabledReadyCard({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="card" style={{ padding: 'var(--pad-card)' }}>
+      <div className="empty" style={{ padding: 18, textAlign: 'left' }}>
+        <b style={{ display: 'block', marginBottom: 6, color: 'var(--fg-primary)' }}>{title}</b>
+        <span>{description}</span>
+      </div>
+    </div>
+  )
+}
+
+export default function IntegratedSearch() {
+  const user = useAuthStore((state) => state.user)
+  const [query, setQuery] = useState('')
+  const [categories, setCategories] = useState<Category[]>([])
+  const [categoryIds, setCategoryIds] = useState<string[]>([])
+  const kmsWorkspace = useWorkspaceScopeStore((state) => state.kmsWorkspace)
+  const faqWorkspace = useWorkspaceScopeStore((state) => state.faqWorkspace)
+  const setKmsWorkspace = useWorkspaceScopeStore((state) => state.setKmsWorkspace)
+  const setFaqWorkspace = useWorkspaceScopeStore((state) => state.setFaqWorkspace)
+  const [layout, setLayout] = useState<'rail' | 'overview' | 'tabs'>('rail')
+  const [tab, setTab] = useState<'all' | 'ai' | 'faq'>('all')
+  const [includeGenerative, setIncludeGenerative] = useState(true)
+  const [includeFaq, setIncludeFaq] = useState(true)
+  const [showSearchSettings, setShowSearchSettings] = useState(false)
+  const [showCategoryPicker, setShowCategoryPicker] = useState(false)
+  const [categorySearch, setCategorySearch] = useState('')
+  const [kmsOptions, setKmsOptions] = useState<KmsSearchOptions>(DEFAULT_KMS_OPTIONS)
+  const [result, setResult] = useState<any>(null)
+  const [loading, setLoading] = useState(false)
+  const canChooseWorkspaceForUser = canChooseWorkspace(user?.role)
+  const { kmsWorkspace: effectiveKmsWorkspace, faqWorkspace: effectiveFaqWorkspace } = resolveEffectiveWorkspaceScope({
+    role: user?.role,
+    selectedKmsWorkspace: kmsWorkspace,
+    selectedFaqWorkspace: faqWorkspace,
+    userKmsWorkspace: user?.kms_workspace,
+    userFaqWorkspace: user?.faq_workspace
+  })
+
+  useEffect(() => {
+    api.get('/api/categories').then((response) => setCategories(response.data.categories || []))
+  }, [])
+
+  useEffect(() => {
+    if (effectiveKmsWorkspace !== kmsWorkspace) setKmsWorkspace(effectiveKmsWorkspace)
+    if (effectiveFaqWorkspace !== faqWorkspace) setFaqWorkspace(effectiveFaqWorkspace)
+  }, [effectiveFaqWorkspace, effectiveKmsWorkspace, faqWorkspace, kmsWorkspace, setFaqWorkspace, setKmsWorkspace])
+
+  const categoryMap = useMemo(
+    () => new Map(categories.map((category) => [category.category_id, category])),
+    [categories]
+  )
+  const activeCategories = categories.filter((category) => category.is_active)
+  const shownCategories = [...activeCategories].sort((a, b) => categoryLabel(a).localeCompare(categoryLabel(b)))
+  const selectedCategoryLabels = categoryIds.map((id) => categoryMap.get(id)).filter(Boolean) as Category[]
+  const categorySearchKeyword = categorySearch.trim().toLowerCase()
+  const filteredCategoryOptions = shownCategories.filter((category) => {
+    if (!categorySearchKeyword) return true
+    return categoryLabel(category).toLowerCase().includes(categorySearchKeyword)
+  })
+
+  const toggleCategory = (categoryId: string) => {
+    setCategoryIds((value) =>
+      value.includes(categoryId) ? value.filter((item) => item !== categoryId) : [...value, categoryId]
+    )
+  }
+
+  const updateKmsOption = <K extends keyof KmsSearchOptions>(key: K, value: KmsSearchOptions[K]) => {
+    setKmsOptions((current) => {
+      const next = { ...current, [key]: value }
+      if (key === 'include_references' && value === false) {
+        next.include_chunk_content = false
+      }
+      return next
+    })
+  }
+
+  const submit = async (event?: FormEvent) => {
+    event?.preventDefault()
+    if (!query.trim()) return
+    setLoading(true)
+    try {
+      const response = await api.post('/api/search/integrated', {
+        query,
+        category_ids: categoryIds,
+        include_generative: includeGenerative,
+        include_faq: includeFaq,
+        kms_workspace: effectiveKmsWorkspace,
+        faq_workspace: effectiveFaqWorkspace,
+        kms_options: {
+          ...kmsOptions,
+          top_k: Number(kmsOptions.top_k) || DEFAULT_KMS_OPTIONS.top_k,
+          chunk_top_k: Number(kmsOptions.chunk_top_k) || DEFAULT_KMS_OPTIONS.chunk_top_k
+        }
+      })
+      setResult(response.data)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const faqResults = result?.faq_results || []
+  const hasResult = Boolean(result)
+  const elapsedSeconds = result ? (Number(result.latency_ms || 0) / 1000).toFixed(2) : '0.00'
+  const aiBlock = includeGenerative && result ? <AiAnswer result={result} /> : null
+  const faqBlock = includeFaq && result ? (
+    <div className="col" style={{ gap: 'var(--gap)' }}>
+      <div className="row" style={{ gap: 8 }}>
+        <BookOpenIcon className="size-4" style={{ color: 'var(--fg-secondary)' }} />
+        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-primary)' }}>FAQ 답변</span>
+        <span className="badge gray">{faqResults.length}건</span>
+      </div>
+      {faqResults.length ? (
+        faqResults.map((item: any, index: number) => (
+          <FaqResult key={item.answer_id || item.id || index} item={item} rank={index + 1} />
+        ))
+      ) : (
+        <div className="card">
+          <div className="empty">FAQ 결과가 없습니다.</div>
+        </div>
+      )}
+    </div>
+  ) : null
+
+  const keywords = result?.keywords || []
+  const readyOverview = <SearchReadyPreview includeGenerative={includeGenerative} includeFaq={includeFaq} />
+  const readyAiBlock = includeGenerative ? (
+    <SearchReadyPreview includeGenerative includeFaq={false} />
+  ) : (
+    <DisabledReadyCard title="AI 생성형 답변" description="검색 범위에서 AI 생성형 답변이 꺼져 있습니다." />
+  )
+  const readyFaqBlock = includeFaq ? (
+    <SearchReadyPreview includeGenerative={false} includeFaq />
+  ) : (
+    <DisabledReadyCard title="FAQ 답변" description="검색 범위에서 FAQ 답변이 꺼져 있습니다." />
+  )
+  const readyTabs = (
+    <div>
+      <div className="tabs" style={{ marginBottom: 16 }}>
+        <button type="button" className={tab === 'all' ? 'on' : ''} onClick={() => setTab('all')}>
+          전체
+        </button>
+        <button type="button" className={tab === 'ai' ? 'on' : ''} onClick={() => setTab('ai')}>
+          <SparklesIcon className="size-4" /> AI 답변
+        </button>
+        <button type="button" className={tab === 'faq' ? 'on' : ''} onClick={() => setTab('faq')}>
+          <BookOpenIcon className="size-4" /> FAQ
+        </button>
+      </div>
+      <div className="col" style={{ gap: 'var(--gap)' }}>
+        {(tab === 'all' || tab === 'ai') && readyAiBlock}
+        {(tab === 'all' || tab === 'faq') && readyFaqBlock}
+      </div>
+    </div>
+  )
+  const sideRail = (
+    <aside className="col" style={{ gap: 'var(--gap)', position: 'sticky', top: 0 }}>
+      <div className="card">
+        <div className="card-h">
+          <div>
+            <div className="t">워크스페이스</div>
+            <div className="sub">LightRAG 조회 범위</div>
+          </div>
+        </div>
+        <div className="card-b">
+          <div className="col" style={{ gap: 10 }}>
+            <label className="field">
+              <span>KMS 워크스페이스</span>
+              <WorkspaceSelect
+                value={effectiveKmsWorkspace}
+                mode="kms"
+                onChange={setKmsWorkspace}
+                placeholder="KMS 워크스페이스"
+                disabled={!canChooseWorkspaceForUser}
+              />
+            </label>
+            <label className="field">
+              <span>FAQ 워크스페이스</span>
+              <WorkspaceSelect
+                value={effectiveFaqWorkspace}
+                mode="answer_catalog"
+                onChange={setFaqWorkspace}
+                placeholder="FAQ 워크스페이스"
+                disabled={!canChooseWorkspaceForUser}
+              />
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-h">
+          <div>
+            <div className="t">검색 범위</div>
+            <div className="sub">통합 검색 대상</div>
+          </div>
+        </div>
+        <div className="card-b">
+          <div className="col" style={{ gap: 8, fontSize: 12.5 }}>
+            <div className="row">
+              <SparklesIcon className="size-3" style={{ color: 'var(--accent)' }} />
+              <span className="grow">생성형 KMS</span>
+              <span className={includeGenerative ? 'badge green' : 'badge gray'}>
+                <span className="d" /> {includeGenerative ? 'ON' : 'OFF'}
+              </span>
+            </div>
+            <div className="row">
+              <BookOpenIcon className="size-3" style={{ color: 'var(--fg-secondary)' }} />
+              <span className="grow">FAQ KMS</span>
+              <span className={includeFaq ? 'badge green' : 'badge gray'}>
+                <span className="d" /> {includeFaq ? 'ON' : 'OFF'}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-h">
+          <div>
+            <div className="t">생성형 검색 설정</div>
+            <div className="sub">LightRAG query options</div>
+          </div>
+          <div className="sp" />
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowSearchSettings((value) => !value)}>
+            {showSearchSettings ? '접기' : '수정'}
+          </button>
+        </div>
+        <div className="card-b">
+          <div className="col" style={{ gap: 8, fontSize: 12.5 }}>
+            <div className="row"><span className="grow muted">쿼리모드</span><b>{queryModeOptions.find((option) => option.value === kmsOptions.mode)?.label}</b></div>
+            <div className="row"><span className="grow muted">응답형식</span><b>{responseFormatLabel(kmsOptions.response_type)}</b></div>
+            <div className="row"><span className="grow muted">그래프 후보</span><span className="num">{kmsOptions.top_k}</span></div>
+            <div className="row"><span className="grow muted">청크 후보</span><span className="num">{kmsOptions.chunk_top_k}</span></div>
+            <div className="row wrap" style={{ gap: 6 }}>
+              {kmsOptions.include_references && <span className="badge green"><span className="d" />참조</span>}
+              {kmsOptions.include_chunk_content && <span className="badge green"><span className="d" />청크</span>}
+              {kmsOptions.highlight_entities && <span className="badge green"><span className="d" />엔티티</span>}
+              {kmsOptions.enable_rerank && <span className="badge green"><span className="d" />리랭크</span>}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-h">
+          <div>
+            <div className="t">{hasResult ? '추출 키워드' : '카테고리 필터'}</div>
+          </div>
+        </div>
+        <div className="card-b">
+          {hasResult ? (
+            <div className="row wrap" style={{ gap: 7 }}>
+              {keywords.length ? (
+                keywords.map((keyword: string) => (
+                  <span key={keyword} className="badge blue">
+                    <TagIcon className="size-3" /> {keyword}
+                  </span>
+                ))
+              ) : (
+                <span className="muted" style={{ fontSize: 12 }}>
+                  추출된 키워드가 없습니다.
+                </span>
+              )}
+            </div>
+          ) : (
+            <div className="col" style={{ gap: 8 }}>
+              {selectedCategoryLabels.length ? (
+                selectedCategoryLabels.map((category) => (
+                  <span key={category.category_id} className="badge outline">
+                    {categoryLabel(category)}
+                  </span>
+                ))
+              ) : (
+                <span className="muted" style={{ fontSize: 12 }}>
+                  전체 카테고리
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </aside>
+  )
+
+  return (
+    <div className="content-inner fadein">
+      <div className="page-head">
+        <div>
+          <h1>통합 검색</h1>
+          <p>질문 하나로 생성형 AI 답변과 FAQ 답변을 함께 조회합니다.</p>
+        </div>
+        <div className="sp" />
+        <div className="seg">
+          {[
+            ['rail', '출처 패널'],
+            ['overview', 'AI 오버뷰'],
+            ['tabs', '탭 전환']
+          ].map(([key, label]) => (
+            <button
+              key={key}
+              className={layout === key ? 'on' : ''}
+              type="button"
+              onClick={() => setLayout(key as 'rail' | 'overview' | 'tabs')}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <form onSubmit={submit} className="card" style={{ padding: 14, marginBottom: 16 }}>
+        <div className="row" style={{ gap: 10 }}>
+          <div className="grow" style={{ position: 'relative' }}>
+            <SearchIcon
+              className="size-5"
+              style={{ position: 'absolute', left: 13, top: 11, color: 'var(--fg-secondary)' }}
+            />
+            <input
+              className="input"
+              style={{ paddingLeft: 40, height: 42, fontSize: 15 }}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="질문을 입력하세요. 예) 환불은 며칠 걸리나요?"
+            />
+          </div>
+          <Button type="submit" disabled={loading || !query.trim() || (!includeGenerative && !includeFaq)} style={{ height: 42, padding: '0 22px' }}>
+            <SearchIcon className="size-4" /> {loading ? '검색 중' : '검색'}
+          </Button>
+        </div>
+
+        <div className="row wrap" style={{ gap: 12, marginTop: 12 }}>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={includeGenerative}
+              onChange={(event) => setIncludeGenerative(event.target.checked)}
+            />
+            <SparklesIcon className="size-4" style={{ color: 'var(--accent)' }} /> AI 생성형 답변
+          </label>
+          <label className="check">
+            <input type="checkbox" checked={includeFaq} onChange={(event) => setIncludeFaq(event.target.checked)} />
+            <BookOpenIcon className="size-4" style={{ color: 'var(--fg-secondary)' }} /> FAQ 답변
+          </label>
+          <div style={{ width: 1, height: 18, background: 'var(--border-default)' }} />
+          <button
+            type="button"
+            className={`btn btn-secondary btn-sm${showCategoryPicker ? ' on' : ''}`}
+            onClick={() => setShowCategoryPicker((value) => !value)}
+          >
+            <FilterIcon className="size-4" /> 카테고리 선택
+            {categoryIds.length > 0 && <span className="category-filter-count">{categoryIds.length}</span>}
+          </button>
+          {selectedCategoryLabels.length ? (
+            selectedCategoryLabels.map((category) => (
+              <button
+                type="button"
+                key={category.category_id}
+                className="chip on"
+                onClick={() => toggleCategory(category.category_id)}
+                title={`${categoryLabel(category)} 선택 해제`}
+              >
+                {categoryLabel(category)}
+                <XIcon className="size-3" />
+              </button>
+            ))
+          ) : (
+            <span className="badge outline">전체 카테고리</span>
+          )}
+        </div>
+
+        {showCategoryPicker && (
+          <div className="category-picker-panel">
+            <div className="row wrap" style={{ gap: 8 }}>
+              <div className="grow">
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-primary)' }}>카테고리 선택</div>
+                <div className="muted" style={{ fontSize: 12 }}>
+                  선택한 카테고리와 하위 카테고리 범위의 지식만 검색 후보로 사용합니다.
+                </div>
+              </div>
+              {categoryIds.length > 0 && (
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setCategoryIds([])}>
+                  전체 해제
+                </button>
+              )}
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowCategoryPicker(false)}>
+                닫기
+              </button>
+            </div>
+            <input
+              className="input"
+              value={categorySearch}
+              onChange={(event) => setCategorySearch(event.target.value)}
+              placeholder="카테고리명 검색"
+              style={{ height: 36, marginTop: 10 }}
+            />
+            <div className="category-picker-list">
+              {filteredCategoryOptions.length ? (
+                filteredCategoryOptions.map((category) => {
+                  const checked = categoryIds.includes(category.category_id)
+                  return (
+                    <label key={category.category_id} className={`category-picker-option${checked ? ' on' : ''}`}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleCategory(category.category_id)}
+                      />
+                      <span className="grow" title={categoryLabel(category)}>
+                        {categoryLabel(category)}
+                      </span>
+                      {typeof category.total_knowledge_count === 'number' && (
+                        <span className="badge outline">{category.total_knowledge_count}건</span>
+                      )}
+                    </label>
+                  )
+                })
+              ) : (
+                <div className="empty" style={{ padding: 18 }}>
+                  조건에 맞는 카테고리가 없습니다.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div className="row wrap" style={{ gap: 8, marginTop: 12 }}>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => setShowSearchSettings((value) => !value)}
+          >
+            <SlidersHorizontalIcon className="size-4" /> 검색 설정
+          </button>
+          <span className="badge blue">쿼리모드 {queryModeOptions.find((option) => option.value === kmsOptions.mode)?.label}</span>
+          <span className="badge outline">응답형식 {responseFormatLabel(kmsOptions.response_type)}</span>
+          <span className={kmsOptions.include_references ? 'badge green' : 'badge gray'}>
+            <span className="d" /> 참조 문서
+          </span>
+          <span className={kmsOptions.include_chunk_content ? 'badge green' : 'badge gray'}>
+            <span className="d" /> 청크 본문
+          </span>
+          <span className={kmsOptions.highlight_entities ? 'badge green' : 'badge gray'}>
+            <span className="d" /> 엔티티 강조
+          </span>
+          <span className={kmsOptions.enable_rerank ? 'badge green' : 'badge gray'}>
+            <span className="d" /> 리랭크
+          </span>
+        </div>
+
+        {showSearchSettings && (
+          <div
+            className="grid"
+            style={{
+              gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
+              gap: 12,
+              marginTop: 12,
+              padding: 14,
+              border: '1px solid var(--border-default)',
+              borderRadius: 'var(--radius-md)',
+              background: 'var(--bg-subtle)'
+            }}
+          >
+            <label className="field">
+              <span>쿼리모드</span>
+              <select
+                className="select"
+                value={kmsOptions.mode}
+                onChange={(event) => updateKmsOption('mode', event.target.value as QueryMode)}
+              >
+                {queryModeOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>응답형식</span>
+              <select
+                className="select"
+                value={kmsOptions.response_type}
+                onChange={(event) => updateKmsOption('response_type', event.target.value)}
+              >
+                {responseFormatOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>그래프 후보 수</span>
+              <input
+                className="input"
+                type="number"
+                min={1}
+                value={kmsOptions.top_k}
+                onChange={(event) => updateKmsOption('top_k', Number(event.target.value))}
+              />
+            </label>
+            <label className="field">
+              <span>청크 후보 수</span>
+              <input
+                className="input"
+                type="number"
+                min={1}
+                value={kmsOptions.chunk_top_k}
+                onChange={(event) => updateKmsOption('chunk_top_k', Number(event.target.value))}
+              />
+            </label>
+            <label className="check" style={{ minHeight: 38 }}>
+              <input
+                type="checkbox"
+                checked={kmsOptions.include_references}
+                onChange={(event) => updateKmsOption('include_references', event.target.checked)}
+              />
+              참조 문서 포함
+            </label>
+            <label className="check" style={{ minHeight: 38, opacity: kmsOptions.include_references ? 1 : 0.55 }}>
+              <input
+                type="checkbox"
+                checked={kmsOptions.include_chunk_content}
+                disabled={!kmsOptions.include_references}
+                onChange={(event) => updateKmsOption('include_chunk_content', event.target.checked)}
+              />
+              청크 컨텐츠 포함
+            </label>
+            <label className="check" style={{ minHeight: 38 }}>
+              <input
+                type="checkbox"
+                checked={kmsOptions.highlight_entities}
+                onChange={(event) => updateKmsOption('highlight_entities', event.target.checked)}
+              />
+              엔티티 강조
+            </label>
+            <div className="row" style={{ gap: 10, minHeight: 38 }}>
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={kmsOptions.enable_rerank}
+                  onChange={(event) => updateKmsOption('enable_rerank', event.target.checked)}
+                />
+                리랭크 활성화
+              </label>
+              <div className="grow" />
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setKmsOptions(DEFAULT_KMS_OPTIONS)}>
+                <RotateCcwIcon className="size-4" /> 기본값
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="row wrap" style={{ gap: 8, marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>
+          <span className="muted" style={{ fontSize: 12 }}>
+            KMS <span className="mono">{effectiveKmsWorkspace}</span>
+          </span>
+          <span className="muted" style={{ fontSize: 12 }}>
+            FAQ <span className="mono">{effectiveFaqWorkspace}</span>
+          </span>
+          {categoryIds.length > 0 && (
+            <span className="muted" style={{ fontSize: 12 }}>
+              선택 카테고리 {categoryIds.length}개
+            </span>
+          )}
+        </div>
+      </form>
+
+      {hasResult ? (
+        <div className="fadein">
+          <div className="row" style={{ marginBottom: 14, gap: 8 }}>
+            <span className="muted" style={{ fontSize: 13 }}>
+              "<b style={{ color: 'var(--fg-primary)' }}>{query}</b>" 검색 결과
+            </span>
+            <span className="muted" style={{ fontSize: 12.5 }}>
+              · 약 {elapsedSeconds}초
+            </span>
+          </div>
+          <EligibilityNotice result={result} />
+
+          {layout === 'overview' && (
+            <div className="col" style={{ gap: 'var(--gap)' }}>
+              {aiBlock}
+              {faqBlock}
+            </div>
+          )}
+
+          {layout === 'tabs' && (
+            <div>
+              <div className="tabs" style={{ marginBottom: 16 }}>
+                <button className={tab === 'all' ? 'on' : ''} onClick={() => setTab('all')}>
+                  전체
+                </button>
+                <button className={tab === 'ai' ? 'on' : ''} onClick={() => setTab('ai')}>
+                  <SparklesIcon className="size-4" /> AI 답변
+                </button>
+                <button className={tab === 'faq' ? 'on' : ''} onClick={() => setTab('faq')}>
+                  <BookOpenIcon className="size-4" /> FAQ <span className="ct">{faqResults.length}</span>
+                </button>
+              </div>
+              <div className="col" style={{ gap: 'var(--gap)' }}>
+                {(tab === 'all' || tab === 'ai') && aiBlock}
+                {(tab === 'all' || tab === 'faq') && faqBlock}
+              </div>
+            </div>
+          )}
+
+          {layout === 'rail' && (
+            <div className="grid search-result-grid" style={{ gridTemplateColumns: 'minmax(0,1fr) 300px', alignItems: 'start' }}>
+              <div className="col" style={{ gap: 'var(--gap)' }}>
+                {aiBlock}
+                {faqBlock}
+              </div>
+              {sideRail}
+            </div>
+          )}
+        </div>
+      ) : (
+        <>
+          {layout === 'overview' && <div className="fadein">{readyOverview}</div>}
+
+          {layout === 'tabs' && <div className="fadein">{readyTabs}</div>}
+
+          {layout === 'rail' && (
+            <div className="grid search-result-grid" style={{ gridTemplateColumns: 'minmax(0,1fr) 300px', alignItems: 'start' }}>
+              {readyOverview}
+              {sideRail}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
