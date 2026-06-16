@@ -93,6 +93,10 @@ class BoardKnowledgeRequest(KnowledgeMetadataRequest):
     table_prompt: str | None = None
 
 
+class BoardViewProxyRequest(BaseModel):
+    file_path: str = Field(min_length=1)
+
+
 class ScanKnowledgeRequest(KnowledgeMetadataRequest):
     title: str = "입력 폴더 스캔"
     body: str | None = "LightRAG input directory scan"
@@ -969,6 +973,24 @@ async def get_kms_document_preview(
             "GET",
             f"/documents/{doc_id}/preview",
             workspace=effective_workspace,
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_lightrag_error(exc)
+
+
+@router.post("/board/view")
+async def view_board_knowledge_source(
+    payload: BoardViewProxyRequest,
+    user: dict = Depends(get_current_user),
+    kms_workspace: str | None = Query(default=None),
+) -> dict:
+    effective_workspace = _effective_kms_workspace(user, kms_workspace)
+    try:
+        return await lightrag_client.request_json(
+            "POST",
+            "/api/board/view",
+            workspace=effective_workspace,
+            json_body={"file_path": payload.file_path},
         )
     except httpx.HTTPStatusError as exc:
         _raise_lightrag_error(exc)

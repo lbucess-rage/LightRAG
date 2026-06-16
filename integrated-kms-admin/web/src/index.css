@@ -205,6 +205,87 @@
     box-shadow: 0 0 0 3px var(--accent-ring);
   }
 
+  .reference-card-head {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+  }
+
+  .reference-toggle {
+    width: 28px;
+    height: 28px;
+    margin-top: -3px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--fg-secondary);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .reference-toggle:hover {
+    border-color: var(--border-default);
+    background: var(--bg-subtle);
+    color: var(--fg-primary);
+  }
+
+  .reference-card-main {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .reference-card-title {
+    min-width: 0;
+    color: var(--fg-primary);
+    font-size: 13px;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+  }
+
+  .reference-actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    margin-left: auto;
+  }
+
+  .reference-detail {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border-subtle);
+  }
+
+  .reference-path {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .reference-text-excerpt {
+    display: -webkit-box;
+    overflow: hidden;
+    margin-top: 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--bg-subtle);
+    color: var(--fg-secondary);
+    font-size: 12px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 6;
+  }
+
   .reference-image-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -247,6 +328,17 @@
     line-height: 1.5;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 3;
+  }
+
+  @media (max-width: 760px) {
+    .reference-card-main {
+      flex-direction: column;
+    }
+
+    .reference-actions {
+      justify-content: flex-start;
+      margin-left: 0;
+    }
   }
 
   .category-filter-count {

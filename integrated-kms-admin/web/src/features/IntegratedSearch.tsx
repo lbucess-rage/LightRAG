@@ -1,10 +1,15 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import {
   BookOpenIcon,
   CheckIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
   DownloadIcon,
   ExternalLinkIcon,
   FilterIcon,
+  FileTextIcon,
   ImageIcon,
   InfoIcon,
   RotateCcwIcon,
@@ -41,6 +46,14 @@ type KmsSearchOptions = {
   include_chunk_content: boolean
   highlight_entities: boolean
   enable_rerank: boolean
+}
+
+type ReferencePreviewState = {
+  kind: 'document' | 'board'
+  title: string
+  loading: boolean
+  error: string
+  data: any
 }
 
 const BRIEF_ANSWER_RESPONSE_TYPE = "Brief answer: MAXIMUM 5 bullet points using '- ' (hyphen+space). Each point is one concise line. Fewer is better."
@@ -130,11 +143,82 @@ function referenceTitle(reference: any) {
   return reference.title || reference.doc_nm || reference.file_name || reference.file_path || reference.doc_id || '참조 문서'
 }
 
-function referenceOpenUrl(reference: any) {
-  const downloadUrl = typeof reference.download_url === 'string' ? reference.download_url.trim() : ''
-  if (downloadUrl) return downloadUrl
-  const filePath = typeof reference.file_path === 'string' ? reference.file_path.trim() : ''
-  return /^https?:\/\//.test(filePath) ? filePath : ''
+function numericScore(value: unknown) {
+  const score = Number(value)
+  return Number.isFinite(score) ? score : null
+}
+
+function referenceScore(reference: any) {
+  const ownScore = numericScore(reference?.score)
+  if (ownScore !== null) return ownScore
+
+  const scoreCandidates: number[] = []
+  if (Array.isArray(reference?.scores)) {
+    reference.scores.forEach((score: unknown) => {
+      const parsed = numericScore(score)
+      if (parsed !== null) scoreCandidates.push(parsed)
+    })
+  }
+  if (Array.isArray(reference?.structured_content)) {
+    reference.structured_content.forEach((item: any) => {
+      const parsed = numericScore(item?.score)
+      if (parsed !== null) scoreCandidates.push(parsed)
+    })
+  }
+  return scoreCandidates.length ? Math.max(...scoreCandidates) : null
+}
+
+function sortReferencesByScore(references: any[]) {
+  return references
+    .map((reference, index) => ({ reference, index, score: referenceScore(reference) }))
+    .sort((a, b) => {
+      if (a.score === null && b.score === null) return a.index - b.index
+      if (a.score === null) return 1
+      if (b.score === null) return -1
+      if (a.score !== b.score) return b.score - a.score
+      return a.index - b.index
+    })
+    .map((item) => item.reference)
+}
+
+function referenceFilePath(reference: any) {
+  return typeof reference?.file_path === 'string' ? reference.file_path.trim() : ''
+}
+
+function isBoardReference(reference: any) {
+  const filePath = referenceFilePath(reference)
+  if (!/^https?:\/\//.test(filePath)) return false
+  try {
+    const url = new URL(filePath)
+    return /\/api\/board(\/|$)/.test(url.pathname)
+  } catch {
+    return filePath.includes('/api/board/')
+  }
+}
+
+function referenceEmbeddedText(reference: any) {
+  const content = Array.isArray(reference?.content) ? reference.content.filter(Boolean).join('\n\n') : ''
+  if (content.trim()) return content
+  const structured = Array.isArray(reference?.structured_content) ? reference.structured_content : []
+  return structured
+    .map((item: any) => safeString(item?.content || item?.text || item?.analysis?.description || item?.entity?.summary))
+    .filter(Boolean)
+    .join('\n\n')
+}
+
+function previewText(data: any) {
+  const content = safeString(data?.content)
+  if (content.trim()) return content
+  const chunks = Array.isArray(data?.chunks) ? data.chunks : []
+  return chunks.map((chunk: any) => safeString(chunk?.content)).filter(Boolean).join('\n\n')
+}
+
+function prettyJson(value: unknown) {
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
 }
 
 function imageSource(image: any) {
@@ -223,33 +307,70 @@ function scrollToReference(refId: string) {
   window.history.replaceState(null, '', `#${referenceAnchorId(refId)}`)
 }
 
-function CitationText({ text, references }: { text: string; references: any[] }) {
+function markdownWithCitationLinks(text: string, references: any[]) {
   const refsById = new Map(references.map((reference, index) => [referenceId(reference, index), reference]))
-  const parts = text.split(/(\[\d{1,3}\])/g)
+  return text.replace(/\[(\d{1,3})\]/g, (match, refId, offset, fullText) => {
+    if (offset > 0 && fullText[offset - 1] === '^') return match
+    if (!refsById.has(refId)) return match
+    return `[\\[${refId}\\]](#${referenceAnchorId(refId)})`
+  })
+}
+
+function CitationText({
+  text,
+  references,
+  onReferenceSelect
+}: {
+  text: string
+  references: any[]
+  onReferenceSelect?: (refId: string) => void
+}) {
+  const markdown = markdownWithCitationLinks(text, references)
 
   return (
-    <>
-      {parts.map((part, index) => {
-        const match = part.match(/^\[(\d{1,3})\]$/)
-        if (!match) return <span key={`${part}-${index}`}>{part}</span>
-        const ref = refsById.get(match[1])
-        if (!ref) return <span key={`${part}-${index}`}>{part}</span>
-        return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        a: ({ href, children }) => {
+          const targetAnchor = href?.startsWith('#kms-reference-') ? href.slice(1) : ''
+          const refId = targetAnchor
+            ? references
+              .map((reference, index) => referenceId(reference, index))
+              .find((id) => referenceAnchorId(id) === targetAnchor)
+            : ''
+          const citationReference = refId
+            ? references.find((reference, index) => referenceId(reference, index) === refId)
+            : null
+          if (refId) {
+            return (
+              <a
+                className="citation-link"
+                href={href}
+                title={`${citationReference ? referenceTitle(citationReference) : `참조 ${refId}`} 근거로 이동`}
+                onClick={(event) => {
+                  event.preventDefault()
+                  onReferenceSelect?.(refId)
+                  scrollToReference(refId)
+                }}
+              >
+                {children}
+              </a>
+            )
+          }
+          return (
           <a
-            key={`${match[1]}-${index}`}
-            className="citation-link"
-            href={`#${referenceAnchorId(match[1])}`}
-            title={`${referenceTitle(ref)} 근거로 이동`}
-            onClick={(event) => {
-              event.preventDefault()
-              scrollToReference(match[1])
-            }}
+            href={href}
+            target={href?.startsWith('http') ? '_blank' : undefined}
+            rel={href?.startsWith('http') ? 'noopener noreferrer' : undefined}
           >
-            [{match[1]}]
+            {children}
           </a>
-        )
-      })}
-    </>
+          )
+        }
+      }}
+    >
+      {markdown}
+    </ReactMarkdown>
   )
 }
 
@@ -286,22 +407,22 @@ function EligibilityNotice({ result }: { result: any }) {
   if (!messages.length) return null
 
   return (
-    <div className="card" style={{ padding: 14, marginBottom: 14, borderColor: '#f3d89a', background: '#fffaf0' }}>
+    <div className="card" style={{ padding: 12, borderColor: 'var(--border-default)', background: 'var(--bg-elevated)' }}>
       <div className="row" style={{ gap: 9, alignItems: 'flex-start' }}>
-        <InfoIcon className="size-4" style={{ color: '#b7791f', marginTop: 2, flexShrink: 0 }} />
+        <InfoIcon className="size-4" style={{ color: 'var(--fg-secondary)', marginTop: 2, flexShrink: 0 }} />
         <div className="col" style={{ gap: 7, minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-primary)' }}>
-            유효하지 않은 지식은 답변 후보에서 제외되었습니다.
+            검색 후보 적용 내역
           </div>
           <div className="row wrap" style={{ gap: 7 }}>
             {messages.map((message) => (
-              <span key={message.key} className="badge amber">
+              <span key={message.key} className="badge gray">
                 {message.label} 제외 {message.count}건{message.reasons ? ` · ${message.reasons}` : ''}
               </span>
             ))}
           </div>
           <div className="muted" style={{ fontSize: 12, lineHeight: 1.55 }}>
-            선택한 고객센터, 워크스페이스, 카테고리 범위에는 있었지만 유효기간 또는 사용 여부 조건을 통과하지 못해 LightRAG 검색 후보로 전달하지 않았습니다.
+            선택한 고객센터, 워크스페이스, 카테고리 범위에는 있었지만 유효기간 또는 사용 여부 조건을 통과하지 못한 항목은 LightRAG 검색 후보로 전달하지 않았습니다.
           </div>
           {messages.some((message) => message.items.length > 0) && (
             <div className="row wrap" style={{ gap: 6 }}>
@@ -320,13 +441,226 @@ function EligibilityNotice({ result }: { result: any }) {
   )
 }
 
-function AiAnswer({ result }: { result: any }) {
+function ReferencePreviewModal({ preview, onClose }: { preview: ReferencePreviewState | null; onClose: () => void }) {
+  if (!preview) return null
+
+  const documentText = preview.kind === 'document' ? previewText(preview.data) : ''
+  const board = preview.kind === 'board' ? preview.data : null
+  const attachments = Array.isArray(board?.attachments) ? board.attachments : []
+
+  return (
+    <div className="overlay" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <div className="modal lg">
+        <div className="modal-h">
+          {preview.kind === 'board' ? <BookOpenIcon className="size-5" /> : <FileTextIcon className="size-5" />}
+          <div className="t">{preview.title}</div>
+          <button type="button" className="x" onClick={onClose} aria-label="닫기">
+            <XIcon className="size-5" />
+          </button>
+        </div>
+        <div className="modal-b">
+          {preview.loading && <div className="empty">내용을 불러오는 중입니다.</div>}
+          {preview.error && (
+            <div className="badge red" style={{ justifyContent: 'flex-start', whiteSpace: 'normal', borderRadius: 'var(--radius-md)', padding: 10 }}>
+              {preview.error}
+            </div>
+          )}
+          {!preview.loading && !preview.error && preview.kind === 'document' && (
+            <div className="col" style={{ gap: 14 }}>
+              <div className="row wrap" style={{ gap: 8 }}>
+                {preview.data?.raw_kind && <span className="badge gray">{preview.data.raw_kind}</span>}
+                {preview.data?.chunks_count !== undefined && <span className="badge outline">청크 {preview.data.chunks_count}개</span>}
+                {preview.data?.content_length !== undefined && <span className="badge outline">본문 {Number(preview.data.content_length || 0).toLocaleString()}자</span>}
+              </div>
+              <div
+                className="card"
+                style={{
+                  padding: 14,
+                  maxHeight: '52vh',
+                  overflow: 'auto',
+                  whiteSpace: 'pre-wrap',
+                  lineHeight: 1.65,
+                  color: 'var(--fg-primary-soft)'
+                }}
+              >
+                {documentText || '표시할 텍스트 본문이 없습니다.'}
+              </div>
+              {Array.isArray(preview.data?.chunks) && preview.data.chunks.length > 0 && (
+                <details>
+                  <summary className="eyebrow" style={{ cursor: 'pointer' }}>청크별 본문 보기</summary>
+                  <div className="col" style={{ gap: 8, marginTop: 10 }}>
+                    {preview.data.chunks.map((chunk: any, index: number) => (
+                      <div key={chunk.id || index} className="card" style={{ padding: 12 }}>
+                        <div className="row wrap" style={{ gap: 7, marginBottom: 8 }}>
+                          <span className="badge outline">#{index + 1}</span>
+                          {chunk.tokens !== undefined && <span className="badge gray">{chunk.tokens} tokens</span>}
+                        </div>
+                        <div style={{ whiteSpace: 'pre-wrap', fontSize: 12.5, lineHeight: 1.6 }}>
+                          {chunk.content || '청크 본문이 없습니다.'}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
+            </div>
+          )}
+          {!preview.loading && !preview.error && preview.kind === 'board' && (
+            <div className="col" style={{ gap: 14 }}>
+              {!board?.success && (
+                <div className="badge red" style={{ justifyContent: 'flex-start', whiteSpace: 'normal', borderRadius: 'var(--radius-md)', padding: 10 }}>
+                  {board?.error || '게시글 원문을 불러오지 못했습니다.'}
+                </div>
+              )}
+              {board?.success && (
+                <>
+                  <div>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--fg-primary)' }}>{board.title || preview.title}</div>
+                    <div className="row wrap muted" style={{ gap: 10, marginTop: 8, fontSize: 12 }}>
+                      {board.date && <span>{board.date}</span>}
+                      {board.author && <span>작성자 {board.author}</span>}
+                    </div>
+                  </div>
+                  <div className="card" style={{ padding: 14, maxHeight: '44vh', overflow: 'auto', whiteSpace: 'pre-wrap', lineHeight: 1.65 }}>
+                    {board.body || '게시글 본문이 없습니다.'}
+                  </div>
+                  {attachments.length > 0 && (
+                    <div>
+                      <div className="eyebrow" style={{ marginBottom: 8 }}>첨부 {attachments.length}건</div>
+                      <div className="row wrap" style={{ gap: 8 }}>
+                        {attachments.map((attachment: any, index: number) => {
+                          const url = attachment.url || attachment.download_url || attachment.filePath || attachment.file_path
+                          const name = attachment.name || attachment.fileName || attachment.file_name || `첨부 ${index + 1}`
+                          return url ? (
+                            <a key={`${url}-${index}`} className="btn btn-secondary btn-sm" href={url} target="_blank" rel="noopener noreferrer">
+                              <ExternalLinkIcon className="size-4" /> {name}
+                            </a>
+                          ) : (
+                            <span key={`${name}-${index}`} className="badge gray">{name}</span>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {board.raw_data && (
+                    <details>
+                      <summary className="eyebrow" style={{ cursor: 'pointer' }}>원본 JSON 보기</summary>
+                      <pre className="mono" style={{ marginTop: 10, maxHeight: 260, overflow: 'auto', padding: 12, borderRadius: 'var(--radius-md)', background: 'var(--bg-subtle)', fontSize: 11.5 }}>
+                        {prettyJson(board.raw_data)}
+                      </pre>
+                    </details>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="modal-f">
+          <Button type="button" variant="outline" onClick={onClose}>닫기</Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AiAnswer({ result, kmsWorkspace }: { result: any; kmsWorkspace: string }) {
   const answerText = textFromGenerative(result)
-  const references = result?.references || result?.generative_answer?.references || []
+  const references = useMemo(
+    () => sortReferencesByScore(result?.references || result?.generative_answer?.references || []),
+    [result]
+  )
   const keywords = result?.keywords || []
+  const [preview, setPreview] = useState<ReferencePreviewState | null>(null)
+  const [expandedReferenceIds, setExpandedReferenceIds] = useState<Set<string>>(() => new Set())
+
+  useEffect(() => {
+    const refIdFromHash = window.location.hash.match(/^#kms-reference-(.+)$/)?.[1]
+    if (!refIdFromHash) return
+    const refId = references
+      .map((reference, index) => referenceId(reference, index))
+      .find((id) => referenceAnchorId(id).replace(/^kms-reference-/, '') === refIdFromHash)
+    if (refId) {
+      setExpandedReferenceIds((current) => {
+        if (current.has(refId)) return current
+        return new Set([...current, refId])
+      })
+    }
+  }, [references])
+
+  const toggleReference = (refId: string) => {
+    setExpandedReferenceIds((current) => {
+      const next = new Set(current)
+      if (next.has(refId)) {
+        next.delete(refId)
+      } else {
+        next.add(refId)
+      }
+      return next
+    })
+  }
+
+  const expandReference = (refId: string) => {
+    setExpandedReferenceIds((current) => {
+      if (current.has(refId)) return current
+      return new Set([...current, refId])
+    })
+  }
+
+  const openDocumentPreview = async (reference: any) => {
+    const title = referenceTitle(reference)
+    setPreview({ kind: 'document', title, loading: true, error: '', data: null })
+    const embeddedText = referenceEmbeddedText(reference)
+    try {
+      if (reference.doc_id) {
+        const response = await api.get(`/api/knowledge/kms-documents/${encodeURIComponent(reference.doc_id)}/preview`, {
+          params: { kms_workspace: kmsWorkspace }
+        })
+        setPreview({ kind: 'document', title, loading: false, error: '', data: response.data })
+      } else {
+        setPreview({
+          kind: 'document',
+          title,
+          loading: false,
+          error: embeddedText ? '' : '문서 ID가 없어 원문 미리보기를 불러올 수 없습니다.',
+          data: { content: embeddedText, chunks: [] }
+        })
+      }
+    } catch (error: any) {
+      setPreview({
+        kind: 'document',
+        title,
+        loading: false,
+        error: error?.response?.data?.detail || '본문을 불러오지 못했습니다.',
+        data: embeddedText ? { content: embeddedText, chunks: [] } : null
+      })
+    }
+  }
+
+  const openBoardPreview = async (reference: any) => {
+    const title = referenceTitle(reference)
+    const filePath = referenceFilePath(reference)
+    setPreview({ kind: 'board', title, loading: true, error: '', data: null })
+    try {
+      const response = await api.post(
+        '/api/knowledge/board/view',
+        { file_path: filePath },
+        { params: { kms_workspace: kmsWorkspace } }
+      )
+      setPreview({ kind: 'board', title: response.data?.title || title, loading: false, error: '', data: response.data })
+    } catch (error: any) {
+      setPreview({
+        kind: 'board',
+        title,
+        loading: false,
+        error: error?.response?.data?.detail || '게시글 원문을 불러오지 못했습니다.',
+        data: null
+      })
+    }
+  }
 
   return (
     <div className="card" style={{ overflow: 'hidden', borderColor: '#c9d8f7' }}>
+      <ReferencePreviewModal preview={preview} onClose={() => setPreview(null)} />
       <div style={{ background: 'linear-gradient(180deg, var(--accent-soft), #fff)', padding: 'var(--pad-card)' }}>
         <div className="row" style={{ gap: 9, marginBottom: 12 }}>
           <span className="row" style={{ gap: 7, color: 'var(--accent)', fontWeight: 700, fontSize: 13 }}>
@@ -339,10 +673,8 @@ function AiAnswer({ result }: { result: any }) {
           <span className="badge outline">생성형 KMS</span>
         </div>
 
-        <div className="rich">
-          <p style={{ whiteSpace: 'pre-wrap' }}>
-            <CitationText text={answerText} references={references} />
-          </p>
+        <div className="rich markdown-answer">
+          <CitationText text={answerText} references={references} onReferenceSelect={expandReference} />
         </div>
 
         {keywords.length > 0 && (
@@ -368,8 +700,15 @@ function AiAnswer({ result }: { result: any }) {
             <div className="col" style={{ gap: 7 }}>
               {references.map((reference: any, index: number) => {
                 const refId = referenceId(reference, index)
-                const openUrl = referenceOpenUrl(reference)
+                const refScore = referenceScore(reference)
                 const downloadUrl = typeof reference.download_url === 'string' ? reference.download_url.trim() : ''
+                const boardRef = isBoardReference(reference)
+                const filePathUrl = /^https?:\/\//.test(referenceFilePath(reference)) ? referenceFilePath(reference) : ''
+                const openUrl = downloadUrl || (!boardRef ? filePathUrl : '')
+                const hasTextPreview = Boolean(reference.doc_id || referenceEmbeddedText(reference).trim())
+                const imageCount = referenceImages(reference).length
+                const embeddedText = referenceEmbeddedText(reference).trim()
+                const isExpanded = expandedReferenceIds.has(refId)
                 return (
                 <div
                   id={referenceAnchorId(refId)}
@@ -383,60 +722,129 @@ function AiAnswer({ result }: { result: any }) {
                     scrollMarginTop: 90
                   }}
                 >
-                  <div className="row" style={{ gap: 10 }}>
-                    <span
-                      style={{
-                        width: 22,
-                        height: 22,
-                        borderRadius: 6,
-                        background: 'var(--accent-soft)',
-                        color: 'var(--accent)',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: 11,
-                        fontWeight: 700,
-                        flexShrink: 0
-                      }}
+                  <div className="reference-card-head">
+                    <button
+                      type="button"
+                      className="reference-toggle"
+                      onClick={() => toggleReference(refId)}
+                      aria-expanded={isExpanded}
+                      aria-controls={`${referenceAnchorId(refId)}-detail`}
+                      title={isExpanded ? '근거 상세 접기' : '근거 상세 보기'}
                     >
-                      {refId}
-                    </span>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-primary)' }}>
-                      {referenceTitle(reference)}
-                    </span>
-                    <span className="muted" style={{ fontSize: 12 }}>
-                      · {reference.workspace || reference.category || 'KMS'}
-                    </span>
-                    <div className="grow" />
-                    {openUrl ? (
-                      <a
-                        className="btn btn-ghost btn-sm"
-                        href={openUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        title="원본 문서 열기"
-                        style={{ whiteSpace: 'nowrap' }}
-                      >
-                        <ExternalLinkIcon className="size-4" /> 원본 보기
-                      </a>
-                    ) : (
-                      <span className="muted" style={{ fontSize: 12 }}>
-                        원본 링크 없음
-                      </span>
-                    )}
-                    {downloadUrl && (
-                      <a
-                        className="btn btn-ghost btn-sm"
-                        href={downloadUrl}
-                        download
-                        title="원본 문서 다운로드"
-                        style={{ whiteSpace: 'nowrap' }}
-                      >
-                        <DownloadIcon className="size-4" /> 다운로드
-                      </a>
-                    )}
+                      {isExpanded ? <ChevronDownIcon className="size-4" /> : <ChevronRightIcon className="size-4" />}
+                    </button>
+                    <div className="reference-card-main">
+                      <div className="row wrap" style={{ gap: 8, minWidth: 0 }}>
+                        <span
+                          style={{
+                            width: 22,
+                            height: 22,
+                            borderRadius: 6,
+                            background: 'var(--accent-soft)',
+                            color: 'var(--accent)',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: 11,
+                            fontWeight: 700,
+                            flexShrink: 0
+                          }}
+                        >
+                          {refId}
+                        </span>
+                        <span className="reference-card-title">
+                          {referenceTitle(reference)}
+                        </span>
+                        <span className="muted" style={{ fontSize: 12 }}>
+                          · {reference.workspace || reference.category || 'KMS'}
+                        </span>
+                        {refScore !== null && (
+                          <span className="badge outline num" title="검색 관련도 점수">
+                            점수 {refScore.toFixed(4)}
+                          </span>
+                        )}
+                        {imageCount > 0 && (
+                          <span className="badge gray">
+                            이미지 {imageCount}건
+                          </span>
+                        )}
+                      </div>
+                      <div className="reference-actions">
+                        {hasTextPreview && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => openDocumentPreview(reference)}
+                            title="추출된 본문과 청크 보기"
+                            style={{ whiteSpace: 'nowrap' }}
+                          >
+                            <FileTextIcon className="size-4" /> 본문 보기
+                          </button>
+                        )}
+                        {boardRef && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => openBoardPreview(reference)}
+                            title="게시판 API 원문 보기"
+                            style={{ whiteSpace: 'nowrap' }}
+                          >
+                            <BookOpenIcon className="size-4" /> 게시글 보기
+                          </button>
+                        )}
+                        {openUrl ? (
+                          <a
+                            className="btn btn-ghost btn-sm"
+                            href={openUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={downloadUrl ? '원본 파일 열기' : '원본 링크 열기'}
+                            style={{ whiteSpace: 'nowrap' }}
+                          >
+                            <ExternalLinkIcon className="size-4" /> {downloadUrl ? '원본 파일' : '원본 링크'}
+                          </a>
+                        ) : (
+                          <span className="muted" style={{ fontSize: 12 }}>
+                            원본 파일 없음
+                          </span>
+                        )}
+                        {downloadUrl && (
+                          <a
+                            className="btn btn-ghost btn-sm"
+                            href={downloadUrl}
+                            download
+                            title="원본 문서 다운로드"
+                            style={{ whiteSpace: 'nowrap' }}
+                          >
+                            <DownloadIcon className="size-4" /> 다운로드
+                          </a>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <ReferenceImages reference={reference} />
+                  {isExpanded && (
+                    <div id={`${referenceAnchorId(refId)}-detail`} className="reference-detail">
+                      <div className="row wrap" style={{ gap: 7 }}>
+                        {reference.doc_id && <span className="badge outline">문서 ID {reference.doc_id}</span>}
+                        {referenceFilePath(reference) && (
+                          <span className="badge outline reference-path" title={referenceFilePath(reference)}>
+                            출처 {referenceFilePath(reference)}
+                          </span>
+                        )}
+                      </div>
+                      {embeddedText && (
+                        <div className="reference-text-excerpt">
+                          {embeddedText.length > 500 ? `${embeddedText.slice(0, 500)}...` : embeddedText}
+                        </div>
+                      )}
+                      <ReferenceImages reference={reference} />
+                      {!embeddedText && imageCount === 0 && (
+                        <div className="empty" style={{ padding: '10px 0', textAlign: 'left' }}>
+                          표시할 상세 정보가 없습니다. 필요한 경우 본문 보기 또는 원본 파일을 확인하세요.
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
                 )
               })}
@@ -664,7 +1072,8 @@ export default function IntegratedSearch() {
   const faqResults = result?.faq_results || []
   const hasResult = Boolean(result)
   const elapsedSeconds = result ? (Number(result.latency_ms || 0) / 1000).toFixed(2) : '0.00'
-  const aiBlock = includeGenerative && result ? <AiAnswer result={result} /> : null
+  const eligibilityNotice = <EligibilityNotice result={result} />
+  const aiBlock = includeGenerative && result ? <AiAnswer result={result} kmsWorkspace={effectiveKmsWorkspace} /> : null
   const faqBlock = includeFaq && result ? (
     <div className="col" style={{ gap: 'var(--gap)' }}>
       <div className="row" style={{ gap: 8 }}>
@@ -776,6 +1185,8 @@ export default function IntegratedSearch() {
           </div>
         </div>
       </div>
+
+      {hasResult && eligibilityNotice}
 
       <div className="card">
         <div className="card-h">
@@ -1133,12 +1544,12 @@ export default function IntegratedSearch() {
               · 약 {elapsedSeconds}초
             </span>
           </div>
-          <EligibilityNotice result={result} />
 
           {layout === 'overview' && (
             <div className="col" style={{ gap: 'var(--gap)' }}>
               {aiBlock}
               {faqBlock}
+              {eligibilityNotice}
             </div>
           )}
 
@@ -1158,6 +1569,7 @@ export default function IntegratedSearch() {
               <div className="col" style={{ gap: 'var(--gap)' }}>
                 {(tab === 'all' || tab === 'ai') && aiBlock}
                 {(tab === 'all' || tab === 'faq') && faqBlock}
+                {eligibilityNotice}
               </div>
             </div>
           )}

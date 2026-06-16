@@ -3,7 +3,12 @@ import json
 from datetime import UTC, datetime
 
 from kms_admin.routers import knowledge
-from kms_admin.routers.knowledge import FaqAnswerUpdateRequest, _create_completed_faq_job, _faq_answer_update_body
+from kms_admin.routers.knowledge import (
+    BoardViewProxyRequest,
+    FaqAnswerUpdateRequest,
+    _create_completed_faq_job,
+    _faq_answer_update_body,
+)
 
 
 def test_faq_answer_update_body_serializes_datetimes_for_lightrag():
@@ -61,3 +66,32 @@ def test_completed_faq_job_records_answer_ref_and_full_progress(monkeypatch):
     assert metadata["workspace"] == "faq-ws"
     assert metadata["answer_id"] == "answer-1"
     assert metadata["faq_response"]["title"] == "FAQ"
+
+
+def test_board_view_proxy_uses_effective_kms_workspace(monkeypatch):
+    calls = []
+
+    class FakeLightRagClient:
+        async def request_json(self, method, path, *, workspace=None, json_body=None, **kwargs):
+            calls.append((method, path, workspace, json_body))
+            return {"success": True, "title": "게시글", "body": "본문"}
+
+    monkeypatch.setattr(knowledge, "lightrag_client", FakeLightRagClient())
+
+    response = asyncio.run(
+        knowledge.view_board_knowledge_source(
+            BoardViewProxyRequest(file_path="https://kevcs-ap.lbucess.com/api/board/post-1"),
+            user={"role": "admin", "kms_workspace": "base"},
+            kms_workspace="kevcs",
+        )
+    )
+
+    assert response["success"] is True
+    assert calls == [
+        (
+            "POST",
+            "/api/board/view",
+            "kevcs",
+            {"file_path": "https://kevcs-ap.lbucess.com/api/board/post-1"},
+        )
+    ]
