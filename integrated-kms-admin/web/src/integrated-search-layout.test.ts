@@ -57,6 +57,18 @@ test('integrated search renders structured image evidence from LightRAG referenc
   expect(source).toContain('이미지 근거')
 })
 
+test('integrated search exposes FAQ candidate evidence from answer search results', () => {
+  const source = readFileSync(resolve(import.meta.dir, 'features/IntegratedSearch.tsx'), 'utf8')
+  const css = readFileSync(resolve(import.meta.dir, 'index.css'), 'utf8')
+
+  expect(source).toContain('function faqCandidateList')
+  expect(source).toContain('function faqCandidateGuidance')
+  expect(source).toContain('후보 근거 보기')
+  expect(source).toContain('FAQ 후보 근거')
+  expect(source).toContain('className="faq-candidate-panel"')
+  expect(css).toContain('.faq-candidate-card.selected')
+})
+
 test('integrated search opens category options from a picker and shows selected categories only', () => {
   const source = readFileSync(resolve(import.meta.dir, 'features/IntegratedSearch.tsx'), 'utf8')
 

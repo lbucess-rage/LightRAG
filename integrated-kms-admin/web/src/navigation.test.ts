@@ -54,3 +54,13 @@ test('app shell keeps visited tab views mounted', () => {
   expect(source).toContain('hidden={effectiveActive !== item.key}')
   expect(source).toContain('scrollPositions')
 })
+
+test('stats tab refreshes when it becomes active again', () => {
+  const appSource = readFileSync(resolve(import.meta.dir, 'App.tsx'), 'utf8')
+  const sectionSource = readFileSync(resolve(import.meta.dir, 'features/AdminSections.tsx'), 'utf8')
+
+  expect(appSource).toContain("<Stats active={effectiveActive === 'stats'} />")
+  expect(sectionSource).toContain('export function Stats({ active = true }')
+  expect(sectionSource).toContain('if (!active) return')
+  expect(sectionSource).toContain('}, [active, period])')
+})

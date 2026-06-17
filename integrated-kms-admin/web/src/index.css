@@ -541,6 +541,75 @@
     -webkit-line-clamp: 3;
   }
 
+  .faq-candidate-section {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-subtle);
+  }
+
+  .faq-candidate-toggle {
+    gap: 6px;
+  }
+
+  .faq-candidate-toggle svg {
+    transition: transform 0.16s ease;
+  }
+
+  .faq-candidate-panel {
+    margin-top: 10px;
+    padding: 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--bg-subtle);
+  }
+
+  .faq-candidate-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 9px;
+  }
+
+  .faq-candidate-card {
+    padding: 10px;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    background: #fff;
+  }
+
+  .faq-candidate-card.selected {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-ring);
+  }
+
+  .faq-candidate-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .faq-candidate-title {
+    overflow: hidden;
+    color: var(--fg-primary);
+    font-size: 13px;
+    font-weight: 800;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .faq-candidate-body {
+    display: -webkit-box;
+    overflow: hidden;
+    margin-top: 8px;
+    color: var(--fg-secondary);
+    font-size: 12.5px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+  }
+
   @media (max-width: 760px) {
     .source-drawer {
       width: 100vw;

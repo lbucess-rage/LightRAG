@@ -3123,6 +3123,8 @@ export function KnowledgeManagement() {
   const [documentStatus, setDocumentStatus] = useState('all')
   const [faqStatus, setFaqStatus] = useState('all')
   const [faqSearch, setFaqSearch] = useState('')
+  const [knowledgePage, setKnowledgePage] = useState(1)
+  const [knowledgePageSize, setKnowledgePageSize] = useState(10)
   const [faqWorkspaceError, setFaqWorkspaceError] = useState('')
   const [documentDetail, setDocumentDetail] = useState<KmsDocumentDetail | null>(null)
   const [documentDetailLoadingId, setDocumentDetailLoadingId] = useState<string | null>(null)
@@ -3163,12 +3165,12 @@ export function KnowledgeManagement() {
       kms_workspace: effectiveKmsWorkspace,
       faq_workspace: effectiveFaqWorkspace
     })
-    const faqParams = new URLSearchParams({ page_size: '20' })
+    const faqParams = new URLSearchParams({ page_size: '100' })
     if (faqStatus !== 'all') faqParams.set('status', faqStatus)
     if (faqSearch.trim()) faqParams.set('search', faqSearch.trim())
     faqParams.set('faq_workspace', effectiveFaqWorkspace)
     const documentParams = new URLSearchParams({
-      page_size: '20',
+      page_size: '100',
       status: documentStatus,
       kms_workspace: effectiveKmsWorkspace
     })
@@ -3463,6 +3465,23 @@ export function KnowledgeManagement() {
     () => knowledgeRows.filter((row) => activeKnowledgeTab === 'all' || row.kind === activeKnowledgeTab),
     [activeKnowledgeTab, knowledgeRows]
   )
+  const knowledgeTotalPages = Math.max(1, Math.ceil(visibleKnowledgeRows.length / knowledgePageSize))
+  const pagedKnowledgeRows = useMemo(
+    () => visibleKnowledgeRows.slice((knowledgePage - 1) * knowledgePageSize, knowledgePage * knowledgePageSize),
+    [knowledgePage, knowledgePageSize, visibleKnowledgeRows]
+  )
+  const knowledgeRangeStart = visibleKnowledgeRows.length ? (knowledgePage - 1) * knowledgePageSize + 1 : 0
+  const knowledgeRangeEnd = Math.min(visibleKnowledgeRows.length, knowledgePage * knowledgePageSize)
+
+  useEffect(() => {
+    setKnowledgePage(1)
+  }, [activeKnowledgeTab, documentStatus, effectiveFaqWorkspace, effectiveKmsWorkspace, faqSearch, faqStatus])
+
+  useEffect(() => {
+    if (knowledgePage > knowledgeTotalPages) {
+      setKnowledgePage(knowledgeTotalPages)
+    }
+  }, [knowledgePage, knowledgeTotalPages])
 
   const knowledgeCounts = useMemo(
     () => ({
@@ -4093,6 +4112,23 @@ export function KnowledgeManagement() {
             <RefreshCwIcon className="size-4" /> 새로고침
           </Button>
           <div className="grow" />
+          <span className="badge gray">
+            {knowledgeRangeStart.toLocaleString()}-{knowledgeRangeEnd.toLocaleString()} / {visibleKnowledgeRows.length.toLocaleString()}건
+          </span>
+          <select
+            className={selectClass}
+            style={{ width: 118 }}
+            value={knowledgePageSize}
+            onChange={(event) => {
+              setKnowledgePageSize(Number(event.target.value))
+              setKnowledgePage(1)
+            }}
+          >
+            <option value={10}>10개씩</option>
+            <option value={20}>20개씩</option>
+            <option value={50}>50개씩</option>
+            <option value={100}>100개씩</option>
+          </select>
           <span className="muted" style={{ fontSize: 12 }}>
             KMS <span className="mono">{effectiveKmsWorkspace}</span> · FAQ <span className="mono">{effectiveFaqWorkspace}</span>
           </span>
@@ -4128,7 +4164,7 @@ export function KnowledgeManagement() {
               </tr>
             </thead>
             <tbody>
-              {visibleKnowledgeRows.map((row) => (
+              {pagedKnowledgeRows.map((row) => (
                 <tr key={`${row.kind}-${row.id}`}>
                   <td>
                     <div className="row" style={{ gap: 6, alignItems: 'center' }}>
@@ -4206,7 +4242,7 @@ export function KnowledgeManagement() {
           </table>
         ) : (
           <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(330px,1fr))', padding: '0 8px 8px' }}>
-            {visibleKnowledgeRows.map((row) => (
+            {pagedKnowledgeRows.map((row) => (
               <div key={`${row.kind}-${row.id}`} className="card" style={{ padding: 'var(--pad-card)' }}>
                 <div className="row" style={{ gap: 8, marginBottom: 12 }}>
                   <span className={`badge ${row.kind === 'faq' ? 'blue' : 'gray'}`}>
@@ -4267,6 +4303,51 @@ export function KnowledgeManagement() {
               </div>
             ))}
             {!visibleKnowledgeRows.length && <div className="empty">등록된 지식이 없습니다.</div>}
+          </div>
+        )}
+        {visibleKnowledgeRows.length > 0 && (
+          <div className="row wrap" style={{ gap: 8, padding: '12px 14px 4px', borderTop: '1px solid var(--border-subtle)' }}>
+            <span className="muted" style={{ fontSize: 12 }}>
+              {knowledgeRangeStart.toLocaleString()}-{knowledgeRangeEnd.toLocaleString()} 표시 · 전체 {visibleKnowledgeRows.length.toLocaleString()}건
+            </span>
+            <div className="grow" />
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setKnowledgePage(1)}
+              disabled={knowledgePage <= 1}
+            >
+              처음
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setKnowledgePage((page) => Math.max(1, page - 1))}
+              disabled={knowledgePage <= 1}
+            >
+              이전
+            </Button>
+            <span className="badge gray">{knowledgePage} / {knowledgeTotalPages}</span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setKnowledgePage((page) => Math.min(knowledgeTotalPages, page + 1))}
+              disabled={knowledgePage >= knowledgeTotalPages}
+            >
+              다음
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setKnowledgePage(knowledgeTotalPages)}
+              disabled={knowledgePage >= knowledgeTotalPages}
+            >
+              마지막
+            </Button>
           </div>
         )}
       </div>
@@ -6005,7 +6086,7 @@ function MetricBlock({ label, value, unit }: { label: string; value: string | nu
   )
 }
 
-export function Stats() {
+export function Stats({ active = true }: { active?: boolean }) {
   const [stats, setStats] = useState<any>(null)
   const [period, setPeriod] = useState('7d')
   const [keywordDetail, setKeywordDetail] = useState<any>(null)
@@ -6025,8 +6106,9 @@ export function Stats() {
     }
   }
   useEffect(() => {
+    if (!active) return
     loadStats(period)
-  }, [period])
+  }, [active, period])
   const downloadStats = async () => {
     const response = await api.get(`/api/system/stats.csv?period=${encodeURIComponent(period)}`, { responseType: 'blob' })
     const url = URL.createObjectURL(new Blob([response.data], { type: 'text/csv;charset=utf-8' }))

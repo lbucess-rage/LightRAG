@@ -111,6 +111,47 @@ function faqBody(item: any) {
   return item.response || item.body || item.answer?.body || item.answer?.approved_summary || item.approved_summary || '본문이 없습니다.'
 }
 
+function faqCandidateList(item: any) {
+  for (const key of ['candidates', 'candidate_results', 'answer_candidates', 'related_candidates']) {
+    if (Array.isArray(item?.[key])) return item[key].filter(Boolean)
+  }
+  return []
+}
+
+function faqCandidateAnswer(candidate: any) {
+  return candidate?.answer || candidate?.selected_answer || candidate?.answer_item || candidate
+}
+
+function faqCandidateId(candidate: any, index: number) {
+  const answer = faqCandidateAnswer(candidate)
+  return String(answer?.answer_id || candidate?.answer_id || candidate?.id || index + 1)
+}
+
+function faqCandidateTitle(candidate: any, index: number) {
+  const answer = faqCandidateAnswer(candidate)
+  return answer?.title || candidate?.title || candidate?.question || `FAQ 후보 ${index + 1}`
+}
+
+function faqCandidateBody(candidate: any) {
+  const answer = faqCandidateAnswer(candidate)
+  return (
+    candidate?.response ||
+    candidate?.summary ||
+    answer?.approved_summary ||
+    answer?.summary ||
+    answer?.body ||
+    candidate?.reason ||
+    '후보 본문이 없습니다.'
+  )
+}
+
+function faqCandidateGuidance(candidate: any) {
+  if (Array.isArray(candidate?.matched_guidance)) return candidate.matched_guidance
+  if (Array.isArray(candidate?.guidance)) return candidate.guidance
+  if (Array.isArray(candidate?.answer?.matched_guidance)) return candidate.answer.matched_guidance
+  return []
+}
+
 function scorePercent(item: any) {
   const score = Number(item.score ?? item.confidence ?? item.similarity ?? 0)
   if (!Number.isFinite(score) || score <= 0) return null
@@ -953,6 +994,9 @@ function AiAnswer({ result, kmsWorkspace }: { result: any; kmsWorkspace: string 
 function FaqResult({ item, rank }: { item: any; rank: number }) {
   const pct = scorePercent(item)
   const keywords = item.keywords || item.tags || []
+  const candidates = faqCandidateList(item)
+  const [showCandidates, setShowCandidates] = useState(false)
+  const selectedAnswerId = item.answer_id || item.answer?.answer_id
 
   return (
     <div className="card" style={{ padding: 'var(--pad-card)' }}>
@@ -1001,6 +1045,69 @@ function FaqResult({ item, rank }: { item: any; rank: number }) {
               ))}
             </div>
           </div>
+          {candidates.length > 0 && (
+            <div className="faq-candidate-section">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="faq-candidate-toggle"
+                onClick={() => setShowCandidates((current) => !current)}
+                aria-expanded={showCandidates}
+              >
+                <ChevronRightIcon
+                  className="size-4"
+                  style={{ transform: showCandidates ? 'rotate(90deg)' : 'rotate(0deg)' }}
+                />
+                후보 근거 보기 {candidates.length}건
+              </Button>
+
+              {showCandidates && (
+                <div className="faq-candidate-panel">
+                  <div className="eyebrow">FAQ 후보 근거</div>
+                  <div className="faq-candidate-list">
+                    {candidates.map((candidate: any, candidateIndex: number) => {
+                      const candidatePct = scorePercent(candidate)
+                      const candidateId = faqCandidateId(candidate, candidateIndex)
+                      const guidance = faqCandidateGuidance(candidate)
+                      const isSelected = selectedAnswerId && selectedAnswerId === candidateId
+
+                      return (
+                        <div
+                          key={`${candidateId}-${candidateIndex}`}
+                          className={`faq-candidate-card${isSelected ? ' selected' : ''}`}
+                        >
+                          <div className="faq-candidate-head">
+                            <span className="reference-summary-rank">{candidateIndex + 1}</span>
+                            <div className="grow" style={{ minWidth: 0 }}>
+                              <div className="faq-candidate-title">{faqCandidateTitle(candidate, candidateIndex)}</div>
+                              <div className="reference-summary-meta">
+                                {candidateId}
+                                {candidate.selected_by && ` · ${candidate.selected_by}`}
+                                {candidate.reason && ` · ${candidate.reason}`}
+                              </div>
+                            </div>
+                            {isSelected && <span className="badge green">선택 답변</span>}
+                            {candidatePct !== null && <span className="badge outline">점수 {candidatePct}%</span>}
+                          </div>
+                          <div className="faq-candidate-body">{faqCandidateBody(candidate)}</div>
+                          {guidance.length > 0 && (
+                            <div className="row wrap" style={{ gap: 6, marginTop: 8 }}>
+                              {guidance.slice(0, 6).map((guide: unknown, guideIndex: number) => (
+                                <span key={`${candidateId}-guide-${guideIndex}`} className="badge gray">
+                                  {safeString(guide)}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

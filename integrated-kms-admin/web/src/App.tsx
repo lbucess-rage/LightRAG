@@ -125,7 +125,7 @@ export default function App() {
       case 'categories':
         return <Categories />
       case 'stats':
-        return <Stats />
+        return <Stats active={effectiveActive === 'stats'} />
       case 'tenants':
         return <Tenants />
       case 'users':
