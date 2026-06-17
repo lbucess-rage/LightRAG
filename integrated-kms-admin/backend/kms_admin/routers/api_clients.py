@@ -13,9 +13,41 @@ from pydantic import BaseModel, Field
 from ..config import settings
 from ..db import db
 from ..dependencies import audit_log, require_admin
-from ..security import generate_api_key, hash_api_key, mask_api_key_hash
+from ..security import (
+    decrypt_api_key,
+    encrypt_api_key,
+    generate_api_key,
+    hash_api_key,
+    mask_api_key_hash,
+    verify_password,
+)
 
 router = APIRouter(prefix="/api/external-clients", tags=["external-clients"])
+
+
+LIST_API_CLIENTS_SQL = """
+WITH client_call_stats AS (
+    SELECT actor_id AS client_id,
+           COUNT(search_id)::INT AS call_count,
+           MAX(create_time) AS last_search_at
+    FROM KMS_ADMIN_SEARCH_LOGS
+    WHERE actor_type = 'api_client'
+    GROUP BY actor_id
+)
+SELECT c.client_id, c.display_name, c.api_key_hash, c.is_active,
+       c.api_key_encrypted IS NOT NULL AS api_key_revealable,
+       c.tenant_id, t.name AS tenant_name,
+       COALESCE(t.kms_workspace, c.kms_workspace) AS kms_workspace,
+       COALESCE(t.faq_workspace, c.faq_workspace) AS faq_workspace,
+       c.scopes, c.rate_limit_per_minute, c.metadata,
+       c.last_used_at, c.create_time, c.update_time,
+       COALESCE(s.call_count, 0)::INT AS call_count,
+       s.last_search_at
+FROM KMS_ADMIN_API_CLIENTS c
+LEFT JOIN KMS_ADMIN_TENANTS t ON t.tenant_id = c.tenant_id
+LEFT JOIN client_call_stats s ON s.client_id = c.client_id
+ORDER BY c.create_time DESC
+"""
 
 
 def _json_array(value: object) -> list:
@@ -68,6 +100,10 @@ class ApiClientUpdateRequest(BaseModel):
     metadata: dict | None = None
 
 
+class ApiClientRevealRequest(BaseModel):
+    password: str = Field(min_length=1)
+
+
 async def _resolve_tenant(
     tenant_id: str | None,
     kms_workspace: str | None = None,
@@ -111,25 +147,7 @@ async def _resolve_tenant(
 
 @router.get("")
 async def list_api_clients(_: dict = Depends(require_admin)) -> dict:
-    rows = await db.fetch(
-        """
-        SELECT c.client_id, c.display_name, c.api_key_hash, c.is_active,
-               c.tenant_id, t.name AS tenant_name,
-               COALESCE(t.kms_workspace, c.kms_workspace) AS kms_workspace,
-               COALESCE(t.faq_workspace, c.faq_workspace) AS faq_workspace,
-               c.scopes, c.rate_limit_per_minute, c.metadata,
-               c.last_used_at, c.create_time, c.update_time,
-               COUNT(l.search_id)::INT AS call_count,
-               MAX(l.create_time) AS last_search_at
-        FROM KMS_ADMIN_API_CLIENTS c
-        LEFT JOIN KMS_ADMIN_TENANTS t ON t.tenant_id = c.tenant_id
-        LEFT JOIN KMS_ADMIN_SEARCH_LOGS l
-          ON l.actor_type = 'api_client'
-         AND l.actor_id = c.client_id
-        GROUP BY c.client_id
-        ORDER BY c.create_time DESC
-        """
-    )
+    rows = await db.fetch(LIST_API_CLIENTS_SQL)
     for row in rows:
         row["api_key_hint"] = mask_api_key_hash(row.pop("api_key_hash"))
         row["scopes"] = _json_array(row.get("scopes"))
@@ -223,14 +241,15 @@ async def create_api_client(
     await db.execute(
         """
         INSERT INTO KMS_ADMIN_API_CLIENTS(
-            client_id, display_name, api_key_hash, tenant_id, kms_workspace, faq_workspace,
+            client_id, display_name, api_key_hash, api_key_encrypted, tenant_id, kms_workspace, faq_workspace,
             is_active, scopes, rate_limit_per_minute, metadata
         )
-        VALUES($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10::jsonb)
+        VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11::jsonb)
         """,
         client_id,
         payload.display_name,
         hash_api_key(api_key),
+        encrypt_api_key(api_key),
         tenant["tenant_id"],
         tenant["kms_workspace"],
         tenant["faq_workspace"],
@@ -324,11 +343,14 @@ async def rotate_api_client_key(
     await db.execute(
         """
         UPDATE KMS_ADMIN_API_CLIENTS
-        SET api_key_hash = $2, update_time = NOW()
+        SET api_key_hash = $2,
+            api_key_encrypted = $3,
+            update_time = NOW()
         WHERE client_id = $1
         """,
         client_id,
         hash_api_key(api_key),
+        encrypt_api_key(api_key),
     )
     await audit_log(
         request,
@@ -337,6 +359,90 @@ async def rotate_api_client_key(
         action="rotate_api_client_key",
         target_type="api_client",
         target_id=client_id,
+    )
+    return {"client_id": client_id, "api_key": api_key}
+
+
+@router.post("/{client_id}/reveal-key")
+async def reveal_api_client_key(
+    client_id: str,
+    payload: ApiClientRevealRequest,
+    request: Request,
+    admin: dict = Depends(require_admin),
+) -> dict:
+    client = await db.fetchrow(
+        """
+        SELECT client_id, display_name, tenant_id, api_key_encrypted
+        FROM KMS_ADMIN_API_CLIENTS
+        WHERE client_id = $1
+        """,
+        client_id,
+    )
+    if not client:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API client not found")
+
+    admin_user = await db.fetchrow(
+        """
+        SELECT user_id, password_hash
+        FROM KMS_ADMIN_USERS
+        WHERE user_id = $1
+        """,
+        admin["user_id"],
+    )
+    if not admin_user or not verify_password(payload.password, admin_user["password_hash"]):
+        await audit_log(
+            request,
+            actor_type="user",
+            actor_id=admin["user_id"],
+            action="reveal_api_client_key_failed",
+            tenant_id=client.get("tenant_id"),
+            target_type="api_client",
+            target_id=client_id,
+            detail={"reason": "invalid_password"},
+        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Password confirmation failed")
+
+    encrypted = client.get("api_key_encrypted")
+    if not encrypted:
+        await audit_log(
+            request,
+            actor_type="user",
+            actor_id=admin["user_id"],
+            action="reveal_api_client_key_failed",
+            tenant_id=client.get("tenant_id"),
+            target_type="api_client",
+            target_id=client_id,
+            detail={"reason": "encrypted_key_missing"},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Stored API key is not available. Rotate the key to enable reveal.",
+        )
+
+    try:
+        api_key = decrypt_api_key(encrypted)
+    except ValueError as exc:
+        await audit_log(
+            request,
+            actor_type="user",
+            actor_id=admin["user_id"],
+            action="reveal_api_client_key_failed",
+            tenant_id=client.get("tenant_id"),
+            target_type="api_client",
+            target_id=client_id,
+            detail={"reason": "decrypt_failed"},
+        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    await audit_log(
+        request,
+        actor_type="user",
+        actor_id=admin["user_id"],
+        action="reveal_api_client_key",
+        tenant_id=client.get("tenant_id"),
+        target_type="api_client",
+        target_id=client_id,
+        detail={"display_name": client.get("display_name")},
     )
     return {"client_id": client_id, "api_key": api_key}
 
@@ -351,7 +457,10 @@ async def revoke_api_client_key(
     await db.execute(
         """
         UPDATE KMS_ADMIN_API_CLIENTS
-        SET api_key_hash = $2, is_active = FALSE, update_time = NOW()
+        SET api_key_hash = $2,
+            api_key_encrypted = NULL,
+            is_active = FALSE,
+            update_time = NOW()
         WHERE client_id = $1
         """,
         client_id,

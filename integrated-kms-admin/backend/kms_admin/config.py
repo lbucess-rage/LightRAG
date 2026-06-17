@@ -62,6 +62,10 @@ class Settings:
     jwt_expire_minutes: int = _env_int("KMS_ADMIN_JWT_EXPIRE_MINUTES", 480)
     password_pepper: str = os.getenv("ADMIN_PASSWORD_PEPPER", "")
     api_key_pepper: str = os.getenv("KMS_ADMIN_API_KEY_PEPPER", "")
+    api_key_encryption_secret: str = os.getenv(
+        "KMS_ADMIN_API_KEY_ENCRYPTION_SECRET",
+        os.getenv("KMS_ADMIN_API_KEY_PEPPER", ""),
+    )
     bootstrap_admin_id: str = os.getenv("ADMIN_BOOTSTRAP_ID", "admin")
     bootstrap_admin_password: str = os.getenv("ADMIN_BOOTSTRAP_PASSWORD", DEV_BOOTSTRAP_PASSWORD)
     default_tenant_id: str = os.getenv("KMS_ADMIN_DEFAULT_TENANT_ID", "default")
@@ -107,6 +111,11 @@ class Settings:
             errors.append("ADMIN_PASSWORD_PEPPER must be set with at least 16 characters")
         if len(self.api_key_pepper) < 16:
             errors.append("KMS_ADMIN_API_KEY_PEPPER must be set with at least 16 characters")
+        api_key_encryption_secret = self.api_key_encryption_secret or self.api_key_pepper
+        if len(api_key_encryption_secret) < 16:
+            errors.append(
+                "KMS_ADMIN_API_KEY_ENCRYPTION_SECRET or KMS_ADMIN_API_KEY_PEPPER must be set with at least 16 characters"
+            )
         if self.bootstrap_admin_password == DEV_BOOTSTRAP_PASSWORD or len(self.bootstrap_admin_password) < 12:
             errors.append("ADMIN_BOOTSTRAP_PASSWORD must be changed from the development default and be at least 12 characters")
         if errors:

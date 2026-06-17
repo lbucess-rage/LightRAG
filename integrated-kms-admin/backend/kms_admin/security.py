@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import secrets
+import base64
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import bcrypt
 import jwt
+from cryptography.fernet import Fernet, InvalidToken
 from fastapi import HTTPException, status
 
 from .config import settings
@@ -58,6 +60,23 @@ def generate_api_key() -> str:
 def hash_api_key(api_key: str) -> str:
     material = f"{settings.api_key_pepper}{api_key}".encode("utf-8")
     return hashlib.sha256(material).hexdigest()
+
+
+def _api_key_cipher() -> Fernet:
+    secret = settings.api_key_encryption_secret or settings.api_key_pepper
+    key = base64.urlsafe_b64encode(hashlib.sha256(secret.encode("utf-8")).digest())
+    return Fernet(key)
+
+
+def encrypt_api_key(api_key: str) -> str:
+    return _api_key_cipher().encrypt(api_key.encode("utf-8")).decode("utf-8")
+
+
+def decrypt_api_key(api_key_encrypted: str) -> str:
+    try:
+        return _api_key_cipher().decrypt(api_key_encrypted.encode("utf-8")).decode("utf-8")
+    except InvalidToken as exc:
+        raise ValueError("API key cannot be decrypted with the configured server secret") from exc
 
 
 def mask_api_key_hash(api_key_hash: str) -> str:

@@ -88,6 +88,7 @@ type ApiClient = {
   client_id: string
   display_name: string
   api_key_hint: string
+  api_key_revealable?: boolean
   is_active: boolean
   tenant_id?: string | null
   tenant_name?: string | null
@@ -123,6 +124,14 @@ type ExternalSearchLog = {
   client_trace_id?: string | null
   result_summary?: Record<string, unknown> | null
   create_time?: string | null
+}
+
+type ExternalSearchSamplePreset = {
+  key: string
+  label: string
+  description: string
+  endpoint: 'sync' | 'stream'
+  payload: Record<string, unknown>
 }
 
 type AuditHistory = {
@@ -783,6 +792,185 @@ function prettyJson(value: unknown) {
     return String(value)
   }
 }
+
+const externalSearchSamplePresets: ExternalSearchSamplePreset[] = [
+  {
+    key: 'integrated-basic',
+    label: '통합 검색 기본',
+    description: '생성형 KMS 답변과 FAQ 후보를 함께 조회합니다.',
+    endpoint: 'sync',
+    payload: {
+      query: '카드 인증이 실패할 때 어떻게 해야 하나요?',
+      category_ids: [],
+      include_generative: true,
+      include_faq: true,
+      kms_options: {
+        mode: 'mix',
+        response_type: 'Brief answer: MAXIMUM 5 bullet points using \'- \' (hyphen+space). Each point is one concise line. Fewer is better.',
+        top_k: 40,
+        chunk_top_k: 20,
+        include_references: true,
+        include_chunk_content: true,
+        highlight_entities: true,
+        enable_rerank: true
+      },
+      faq_options: {
+        top_k: 5,
+        min_score: 0.18,
+        retrieval_mode: 'keyword',
+        include_candidates: true
+      },
+      client_trace_id: 'sample-integrated-basic'
+    }
+  },
+  {
+    key: 'generative-only',
+    label: '생성형만',
+    description: 'FAQ를 제외하고 LightRAG 생성형 답변과 근거만 확인합니다.',
+    endpoint: 'sync',
+    payload: {
+      query: 'PC 고장 시 조치 방법을 알려줘',
+      category_ids: [],
+      include_generative: true,
+      include_faq: false,
+      kms_options: {
+        mode: 'mix',
+        top_k: 30,
+        chunk_top_k: 12,
+        include_references: true,
+        include_chunk_content: true,
+        highlight_entities: true,
+        enable_rerank: true
+      },
+      client_trace_id: 'sample-generative-only'
+    }
+  },
+  {
+    key: 'faq-only',
+    label: 'FAQ만',
+    description: '승인형 FAQ 답변 후보만 조회합니다.',
+    endpoint: 'sync',
+    payload: {
+      query: '회원가입 방법이 궁금합니다',
+      category_ids: [],
+      include_generative: false,
+      include_faq: true,
+      faq_options: {
+        top_k: 10,
+        min_score: 0.12,
+        strategy: 'balanced',
+        retrieval_mode: 'keyword',
+        include_candidates: true
+      },
+      client_trace_id: 'sample-faq-only'
+    }
+  },
+  {
+    key: 'category-filter',
+    label: '카테고리 제한',
+    description: '선택한 카테고리와 하위 카테고리 범위의 유효한 지식만 검색합니다.',
+    endpoint: 'sync',
+    payload: {
+      query: '이핏 충전 방법',
+      category_ids: ['category_id_here'],
+      include_generative: true,
+      include_faq: true,
+      kms_options: {
+        mode: 'mix',
+        top_k: 20,
+        chunk_top_k: 10,
+        include_references: true,
+        include_chunk_content: true
+      },
+      faq_options: {
+        top_k: 5,
+        min_score: 0.18,
+        include_candidates: true
+      },
+      client_trace_id: 'sample-category-filter'
+    }
+  },
+  {
+    key: 'streaming',
+    label: '스트리밍',
+    description: 'NDJSON 이벤트로 생성형 답변 조각, FAQ 결과, 완료 이벤트를 확인합니다.',
+    endpoint: 'stream',
+    payload: {
+      query: '전화기 설정 방법을 알려줘',
+      category_ids: [],
+      include_generative: true,
+      include_faq: true,
+      kms_options: {
+        mode: 'mix',
+        top_k: 20,
+        chunk_top_k: 8,
+        include_references: true,
+        include_chunk_content: true
+      },
+      faq_options: {
+        top_k: 5,
+        min_score: 0.18,
+        include_candidates: true
+      },
+      client_trace_id: 'sample-streaming'
+    }
+  }
+]
+
+const externalSearchParameterDocs = [
+  {
+    name: 'query',
+    required: '필수',
+    type: 'string',
+    description: '사용자 질문입니다. 내부 검색 로그와 외부 client_trace_id 추적의 기준이 됩니다.'
+  },
+  {
+    name: 'category_ids',
+    required: '선택',
+    type: 'string[]',
+    description: 'GET /api/external/categories에서 받은 category_id 배열입니다. 선택한 카테고리와 하위 카테고리 지식만 후보가 됩니다.'
+  },
+  {
+    name: 'include_generative',
+    required: '선택',
+    type: 'boolean',
+    description: '생성형 KMS 답변 포함 여부입니다. 기본값은 true입니다.'
+  },
+  {
+    name: 'include_faq',
+    required: '선택',
+    type: 'boolean',
+    description: 'FAQ KMS 답변 후보 포함 여부입니다. 기본값은 true입니다.'
+  },
+  {
+    name: 'kms_options',
+    required: '선택',
+    type: 'object',
+    description: '생성형 검색 옵션입니다. mode, top_k, chunk_top_k, include_references, include_chunk_content, enable_rerank 등을 지정합니다.'
+  },
+  {
+    name: 'faq_options',
+    required: '선택',
+    type: 'object',
+    description: 'FAQ 검색 옵션입니다. top_k, min_score, retrieval_mode, include_candidates 등을 지정합니다.'
+  },
+  {
+    name: 'client_trace_id',
+    required: '선택',
+    type: 'string',
+    description: '외부 시스템의 요청 추적 ID입니다. 검색 로그에 저장되어 장애 추적과 대사에 사용됩니다.'
+  }
+]
+
+const externalSearchResponseDocs = [
+  ['search_id', '어드민 통합 검색 로그 ID'],
+  ['generative_answer', '생성형 KMS 답변, 주요 키워드, 근거 refs'],
+  ['faq_results', 'FAQ KMS 답변 후보 목록'],
+  ['keywords', '통합 검색 결과 기준 주요 키워드'],
+  ['references', '통합 근거 목록'],
+  ['trace.eligibility', '카테고리, 사용 여부, 유효기간 적용 결과와 제외 사유'],
+  ['latency_ms', '어드민 API 기준 처리 시간']
+]
 
 function impactCount(impact: Record<string, unknown> | undefined, key: string) {
   const value = impact?.[key]
@@ -4714,6 +4902,23 @@ export function ExternalClients() {
   const [historyClient, setHistoryClient] = useState<ApiClient | null>(null)
   const [historyRows, setHistoryRows] = useState<ExternalSearchLog[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
+  const [revealClient, setRevealClient] = useState<ApiClient | null>(null)
+  const [revealPassword, setRevealPassword] = useState('')
+  const [revealedKey, setRevealedKey] = useState('')
+  const [revealError, setRevealError] = useState('')
+  const [revealLoading, setRevealLoading] = useState(false)
+  const [sampleOpen, setSampleOpen] = useState(false)
+  const [sampleTab, setSampleTab] = useState<'search' | 'categories' | 'docs'>('search')
+  const [sampleApiKey, setSampleApiKey] = useState('')
+  const [sampleEndpoint, setSampleEndpoint] = useState<'sync' | 'stream'>(externalSearchSamplePresets[0].endpoint)
+  const [samplePresetKey, setSamplePresetKey] = useState(externalSearchSamplePresets[0].key)
+  const [samplePayloadText, setSamplePayloadText] = useState(prettyJson(externalSearchSamplePresets[0].payload))
+  const [sampleResult, setSampleResult] = useState('')
+  const [sampleError, setSampleError] = useState('')
+  const [sampleRunning, setSampleRunning] = useState(false)
+  const [sampleCategoryResult, setSampleCategoryResult] = useState('')
+  const [sampleCategoryError, setSampleCategoryError] = useState('')
+  const [sampleCategoryLoading, setSampleCategoryLoading] = useState(false)
 
   const load = async () => {
     const response = await api.get('/api/external-clients')
@@ -4723,6 +4928,10 @@ export function ExternalClients() {
   useEffect(() => {
     load()
   }, [])
+
+  useEffect(() => {
+    if (issuedKey && !sampleApiKey) setSampleApiKey(issuedKey)
+  }, [issuedKey, sampleApiKey])
 
   const resetExternalForm = () => {
     setEditingId(null)
@@ -4824,6 +5033,174 @@ export function ExternalClients() {
     await load()
   }
 
+  const openRevealKey = (client: ApiClient) => {
+    setRevealClient(client)
+    setRevealPassword('')
+    setRevealedKey('')
+    setRevealError(
+      client.api_key_revealable
+        ? ''
+        : '이 API Key는 암호화 저장 이전에 발급되어 원문 확인이 불가합니다. 키를 재발급하면 이후부터 비밀번호 확인 후 다시 볼 수 있습니다.'
+    )
+  }
+
+  const revealKey = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!revealClient || !revealPassword.trim()) return
+    setRevealLoading(true)
+    setRevealError('')
+    setRevealedKey('')
+    try {
+      const response = await api.post(`/api/external-clients/${revealClient.client_id}/reveal-key`, {
+        password: revealPassword
+      })
+      setRevealedKey(response.data.api_key || '')
+      setRevealPassword('')
+    } catch (error: any) {
+      setRevealError(error?.response?.data?.detail || 'API Key 확인에 실패했습니다.')
+    } finally {
+      setRevealLoading(false)
+    }
+  }
+
+  const openSampleTester = () => {
+    setSampleOpen(true)
+    setSampleTab('search')
+    setSampleError('')
+    setSampleResult('')
+    setSampleCategoryError('')
+    setSampleCategoryResult('')
+    if (issuedKey && !sampleApiKey) setSampleApiKey(issuedKey)
+  }
+
+  const applySamplePreset = (presetKey: string) => {
+    const preset = externalSearchSamplePresets.find((item) => item.key === presetKey) || externalSearchSamplePresets[0]
+    setSamplePresetKey(preset.key)
+    setSampleEndpoint(preset.endpoint)
+    setSamplePayloadText(prettyJson(preset.payload))
+    setSampleError('')
+    setSampleResult('')
+  }
+
+  const sampleRequestCurl = useMemo(() => {
+    const path = sampleEndpoint === 'stream' ? '/api/external/search/stream' : '/api/external/search'
+    const command = sampleEndpoint === 'stream' ? 'curl -N -X POST' : 'curl -X POST'
+    const key = sampleApiKey.trim() || issuedKey || 'kmsadm_발급받은_API_KEY'
+    return `${command} http://127.0.0.1:9522${path} \\
+  -H 'Content-Type: application/json' \\
+  -H 'X-KMS-ADMIN-API-Key: ${key}' \\
+  -d '${samplePayloadText}'`
+  }, [issuedKey, sampleApiKey, sampleEndpoint, samplePayloadText])
+
+  const sampleCategoryCurl = useMemo(() => {
+    const key = sampleApiKey.trim() || issuedKey || 'kmsadm_발급받은_API_KEY'
+    return `curl -X GET 'http://127.0.0.1:9522/api/external/categories' \\
+  -H 'X-KMS-ADMIN-API-Key: ${key}'`
+  }, [issuedKey, sampleApiKey])
+
+  const runSampleCategoryRequest = async () => {
+    setSampleCategoryError('')
+    setSampleCategoryResult('')
+    if (!sampleApiKey.trim()) {
+      setSampleCategoryError('API Key를 입력해야 카테고리 조회를 실행할 수 있습니다.')
+      return
+    }
+    setSampleCategoryLoading(true)
+    try {
+      const response = await fetch('/api/external/categories', {
+        headers: {
+          'X-KMS-ADMIN-API-Key': sampleApiKey.trim()
+        }
+      })
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(errorText || `HTTP ${response.status}`)
+      }
+      setSampleCategoryResult(prettyJson(await response.json()))
+    } catch (error: any) {
+      setSampleCategoryError(error?.message || '카테고리 조회에 실패했습니다.')
+    } finally {
+      setSampleCategoryLoading(false)
+    }
+  }
+
+  const runSampleRequest = async () => {
+    setSampleError('')
+    setSampleResult('')
+    if (!sampleApiKey.trim()) {
+      setSampleError('API Key를 입력해야 합니다. API 관리에서 비밀번호 재확인 후 원문 Key를 확인할 수 있습니다.')
+      return
+    }
+
+    let payload: unknown
+    try {
+      payload = JSON.parse(samplePayloadText)
+    } catch (error: any) {
+      setSampleError(`요청 JSON 형식이 올바르지 않습니다. ${error?.message || ''}`.trim())
+      return
+    }
+
+    setSampleRunning(true)
+    try {
+      if (sampleEndpoint === 'sync') {
+        const response = await api.post('/api/external/search', payload, {
+          headers: { 'X-KMS-ADMIN-API-Key': sampleApiKey.trim() }
+        })
+        setSampleResult(prettyJson(response.data))
+        return
+      }
+
+      const response = await fetch('/api/external/search/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-KMS-ADMIN-API-Key': sampleApiKey.trim()
+        },
+        body: JSON.stringify(payload)
+      })
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(errorText || `HTTP ${response.status}`)
+      }
+      const reader = response.body?.getReader()
+      if (!reader) {
+        setSampleResult('스트리밍 응답 본문을 읽을 수 없습니다.')
+        return
+      }
+      const decoder = new TextDecoder()
+      let buffer = ''
+      const lines: string[] = []
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const parts = buffer.split('\n')
+        buffer = parts.pop() || ''
+        for (const line of parts) {
+          if (!line.trim()) continue
+          try {
+            lines.push(prettyJson(JSON.parse(line)))
+          } catch {
+            lines.push(line)
+          }
+        }
+        setSampleResult(lines.join('\n\n'))
+      }
+      if (buffer.trim()) {
+        try {
+          lines.push(prettyJson(JSON.parse(buffer)))
+        } catch {
+          lines.push(buffer)
+        }
+      }
+      setSampleResult(lines.join('\n\n'))
+    } catch (error: any) {
+      setSampleError(error?.response?.data?.detail || error?.message || '샘플 요청 실행에 실패했습니다.')
+    } finally {
+      setSampleRunning(false)
+    }
+  }
+
   const sampleKey = issuedKey || 'kmsadm_3f9c8e21d7b64a8f'
   const sampleCurl = `curl -X POST http://127.0.0.1:9522/api/external/search \\
   -H 'Content-Type: application/json' \\
@@ -4900,6 +5277,9 @@ export function ExternalClients() {
                   <Button type="button" size="sm" variant="outline" onClick={() => openClientHistory(client)}>
                     이력
                   </Button>
+                  <Button type="button" size="sm" variant="outline" onClick={() => openRevealKey(client)}>
+                    <KeyRoundIcon className="size-4" /> 키 확인
+                  </Button>
                   <Button type="button" size="sm" variant="ghost" onClick={() => toggleActive(client)}>
                     {client.is_active ? '비활성' : '활성'}
                   </Button>
@@ -4951,6 +5331,15 @@ export function ExternalClients() {
             >
               <ClipboardIcon className="size-4" /> 복사
             </Button>
+            <Button
+              type="button"
+              size="sm"
+              className="btn-block"
+              style={{ marginTop: 8 }}
+              onClick={openSampleTester}
+            >
+              <SearchIcon className="size-4" /> 샘플 실행
+            </Button>
             <div style={{ display: 'flex', gap: 9, marginTop: 12, padding: 12, background: 'var(--accent-soft)', borderRadius: 'var(--radius-md)', fontSize: 12, color: 'var(--fg-primary-soft)', lineHeight: 1.5 }}>
               <HelpCircleIcon className="size-4" style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 1 }} />
               스트리밍 응답은 <b className="mono">/api/external/search/stream</b> NDJSON 엔드포인트를 사용합니다.
@@ -4962,6 +5351,351 @@ export function ExternalClients() {
           </CardContent>
         </Card>
       </div>
+
+      {sampleOpen && (
+        <Modal
+          xl
+          title="외부 통합 검색 API 샘플"
+          icon={SearchIcon}
+          onClose={() => setSampleOpen(false)}
+          footer={
+            <>
+              {sampleTab !== 'docs' && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => navigator.clipboard?.writeText(sampleTab === 'categories' ? sampleCategoryCurl : sampleRequestCurl)}
+                >
+                  <ClipboardIcon className="size-4" /> curl 복사
+                </Button>
+              )}
+              <Button type="button" variant="outline" onClick={() => setSampleOpen(false)}>
+                닫기
+              </Button>
+              {sampleTab === 'categories' && (
+                <Button type="button" onClick={runSampleCategoryRequest} disabled={sampleCategoryLoading}>
+                  {sampleCategoryLoading ? <RotateCwIcon className="size-4" /> : <FolderSearchIcon className="size-4" />}
+                  {sampleCategoryLoading ? '조회 중' : '카테고리 조회'}
+                </Button>
+              )}
+              {sampleTab === 'search' && (
+                <Button type="button" onClick={runSampleRequest} disabled={sampleRunning}>
+                  {sampleRunning ? <RotateCwIcon className="size-4" /> : <SearchIcon className="size-4" />}
+                  {sampleRunning ? '실행 중' : '검색 실행'}
+                </Button>
+              )}
+            </>
+          }
+        >
+          <div className="col" style={{ gap: 14 }}>
+            <div style={{ display: 'flex', gap: 9, padding: 12, background: 'var(--accent-soft)', borderRadius: 'var(--radius-md)', fontSize: 12, color: 'var(--fg-primary-soft)', lineHeight: 1.55 }}>
+              <HelpCircleIcon className="size-4" style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 1 }} />
+              외부 시스템이 호출하는 API와 동일하게 API Key 헤더로 테스트합니다. 워크스페이스는 API Key에 매핑된 고객센터 기준으로 적용되며, 요청 JSON의 카테고리와 옵션만 바꿔가며 확인할 수 있습니다.
+            </div>
+
+            <div className="card" style={{ padding: 14 }}>
+              <div className="grid" style={{ gridTemplateColumns: 'minmax(0,1fr) 180px', gap: 12, alignItems: 'start' }}>
+                <label className="field">
+                  <span>API Key</span>
+                  <Input
+                    value={sampleApiKey}
+                    onChange={(event) => setSampleApiKey(event.target.value)}
+                    placeholder="kmsadm_..."
+                    autoComplete="off"
+                  />
+                  <span className="field-help">API 관리에서 비밀번호 재확인 후 원문 Key를 다시 확인할 수 있습니다.</span>
+                </label>
+                <label className="field">
+                  <span>응답 방식</span>
+                  <select
+                    className={selectClass}
+                    value={sampleEndpoint}
+                    onChange={(event) => setSampleEndpoint(event.target.value as 'sync' | 'stream')}
+                  >
+                    <option value="sync">동기 JSON</option>
+                    <option value="stream">NDJSON 스트리밍</option>
+                  </select>
+                </label>
+              </div>
+              <div className="row wrap" style={{ gap: 8, marginTop: 10 }}>
+                <span className="badge gray">인증 헤더 X-KMS-ADMIN-API-Key</span>
+                <span className="badge gray">카테고리 조회 GET /api/external/categories</span>
+                <span className="badge blue">검색 POST /api/external/search</span>
+              </div>
+            </div>
+
+            <div className="tabs" style={{ marginBottom: 0 }}>
+              <button type="button" className={sampleTab === 'search' ? 'on' : ''} onClick={() => setSampleTab('search')}>
+                검색 실행
+              </button>
+              <button type="button" className={sampleTab === 'categories' ? 'on' : ''} onClick={() => setSampleTab('categories')}>
+                카테고리 조회
+              </button>
+              <button type="button" className={sampleTab === 'docs' ? 'on' : ''} onClick={() => setSampleTab('docs')}>
+                파라미터 설명
+              </button>
+            </div>
+
+            {sampleTab === 'categories' && (
+            <div className="grid" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 12 }}>
+              <div className="card" style={{ padding: 14 }}>
+                <div className="row" style={{ gap: 8, marginBottom: 8 }}>
+                  <FolderIcon className="size-4" style={{ color: 'var(--accent)' }} />
+                  <b>카테고리 정보 조회</b>
+                  <span className="badge gray">GET /api/external/categories</span>
+                </div>
+                <p className="muted" style={{ margin: '0 0 10px', fontSize: 12.5, lineHeight: 1.5 }}>
+                  외부 클라이언트는 이 API로 category_id, parent_id, path, 유효 지식 수를 받은 뒤 검색 요청의 category_ids에 선택한 ID를 전달합니다.
+                </p>
+                <pre
+                  className="mono"
+                  style={{
+                    margin: 0,
+                    maxHeight: 120,
+                    overflow: 'auto',
+                    padding: 10,
+                    borderRadius: 'var(--radius-md)',
+                    background: 'var(--bg-subtle)',
+                    fontSize: 11.5,
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-all'
+                  }}
+                >
+                  {sampleCategoryCurl}
+                </pre>
+                <div className="row" style={{ gap: 8, marginTop: 10 }}>
+                  <Button type="button" size="sm" variant="outline" onClick={() => navigator.clipboard?.writeText(sampleCategoryCurl)}>
+                    <ClipboardIcon className="size-4" /> 복사
+                  </Button>
+                  <Button type="button" size="sm" onClick={runSampleCategoryRequest} disabled={sampleCategoryLoading}>
+                    {sampleCategoryLoading ? <RotateCwIcon className="size-4" /> : <FolderSearchIcon className="size-4" />}
+                    {sampleCategoryLoading ? '조회 중' : '카테고리 조회'}
+                  </Button>
+                </div>
+                {sampleCategoryError && (
+                  <div className="badge red" style={{ marginTop: 10, justifyContent: 'flex-start', whiteSpace: 'normal', borderRadius: 'var(--radius-md)', padding: 10 }}>
+                    {sampleCategoryError}
+                  </div>
+                )}
+                {sampleCategoryResult && (
+                  <pre
+                    className="mono"
+                    style={{
+                      margin: '10px 0 0',
+                      maxHeight: 180,
+                      overflow: 'auto',
+                      padding: 10,
+                      borderRadius: 'var(--radius-md)',
+                      background: 'var(--c-primary)',
+                      color: '#e4e9f3',
+                      fontSize: 11.5,
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word'
+                    }}
+                  >
+                    {sampleCategoryResult}
+                  </pre>
+                )}
+              </div>
+
+              <div className="card" style={{ padding: 14 }}>
+                <div className="row" style={{ gap: 8, marginBottom: 8 }}>
+                  <CalendarIcon className="size-4" style={{ color: 'var(--accent)' }} />
+                  <b>유효기간 적용 방식</b>
+                  <span className="badge green">서버 정책</span>
+                </div>
+                <div className="col" style={{ gap: 8, fontSize: 12.5, color: 'var(--fg-secondary)', lineHeight: 1.55 }}>
+                  <div>검색 요청에는 valid_from, valid_until을 전달하지 않습니다.</div>
+                  <div>어드민 원장에 저장된 사용 여부와 유효기간을 기준으로 서버가 후보 지식을 자동 필터링합니다.</div>
+                  <div className="mono" style={{ padding: 10, borderRadius: 'var(--radius-md)', background: 'var(--bg-subtle)', color: 'var(--fg-primary)' }}>
+                    enabled = true<br />
+                    valid_from is null or valid_from &lt;= server_now<br />
+                    valid_until is null or valid_until &gt;= server_now
+                  </div>
+                  <div>제외된 지식은 응답의 <b className="mono">trace.eligibility</b>에서 expired, inactive, not_started 사유로 확인할 수 있습니다.</div>
+                </div>
+              </div>
+            </div>
+            )}
+
+            {sampleTab === 'docs' && (
+            <div className="col" style={{ gap: 12 }}>
+            <div className="card" style={{ padding: 14 }}>
+              <div className="row" style={{ gap: 8, marginBottom: 8 }}>
+                <CalendarIcon className="size-4" style={{ color: 'var(--accent)' }} />
+                <b>유효기간 적용 방식</b>
+                <span className="badge green">서버 정책</span>
+              </div>
+              <div className="col" style={{ gap: 8, fontSize: 12.5, color: 'var(--fg-secondary)', lineHeight: 1.55 }}>
+                <div>검색 요청에는 valid_from, valid_until을 전달하지 않습니다.</div>
+                <div>어드민 원장에 저장된 사용 여부와 유효기간을 기준으로 서버가 후보 지식을 자동 필터링합니다.</div>
+                <div className="mono" style={{ padding: 10, borderRadius: 'var(--radius-md)', background: 'var(--bg-subtle)', color: 'var(--fg-primary)' }}>
+                  enabled = true<br />
+                  valid_from is null or valid_from &lt;= server_now<br />
+                  valid_until is null or valid_until &gt;= server_now
+                </div>
+                <div>제외된 지식은 응답의 <b className="mono">trace.eligibility</b>에서 expired, inactive, not_started 사유로 확인할 수 있습니다.</div>
+              </div>
+            </div>
+
+            <details open>
+              <summary className="eyebrow" style={{ cursor: 'pointer', marginBottom: 8 }}>
+                통합 검색 요청 파라미터
+              </summary>
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th style={{ width: 150 }}>필드</th>
+                    <th style={{ width: 70 }}>필수</th>
+                    <th style={{ width: 120 }}>타입</th>
+                    <th>설명</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {externalSearchParameterDocs.map((param) => (
+                    <tr key={param.name}>
+                      <td className="mono" style={{ fontSize: 12 }}>{param.name}</td>
+                      <td><span className={`badge ${param.required === '필수' ? 'blue' : 'gray'}`}>{param.required}</span></td>
+                      <td className="mono muted" style={{ fontSize: 12 }}>{param.type}</td>
+                      <td style={{ fontSize: 12.5, lineHeight: 1.45 }}>{param.description}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </details>
+
+            <details>
+              <summary className="eyebrow" style={{ cursor: 'pointer', marginBottom: 8 }}>
+                응답 필드와 스트리밍 이벤트
+              </summary>
+              <div className="grid" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 12 }}>
+                <table className="tbl">
+                  <tbody>
+                    {externalSearchResponseDocs.map(([field, description]) => (
+                      <tr key={field}>
+                        <td className="mono" style={{ width: 150, fontSize: 12 }}>{field}</td>
+                        <td style={{ fontSize: 12.5 }}>{description}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div style={{ padding: 12, border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', fontSize: 12.5, lineHeight: 1.6, color: 'var(--fg-secondary)' }}>
+                  <b style={{ color: 'var(--fg-primary)' }}>NDJSON 이벤트</b>
+                  <div className="mono" style={{ marginTop: 8 }}>
+                    metadata<br />
+                    generative_delta<br />
+                    faq_results<br />
+                    done<br />
+                    error
+                  </div>
+                </div>
+              </div>
+            </details>
+            </div>
+            )}
+
+            {sampleTab === 'search' && (
+            <div className="grid" style={{ gridTemplateColumns: '260px minmax(0,1fr)', gap: 14, alignItems: 'start' }}>
+              <div className="col" style={{ gap: 8 }}>
+                <div className="eyebrow">샘플 프리셋</div>
+                {externalSearchSamplePresets.map((preset) => (
+                  <button
+                    key={preset.key}
+                    type="button"
+                    className={`category-picker-option${samplePresetKey === preset.key ? ' on' : ''}`}
+                    onClick={() => applySamplePreset(preset.key)}
+                    style={{ alignItems: 'flex-start' }}
+                  >
+                    <SearchIcon className="size-4" style={{ marginTop: 2, flexShrink: 0 }} />
+                    <span className="col" style={{ gap: 3, minWidth: 0 }}>
+                      <b style={{ fontSize: 12.5, color: 'var(--fg-primary)' }}>{preset.label}</b>
+                      <small style={{ color: 'var(--fg-secondary)', lineHeight: 1.35 }}>{preset.description}</small>
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="col" style={{ gap: 12 }}>
+                <label className="field">
+                  <span>요청 JSON</span>
+                  <Textarea
+                    value={samplePayloadText}
+                    onChange={(event) => setSamplePayloadText(event.target.value)}
+                    rows={15}
+                    className="mono"
+                    spellCheck={false}
+                    style={{ fontSize: 12, lineHeight: 1.55 }}
+                  />
+                </label>
+
+                <div className="grid" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 12 }}>
+                  <div className="col" style={{ gap: 7 }}>
+                    <div className="eyebrow">curl</div>
+                    <pre
+                      className="mono"
+                      style={{
+                        margin: 0,
+                        minHeight: 180,
+                        maxHeight: 260,
+                        overflow: 'auto',
+                        padding: 12,
+                        borderRadius: 'var(--radius-md)',
+                        background: 'var(--bg-subtle)',
+                        fontSize: 11.5,
+                        lineHeight: 1.6,
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-all'
+                      }}
+                    >
+                      {sampleRequestCurl}
+                    </pre>
+                  </div>
+                  <div className="col" style={{ gap: 7 }}>
+                    <div className="eyebrow">응답 결과</div>
+                    {sampleError && (
+                      <div className="badge red" style={{ justifyContent: 'flex-start', whiteSpace: 'normal', borderRadius: 'var(--radius-md)', padding: 10 }}>
+                        {sampleError}
+                      </div>
+                    )}
+                    <pre
+                      className="mono"
+                      style={{
+                        margin: 0,
+                        minHeight: 180,
+                        maxHeight: 260,
+                        overflow: 'auto',
+                        padding: 12,
+                        borderRadius: 'var(--radius-md)',
+                        background: sampleResult ? 'var(--c-primary)' : 'var(--bg-subtle)',
+                        color: sampleResult ? '#e4e9f3' : 'var(--fg-secondary)',
+                        fontSize: 11.5,
+                        lineHeight: 1.6,
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word'
+                      }}
+                    >
+                      {sampleResult || '실행 결과가 여기에 표시됩니다.'}
+                    </pre>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: 8 }}>
+                  <div className="badge gray" style={{ justifyContent: 'flex-start', whiteSpace: 'normal', padding: 9 }}>
+                    생성형 답변: generative_answer.response
+                  </div>
+                  <div className="badge gray" style={{ justifyContent: 'flex-start', whiteSpace: 'normal', padding: 9 }}>
+                    FAQ 결과: faq_results[]
+                  </div>
+                  <div className="badge gray" style={{ justifyContent: 'flex-start', whiteSpace: 'normal', padding: 9 }}>
+                    정책 내역: trace.eligibility
+                  </div>
+                </div>
+              </div>
+            </div>
+            )}
+          </div>
+        </Modal>
+      )}
 
       {showForm && (
         <Modal
@@ -5005,11 +5739,71 @@ export function ExternalClients() {
         </Modal>
       )}
 
+      {revealClient && (
+        <Modal
+          title={`API Key 확인 · ${revealClient.display_name}`}
+          icon={KeyRoundIcon}
+          onClose={() => setRevealClient(null)}
+          footer={
+            <>
+              {revealedKey && (
+                <Button type="button" variant="outline" onClick={() => navigator.clipboard?.writeText(revealedKey)}>
+                  <ClipboardIcon className="size-4" /> 복사
+                </Button>
+              )}
+              <Button type="button" variant="outline" onClick={() => setRevealClient(null)}>
+                닫기
+              </Button>
+              <Button
+                type="submit"
+                form="api-key-reveal-form"
+                disabled={!revealClient.api_key_revealable || !revealPassword.trim() || revealLoading}
+              >
+                {revealLoading ? <RotateCwIcon className="size-4" /> : <KeyRoundIcon className="size-4" />}
+                {revealLoading ? '확인 중' : '키 확인'}
+              </Button>
+            </>
+          }
+        >
+          <form id="api-key-reveal-form" className="col" style={{ gap: 14 }} onSubmit={revealKey}>
+            <div style={{ display: 'flex', gap: 9, padding: 12, background: 'var(--accent-soft)', borderRadius: 'var(--radius-md)', fontSize: 12, color: 'var(--fg-primary-soft)', lineHeight: 1.55 }}>
+              <ShieldIcon className="size-4" style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 1 }} />
+              API Key 원문 확인은 관리자 비밀번호 재확인이 필요하며, 성공/실패 이력은 감사 로그에 저장됩니다.
+            </div>
+            <div className="mono muted" style={{ fontSize: 12 }}>{revealClient.client_id}</div>
+            <label className="field">
+              <span>관리자 비밀번호</span>
+              <Input
+                type="password"
+                value={revealPassword}
+                onChange={(event) => setRevealPassword(event.target.value)}
+                disabled={!revealClient.api_key_revealable}
+                placeholder="현재 로그인한 관리자 비밀번호"
+                autoComplete="current-password"
+              />
+            </label>
+            {revealError && (
+              <div className="badge red" style={{ justifyContent: 'flex-start', whiteSpace: 'normal', borderRadius: 'var(--radius-md)', padding: 10 }}>
+                {revealError}
+              </div>
+            )}
+            {revealedKey && (
+              <div className="col" style={{ gap: 8 }}>
+                <div className="eyebrow">API Key</div>
+                <div className="mono" style={{ padding: 12, border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', wordBreak: 'break-all', color: 'var(--fg-primary)' }}>
+                  {revealedKey}
+                </div>
+              </div>
+            )}
+          </form>
+        </Modal>
+      )}
+
       {issuedKey && (
         <Modal title="발급된 API Key" icon={KeyRoundIcon} onClose={() => setIssuedKey('')} footer={<Button onClick={() => setIssuedKey('')}>확인</Button>}>
           <div className="col" style={{ gap: 12 }}>
             <div style={{ padding: 12, borderRadius: 'var(--radius-md)', background: 'var(--warning-soft)', color: '#9a5b08', fontSize: 12, lineHeight: 1.5 }}>
-              API Key 원문은 지금 한 번만 표시됩니다. 이후에는 재발급해야 합니다.
+              API Key는 서버 secret으로 암호화 저장됩니다. 이후 API 관리 화면에서 관리자 비밀번호 재확인 후 다시 볼 수 있습니다.
             </div>
             <div className="mono" style={{ padding: 12, border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', wordBreak: 'break-all', color: 'var(--fg-primary)' }}>{issuedKey}</div>
             <pre className="mono" style={{ margin: 0, overflow: 'auto', padding: 12, borderRadius: 'var(--radius-md)', background: 'var(--bg-subtle)', fontSize: 12 }}>

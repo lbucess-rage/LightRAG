@@ -12,6 +12,7 @@ from kms_admin.routers.knowledge import (
     _json_list,
     _text_file_sources,
 )
+from kms_admin.routers.search import EXTERNAL_CATEGORIES_SQL
 from kms_admin.search_service import (
     BRIEF_ANSWER_RESPONSE_TYPE,
     CandidateScope,
@@ -40,6 +41,14 @@ def test_build_kms_query_payload_uses_admin_defaults():
     assert payload["highlight_entities"] is True
     assert payload["enable_rerank"] is True
     assert payload["stream"] is False
+
+
+def test_external_categories_query_documents_valid_counts_and_active_filter():
+    assert "valid_direct_knowledge_count" in EXTERNAL_CATEGORIES_SQL
+    assert "valid_total_knowledge_count" in EXTERNAL_CATEGORIES_SQL
+    assert "valid_from IS NULL OR valid_from <= NOW()" in EXTERNAL_CATEGORIES_SQL
+    assert "valid_until IS NULL OR valid_until >= NOW()" in EXTERNAL_CATEGORIES_SQL
+    assert "$2::boolean OR is_active = TRUE" in EXTERNAL_CATEGORIES_SQL
 
 
 def test_admin_workspace_defaults_use_test_pair():

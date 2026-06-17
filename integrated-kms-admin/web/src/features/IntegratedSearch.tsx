@@ -4,7 +4,6 @@ import remarkGfm from 'remark-gfm'
 import {
   BookOpenIcon,
   CheckIcon,
-  ChevronDownIcon,
   ChevronRightIcon,
   DownloadIcon,
   ExternalLinkIcon,
@@ -137,6 +136,12 @@ function referenceId(reference: any, index: number) {
 
 function referenceAnchorId(refId: string) {
   return `kms-reference-${refId.replace(/[^a-zA-Z0-9_-]/g, '-')}`
+}
+
+function clearReferenceHash() {
+  if (window.location.hash.startsWith('#kms-reference-')) {
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`)
+  }
 }
 
 function referenceTitle(reference: any) {
@@ -300,13 +305,6 @@ function ReferenceImages({ reference }: { reference: any }) {
   )
 }
 
-function scrollToReference(refId: string) {
-  const target = document.getElementById(referenceAnchorId(refId))
-  if (!target) return
-  target.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  window.history.replaceState(null, '', `#${referenceAnchorId(refId)}`)
-}
-
 function markdownWithCitationLinks(text: string, references: any[]) {
   const refsById = new Map(references.map((reference, index) => [referenceId(reference, index), reference]))
   return text.replace(/\[(\d{1,3})\]/g, (match, refId, offset, fullText) => {
@@ -346,11 +344,10 @@ function CitationText({
               <a
                 className="citation-link"
                 href={href}
-                title={`${citationReference ? referenceTitle(citationReference) : `참조 ${refId}`} 근거로 이동`}
+                title={`${citationReference ? referenceTitle(citationReference) : `참조 ${refId}`} 근거 보기`}
                 onClick={(event) => {
                   event.preventDefault()
                   onReferenceSelect?.(refId)
-                  scrollToReference(refId)
                 }}
               >
                 {children}
@@ -371,6 +368,250 @@ function CitationText({
     >
       {markdown}
     </ReactMarkdown>
+  )
+}
+
+function referenceOpenInfo(reference: any) {
+  const downloadUrl = typeof reference.download_url === 'string' ? reference.download_url.trim() : ''
+  const boardRef = isBoardReference(reference)
+  const filePathUrl = /^https?:\/\//.test(referenceFilePath(reference)) ? referenceFilePath(reference) : ''
+  const openUrl = downloadUrl || (!boardRef ? filePathUrl : '')
+  const hasTextPreview = Boolean(reference.doc_id || referenceEmbeddedText(reference).trim())
+  const imageCount = referenceImages(reference).length
+  const embeddedText = referenceEmbeddedText(reference).trim()
+  return { downloadUrl, boardRef, openUrl, hasTextPreview, imageCount, embeddedText }
+}
+
+function ReferenceActionRow({
+  reference,
+  openDocumentPreview,
+  openBoardPreview
+}: {
+  reference: any
+  openDocumentPreview: (reference: any) => void
+  openBoardPreview: (reference: any) => void
+}) {
+  const { downloadUrl, boardRef, openUrl, hasTextPreview } = referenceOpenInfo(reference)
+
+  return (
+    <div className="reference-actions">
+      {hasTextPreview && (
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={() => openDocumentPreview(reference)}
+          title="추출된 본문과 청크 보기"
+          style={{ whiteSpace: 'nowrap' }}
+        >
+          <FileTextIcon className="size-4" /> 본문 보기
+        </button>
+      )}
+      {boardRef && (
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={() => openBoardPreview(reference)}
+          title="게시판 API 원문 보기"
+          style={{ whiteSpace: 'nowrap' }}
+        >
+          <BookOpenIcon className="size-4" /> 게시글 보기
+        </button>
+      )}
+      {openUrl ? (
+        <a
+          className="btn btn-ghost btn-sm"
+          href={openUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={downloadUrl ? '원본 파일 열기' : '원본 링크 열기'}
+          style={{ whiteSpace: 'nowrap' }}
+        >
+          <ExternalLinkIcon className="size-4" /> {downloadUrl ? '원본 파일' : '원본 링크'}
+        </a>
+      ) : (
+        <span className="muted" style={{ fontSize: 12 }}>
+          원본 파일 없음
+        </span>
+      )}
+      {downloadUrl && (
+        <a
+          className="btn btn-ghost btn-sm"
+          href={downloadUrl}
+          download
+          title="원본 문서 다운로드"
+          style={{ whiteSpace: 'nowrap' }}
+        >
+          <DownloadIcon className="size-4" /> 다운로드
+        </a>
+      )}
+    </div>
+  )
+}
+
+function ReferenceSummaryList({
+  references,
+  onOpen
+}: {
+  references: any[]
+  onOpen: (refId?: string) => void
+}) {
+  if (!references.length) {
+    return (
+      <div className="empty" style={{ padding: '12px 0', textAlign: 'left' }}>
+        연결된 근거 지식이 없습니다.
+      </div>
+    )
+  }
+
+  const topReferences = references.slice(0, 3)
+
+  return (
+    <div className="reference-summary">
+      <div className="reference-summary-list">
+        {topReferences.map((reference: any, index: number) => {
+          const refId = referenceId(reference, index)
+          const refScore = referenceScore(reference)
+          const { imageCount } = referenceOpenInfo(reference)
+          return (
+            <button
+              type="button"
+              key={reference.id || reference.doc_id || refId}
+              className="reference-summary-card"
+              onClick={() => onOpen(refId)}
+              title="근거 상세 보기"
+            >
+              <span className="reference-summary-rank">{refId}</span>
+              <span className="reference-summary-main">
+                <span className="reference-summary-title">{referenceTitle(reference)}</span>
+                <span className="reference-summary-meta">
+                  {reference.workspace || reference.category || 'KMS'}
+                  {refScore !== null && <span className="num" title="검색 관련도 점수"> · 점수 {refScore.toFixed(4)}</span>}
+                  {imageCount > 0 && ` · 이미지 ${imageCount}건`}
+                </span>
+              </span>
+              <ChevronRightIcon className="size-4" />
+            </button>
+          )
+        })}
+      </div>
+      <button type="button" className="btn btn-secondary btn-sm" onClick={() => onOpen()}>
+        근거 전체 보기 {references.length}건
+      </button>
+    </div>
+  )
+}
+
+function ReferenceDrawer({
+  open,
+  references,
+  selectedRefId,
+  onSelect,
+  onClose,
+  openDocumentPreview,
+  openBoardPreview
+}: {
+  open: boolean
+  references: any[]
+  selectedRefId: string | null
+  onSelect: (refId: string) => void
+  onClose: () => void
+  openDocumentPreview: (reference: any) => void
+  openBoardPreview: (reference: any) => void
+}) {
+  if (!open || !references.length) return null
+
+  const selectedIndex = Math.max(
+    0,
+    references.findIndex((reference, index) => referenceId(reference, index) === selectedRefId)
+  )
+  const selectedReference = references[selectedIndex]
+  const selectedId = referenceId(selectedReference, selectedIndex)
+  const selectedScore = referenceScore(selectedReference)
+  const { imageCount, embeddedText } = referenceOpenInfo(selectedReference)
+
+  return (
+    <div className="source-drawer-overlay" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <aside className="source-drawer" aria-label="근거 지식 상세">
+        <div className="source-drawer-h">
+          <div>
+            <div className="source-drawer-title">근거 지식</div>
+            <div className="muted" style={{ fontSize: 12 }}>점수 순 {references.length}건</div>
+          </div>
+          <button type="button" className="x" onClick={onClose} aria-label="닫기">
+            <XIcon className="size-5" />
+          </button>
+        </div>
+        <div className="source-drawer-b">
+          <div className="source-drawer-list">
+            {references.map((reference, index) => {
+              const refId = referenceId(reference, index)
+              const refScore = referenceScore(reference)
+              const isSelected = refId === selectedId
+              return (
+                <button
+                  type="button"
+                  key={reference.id || reference.doc_id || refId}
+                  className={`source-drawer-list-item${isSelected ? ' active' : ''}`}
+                  onClick={() => onSelect(refId)}
+                >
+                  <span className="reference-summary-rank">{refId}</span>
+                  <span className="source-drawer-list-text">
+                    <span>{referenceTitle(reference)}</span>
+                    <small>
+                      {reference.workspace || reference.category || 'KMS'}
+                      {refScore !== null && ` · ${refScore.toFixed(4)}`}
+                    </small>
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+          <div id={referenceAnchorId(selectedId)} className="source-drawer-detail">
+            <div className="source-drawer-detail-head">
+              <div style={{ minWidth: 0 }}>
+                <div className="row wrap" style={{ gap: 8, marginBottom: 8 }}>
+                  <span className="reference-summary-rank">{selectedId}</span>
+                  <span className="badge outline">{selectedReference.workspace || selectedReference.category || 'KMS'}</span>
+                  {selectedScore !== null && (
+                    <span className="badge outline num" title="검색 관련도 점수">
+                      점수 {selectedScore.toFixed(4)}
+                    </span>
+                  )}
+                  {imageCount > 0 && <span className="badge gray">이미지 {imageCount}건</span>}
+                </div>
+                <div className="source-drawer-detail-title">{referenceTitle(selectedReference)}</div>
+              </div>
+              <ReferenceActionRow
+                reference={selectedReference}
+                openDocumentPreview={openDocumentPreview}
+                openBoardPreview={openBoardPreview}
+              />
+            </div>
+
+            <div className="source-drawer-meta">
+              {selectedReference.doc_id && <span className="badge outline">문서 ID {selectedReference.doc_id}</span>}
+              {referenceFilePath(selectedReference) && (
+                <span className="badge outline reference-path" title={referenceFilePath(selectedReference)}>
+                  출처 {referenceFilePath(selectedReference)}
+                </span>
+              )}
+            </div>
+
+            {embeddedText && (
+              <div className="source-drawer-text">
+                {embeddedText}
+              </div>
+            )}
+            <ReferenceImages reference={selectedReference} />
+            {!embeddedText && imageCount === 0 && (
+              <div className="empty" style={{ padding: '18px 0', textAlign: 'left' }}>
+                표시할 상세 정보가 없습니다. 필요한 경우 본문 보기 또는 원본 파일을 확인하세요.
+              </div>
+            )}
+          </div>
+        </div>
+      </aside>
+    </div>
   )
 }
 
@@ -571,7 +812,8 @@ function AiAnswer({ result, kmsWorkspace }: { result: any; kmsWorkspace: string 
   )
   const keywords = result?.keywords || []
   const [preview, setPreview] = useState<ReferencePreviewState | null>(null)
-  const [expandedReferenceIds, setExpandedReferenceIds] = useState<Set<string>>(() => new Set())
+  const [referenceDrawerOpen, setReferenceDrawerOpen] = useState(false)
+  const [selectedReferenceId, setSelectedReferenceId] = useState<string | null>(null)
 
   useEffect(() => {
     const refIdFromHash = window.location.hash.match(/^#kms-reference-(.+)$/)?.[1]
@@ -580,30 +822,22 @@ function AiAnswer({ result, kmsWorkspace }: { result: any; kmsWorkspace: string 
       .map((reference, index) => referenceId(reference, index))
       .find((id) => referenceAnchorId(id).replace(/^kms-reference-/, '') === refIdFromHash)
     if (refId) {
-      setExpandedReferenceIds((current) => {
-        if (current.has(refId)) return current
-        return new Set([...current, refId])
-      })
+      setSelectedReferenceId(refId)
+      setReferenceDrawerOpen(true)
     }
   }, [references])
 
-  const toggleReference = (refId: string) => {
-    setExpandedReferenceIds((current) => {
-      const next = new Set(current)
-      if (next.has(refId)) {
-        next.delete(refId)
-      } else {
-        next.add(refId)
-      }
-      return next
-    })
+  const openReferenceDrawer = (refId?: string) => {
+    const nextRefId = refId || selectedReferenceId || (references[0] ? referenceId(references[0], 0) : null)
+    if (!nextRefId) return
+    setSelectedReferenceId(nextRefId)
+    setReferenceDrawerOpen(true)
+    window.history.replaceState(null, '', `#${referenceAnchorId(nextRefId)}`)
   }
 
-  const expandReference = (refId: string) => {
-    setExpandedReferenceIds((current) => {
-      if (current.has(refId)) return current
-      return new Set([...current, refId])
-    })
+  const selectReference = (refId: string) => {
+    setSelectedReferenceId(refId)
+    window.history.replaceState(null, '', `#${referenceAnchorId(refId)}`)
   }
 
   const openDocumentPreview = async (reference: any) => {
@@ -661,6 +895,15 @@ function AiAnswer({ result, kmsWorkspace }: { result: any; kmsWorkspace: string 
   return (
     <div className="card" style={{ overflow: 'hidden', borderColor: '#c9d8f7' }}>
       <ReferencePreviewModal preview={preview} onClose={() => setPreview(null)} />
+      <ReferenceDrawer
+        open={referenceDrawerOpen}
+        references={references}
+        selectedRefId={selectedReferenceId}
+        onSelect={selectReference}
+        onClose={() => setReferenceDrawerOpen(false)}
+        openDocumentPreview={openDocumentPreview}
+        openBoardPreview={openBoardPreview}
+      />
       <div style={{ background: 'linear-gradient(180deg, var(--accent-soft), #fff)', padding: 'var(--pad-card)' }}>
         <div className="row" style={{ gap: 9, marginBottom: 12 }}>
           <span className="row" style={{ gap: 7, color: 'var(--accent)', fontWeight: 700, fontSize: 13 }}>
@@ -674,7 +917,7 @@ function AiAnswer({ result, kmsWorkspace }: { result: any; kmsWorkspace: string 
         </div>
 
         <div className="rich markdown-answer">
-          <CitationText text={answerText} references={references} onReferenceSelect={expandReference} />
+          <CitationText text={answerText} references={references} onReferenceSelect={openReferenceDrawer} />
         </div>
 
         {keywords.length > 0 && (
@@ -696,164 +939,7 @@ function AiAnswer({ result, kmsWorkspace }: { result: any; kmsWorkspace: string 
           <div className="eyebrow" style={{ marginBottom: 8 }}>
             근거 지식 {references.length}건
           </div>
-          {references.length ? (
-            <div className="col" style={{ gap: 7 }}>
-              {references.map((reference: any, index: number) => {
-                const refId = referenceId(reference, index)
-                const refScore = referenceScore(reference)
-                const downloadUrl = typeof reference.download_url === 'string' ? reference.download_url.trim() : ''
-                const boardRef = isBoardReference(reference)
-                const filePathUrl = /^https?:\/\//.test(referenceFilePath(reference)) ? referenceFilePath(reference) : ''
-                const openUrl = downloadUrl || (!boardRef ? filePathUrl : '')
-                const hasTextPreview = Boolean(reference.doc_id || referenceEmbeddedText(reference).trim())
-                const imageCount = referenceImages(reference).length
-                const embeddedText = referenceEmbeddedText(reference).trim()
-                const isExpanded = expandedReferenceIds.has(refId)
-                return (
-                <div
-                  id={referenceAnchorId(refId)}
-                  key={reference.id || reference.doc_id || refId}
-                  className="reference-card"
-                  style={{
-                    padding: '9px 11px',
-                    background: '#fff',
-                    border: '1px solid var(--border-default)',
-                    borderRadius: 'var(--radius-md)',
-                    scrollMarginTop: 90
-                  }}
-                >
-                  <div className="reference-card-head">
-                    <button
-                      type="button"
-                      className="reference-toggle"
-                      onClick={() => toggleReference(refId)}
-                      aria-expanded={isExpanded}
-                      aria-controls={`${referenceAnchorId(refId)}-detail`}
-                      title={isExpanded ? '근거 상세 접기' : '근거 상세 보기'}
-                    >
-                      {isExpanded ? <ChevronDownIcon className="size-4" /> : <ChevronRightIcon className="size-4" />}
-                    </button>
-                    <div className="reference-card-main">
-                      <div className="row wrap" style={{ gap: 8, minWidth: 0 }}>
-                        <span
-                          style={{
-                            width: 22,
-                            height: 22,
-                            borderRadius: 6,
-                            background: 'var(--accent-soft)',
-                            color: 'var(--accent)',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontSize: 11,
-                            fontWeight: 700,
-                            flexShrink: 0
-                          }}
-                        >
-                          {refId}
-                        </span>
-                        <span className="reference-card-title">
-                          {referenceTitle(reference)}
-                        </span>
-                        <span className="muted" style={{ fontSize: 12 }}>
-                          · {reference.workspace || reference.category || 'KMS'}
-                        </span>
-                        {refScore !== null && (
-                          <span className="badge outline num" title="검색 관련도 점수">
-                            점수 {refScore.toFixed(4)}
-                          </span>
-                        )}
-                        {imageCount > 0 && (
-                          <span className="badge gray">
-                            이미지 {imageCount}건
-                          </span>
-                        )}
-                      </div>
-                      <div className="reference-actions">
-                        {hasTextPreview && (
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            onClick={() => openDocumentPreview(reference)}
-                            title="추출된 본문과 청크 보기"
-                            style={{ whiteSpace: 'nowrap' }}
-                          >
-                            <FileTextIcon className="size-4" /> 본문 보기
-                          </button>
-                        )}
-                        {boardRef && (
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            onClick={() => openBoardPreview(reference)}
-                            title="게시판 API 원문 보기"
-                            style={{ whiteSpace: 'nowrap' }}
-                          >
-                            <BookOpenIcon className="size-4" /> 게시글 보기
-                          </button>
-                        )}
-                        {openUrl ? (
-                          <a
-                            className="btn btn-ghost btn-sm"
-                            href={openUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            title={downloadUrl ? '원본 파일 열기' : '원본 링크 열기'}
-                            style={{ whiteSpace: 'nowrap' }}
-                          >
-                            <ExternalLinkIcon className="size-4" /> {downloadUrl ? '원본 파일' : '원본 링크'}
-                          </a>
-                        ) : (
-                          <span className="muted" style={{ fontSize: 12 }}>
-                            원본 파일 없음
-                          </span>
-                        )}
-                        {downloadUrl && (
-                          <a
-                            className="btn btn-ghost btn-sm"
-                            href={downloadUrl}
-                            download
-                            title="원본 문서 다운로드"
-                            style={{ whiteSpace: 'nowrap' }}
-                          >
-                            <DownloadIcon className="size-4" /> 다운로드
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  {isExpanded && (
-                    <div id={`${referenceAnchorId(refId)}-detail`} className="reference-detail">
-                      <div className="row wrap" style={{ gap: 7 }}>
-                        {reference.doc_id && <span className="badge outline">문서 ID {reference.doc_id}</span>}
-                        {referenceFilePath(reference) && (
-                          <span className="badge outline reference-path" title={referenceFilePath(reference)}>
-                            출처 {referenceFilePath(reference)}
-                          </span>
-                        )}
-                      </div>
-                      {embeddedText && (
-                        <div className="reference-text-excerpt">
-                          {embeddedText.length > 500 ? `${embeddedText.slice(0, 500)}...` : embeddedText}
-                        </div>
-                      )}
-                      <ReferenceImages reference={reference} />
-                      {!embeddedText && imageCount === 0 && (
-                        <div className="empty" style={{ padding: '10px 0', textAlign: 'left' }}>
-                          표시할 상세 정보가 없습니다. 필요한 경우 본문 보기 또는 원본 파일을 확인하세요.
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-                )
-              })}
-            </div>
-          ) : (
-            <div className="empty" style={{ padding: '12px 0', textAlign: 'left' }}>
-              연결된 근거 지식이 없습니다.
-            </div>
-          )}
+          <ReferenceSummaryList references={references} onOpen={openReferenceDrawer} />
         </div>
 
         <div className="row" style={{ gap: 6, marginTop: 14, fontSize: 11.5, color: 'var(--fg-muted)' }}>
@@ -1048,6 +1134,8 @@ export default function IntegratedSearch() {
   const submit = async (event?: FormEvent) => {
     event?.preventDefault()
     if (!query.trim()) return
+    clearReferenceHash()
+    setResult(null)
     setLoading(true)
     try {
       const response = await api.post('/api/search/integrated', {

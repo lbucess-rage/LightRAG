@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -13,6 +13,76 @@ from ..dependencies import get_current_user, get_external_client
 from ..search_service import WorkspaceScope, integrated_search, integrated_search_stream
 
 router = APIRouter(tags=["search"])
+
+
+EXTERNAL_CATEGORIES_SQL = """
+WITH RECURSIVE categories AS (
+    SELECT category_id, tenant_id, parent_id, name, path, sort_order, is_active, metadata,
+           create_time, update_time
+    FROM KMS_ADMIN_CATEGORIES
+    WHERE tenant_id = $1
+      AND ($2::boolean OR is_active = TRUE)
+),
+descendants AS (
+    SELECT category_id AS root_id, category_id
+    FROM categories
+    UNION ALL
+    SELECT descendants.root_id, child.category_id
+    FROM descendants
+    JOIN categories child ON child.parent_id = descendants.category_id
+),
+direct_counts AS (
+    SELECT category_id, COUNT(*)::INT AS direct_knowledge_count
+    FROM KMS_ADMIN_KNOWLEDGE_ITEMS
+    WHERE tenant_id = $1
+      AND category_id IS NOT NULL
+    GROUP BY category_id
+),
+valid_direct_counts AS (
+    SELECT category_id, COUNT(*)::INT AS valid_direct_knowledge_count
+    FROM KMS_ADMIN_KNOWLEDGE_ITEMS
+    WHERE tenant_id = $1
+      AND category_id IS NOT NULL
+      AND enabled = TRUE
+      AND (valid_from IS NULL OR valid_from <= NOW())
+      AND (valid_until IS NULL OR valid_until >= NOW())
+    GROUP BY category_id
+),
+total_counts AS (
+    SELECT descendants.root_id AS category_id,
+           COUNT(i.item_id)::INT AS total_knowledge_count
+    FROM descendants
+    LEFT JOIN KMS_ADMIN_KNOWLEDGE_ITEMS i
+      ON i.tenant_id = $1
+     AND i.category_id = descendants.category_id
+    GROUP BY descendants.root_id
+),
+valid_total_counts AS (
+    SELECT descendants.root_id AS category_id,
+           COUNT(i.item_id)::INT AS valid_total_knowledge_count
+    FROM descendants
+    LEFT JOIN KMS_ADMIN_KNOWLEDGE_ITEMS i
+      ON i.tenant_id = $1
+     AND i.category_id = descendants.category_id
+     AND i.enabled = TRUE
+     AND (i.valid_from IS NULL OR i.valid_from <= NOW())
+     AND (i.valid_until IS NULL OR i.valid_until >= NOW())
+    GROUP BY descendants.root_id
+)
+SELECT categories.category_id, categories.tenant_id, categories.parent_id, categories.name,
+       categories.path, categories.sort_order, categories.is_active, categories.metadata,
+       categories.create_time, categories.update_time,
+       COALESCE(direct_counts.direct_knowledge_count, 0)::INT AS direct_knowledge_count,
+       COALESCE(total_counts.total_knowledge_count, 0)::INT AS total_knowledge_count,
+       COALESCE(valid_direct_counts.valid_direct_knowledge_count, 0)::INT AS valid_direct_knowledge_count,
+       COALESCE(valid_total_counts.valid_total_knowledge_count, 0)::INT AS valid_total_knowledge_count
+FROM categories
+LEFT JOIN direct_counts ON direct_counts.category_id = categories.category_id
+LEFT JOIN total_counts ON total_counts.category_id = categories.category_id
+LEFT JOIN valid_direct_counts ON valid_direct_counts.category_id = categories.category_id
+LEFT JOIN valid_total_counts ON valid_total_counts.category_id = categories.category_id
+ORDER BY categories.path ASC, categories.sort_order ASC, categories.name ASC
+"""
 
 
 class IntegratedSearchRequest(BaseModel):
@@ -26,6 +96,30 @@ class IntegratedSearchRequest(BaseModel):
     kms_options: dict[str, Any] = Field(default_factory=dict)
     faq_options: dict[str, Any] = Field(default_factory=dict)
     client_trace_id: str | None = None
+
+
+@router.get("/api/external/categories")
+async def list_external_categories(
+    include_inactive: bool = Query(default=False),
+    client: dict = Depends(get_external_client),
+) -> dict:
+    rows = await db.fetch(EXTERNAL_CATEGORIES_SQL, client["tenant_id"], include_inactive)
+    return {
+        "tenant_id": client["tenant_id"],
+        "tenant_name": client.get("tenant_name"),
+        "kms_workspace": client["kms_workspace"],
+        "faq_workspace": client["faq_workspace"],
+        "categories": rows,
+        "usage": {
+            "search_request_field": "category_ids",
+            "descendants_included": True,
+            "validity_policy": (
+                "Search candidates are filtered by enabled=true, valid_from<=server_now, "
+                "and valid_until>=server_now. Clients do not pass validity dates in search requests."
+            ),
+            "validity_trace_field": "trace.eligibility",
+        },
+    }
 
 
 async def _internal_scope(payload: IntegratedSearchRequest, user: dict) -> WorkspaceScope:
