@@ -710,7 +710,7 @@ function EligibilityNotice({ result }: { result: any }) {
             <div className="row wrap" style={{ gap: 6 }}>
               {messages.flatMap((message) =>
                 message.items.map((item: any) => (
-                  <span key={`${message.key}-${item.item_id}`} className="badge outline" title={item.title}>
+                  <span key={`${message.key}-${item.item_id}`} className="badge outline eligibility-chip" title={item.title}>
                     {message.label}: {item.title}
                   </span>
                 ))

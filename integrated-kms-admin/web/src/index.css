@@ -712,6 +712,18 @@
 }
 
 /* Prototype CSS is unlayered, so shell height fixes must stay unlayered too. */
+.badge.eligibility-chip {
+  max-width: 100%;
+  min-width: 0;
+  height: auto;
+  justify-content: flex-start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  text-align: left;
+  line-height: 1.35;
+}
+
 .app {
   height: 100vh;
   height: 100dvh;
@@ -730,7 +742,23 @@
 
 .content {
   min-height: 0;
+  overflow-x: hidden;
   padding-bottom: max(48px, env(safe-area-inset-bottom));
+}
+
+.table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+}
+
+.knowledge-table-scroll {
+  padding-bottom: 8px;
+}
+
+.knowledge-table-scroll .tbl {
+  min-width: 1120px;
 }
 
 .field > span,

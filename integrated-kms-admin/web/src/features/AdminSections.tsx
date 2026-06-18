@@ -752,6 +752,17 @@ function statusLabel(status?: string) {
   return labels[normalized] || status || '알 수 없음'
 }
 
+function isRunningJob(job?: Pick<Job, 'status'> | null) {
+  return ['pending', 'running', 'processing'].includes(String(job?.status || '').toLowerCase())
+}
+
+function jobProgressMessage(job: Job) {
+  const metadata = jobMetadata(job)
+  const lastTask = metadata.last_task && typeof metadata.last_task === 'object' ? metadata.last_task as Record<string, unknown> : null
+  const taskMessage = typeof lastTask?.message === 'string' ? lastTask.message : ''
+  return job.message || taskMessage || 'LightRAG 작업 상태를 확인 중입니다.'
+}
+
 function normalizeUiRole(role?: string) {
   const raw = String(role || 'user').toLowerCase()
   return raw === 'viewer' ? 'user' : raw
@@ -3160,7 +3171,7 @@ export function KnowledgeManagement() {
     if (effectiveFaqWorkspace !== faqWorkspace) setFaqWorkspace(effectiveFaqWorkspace)
   }, [effectiveFaqWorkspace, effectiveKmsWorkspace, faqWorkspace, kmsWorkspace, setFaqWorkspace, setKmsWorkspace])
 
-  const load = async () => {
+  const load = async (options: { syncRunning?: boolean } = {}) => {
     const scopeParams = new URLSearchParams({
       kms_workspace: effectiveKmsWorkspace,
       faq_workspace: effectiveFaqWorkspace
@@ -3174,10 +3185,12 @@ export function KnowledgeManagement() {
       status: documentStatus,
       kms_workspace: effectiveKmsWorkspace
     })
-    try {
-      await api.post('/api/jobs/sync-running')
-    } catch {
-      // The list should still render when the background LightRAG task endpoint is temporarily unavailable.
+    if (options.syncRunning ?? true) {
+      try {
+        await api.post('/api/jobs/sync-running')
+      } catch {
+        // The list should still render when the background LightRAG task endpoint is temporarily unavailable.
+      }
     }
     const [knowledgeResponse, categoryResponse, documentResponse, faqResponse, jobsResponse] = await Promise.all([
       api.get(`/api/knowledge?${scopeParams.toString()}`),
@@ -3494,9 +3507,7 @@ export function KnowledgeManagement() {
 
   const knowledgeSummary = useMemo(() => {
     const activeCount = knowledgeRows.filter((row) => row.enabled).length
-    const processingCount = knowledgeRows.filter((row) =>
-      ['pending', 'running', 'processing'].includes(String(row.status || '').toLowerCase())
-    ).length
+    const processingCount = knowledgeRows.filter((row) => isRunningJob({ status: row.status || '' })).length
     const failedCount = knowledgeRows.filter((row) =>
       ['failed', 'error', 'cancelled', 'rolledback'].includes(String(row.status || '').toLowerCase())
     ).length
@@ -3509,6 +3520,11 @@ export function KnowledgeManagement() {
       latestJobs: jobs.slice(0, 4)
     }
   }, [jobs, knowledgeRows])
+
+  const runningJobs = useMemo(
+    () => jobs.filter(isRunningJob).slice(0, 4),
+    [jobs]
+  )
 
   const unlinkedDocumentRows = useMemo(
     () => knowledgeRows.filter((row) => !row.linked && row.document),
@@ -3601,15 +3617,25 @@ export function KnowledgeManagement() {
     }
   }
 
-  const syncRunningJobs = async () => {
-    setSyncing(true)
+  const syncRunningJobs = async (options: { silent?: boolean } = {}) => {
+    if (!options.silent) setSyncing(true)
     try {
       await api.post('/api/jobs/sync-running')
-      await load()
+      await load({ syncRunning: false })
     } finally {
-      setSyncing(false)
+      if (!options.silent) setSyncing(false)
     }
   }
+
+  const runningJobCount = jobs.filter(isRunningJob).length
+
+  useEffect(() => {
+    if (!runningJobCount) return
+    const timer = window.setInterval(() => {
+      void syncRunningJobs({ silent: true })
+    }, 5000)
+    return () => window.clearInterval(timer)
+  }, [runningJobCount, effectiveKmsWorkspace, effectiveFaqWorkspace, documentStatus, faqStatus, faqSearch])
 
   const deleteDocument = async (doc: KmsDocument) => {
     if (!window.confirm(`${doc.file_path || doc.id} 문서를 LightRAG 워크스페이스에서 삭제하시겠습니까?`)) {
@@ -3870,6 +3896,57 @@ export function KnowledgeManagement() {
           </div>
         ))}
       </div>
+
+      {runningJobs.length > 0 && (
+        <div className="card" style={{ marginBottom: 'var(--gap)', borderColor: 'var(--accent)', background: 'var(--accent-soft)' }}>
+          <div className="card-h">
+            <div>
+              <div className="t">진행 중 지식화</div>
+              <div className="sub">LightRAG 작업 상태를 5초마다 자동 동기화합니다.</div>
+            </div>
+            <div className="sp" />
+            <span className="badge blue">
+              <RefreshCwIcon className={syncing ? 'spin size-3' : 'size-3'} /> {runningJobs.length}건 진행 중
+            </span>
+            <Button type="button" size="sm" variant="outline" onClick={() => syncRunningJobs()} disabled={syncing}>
+              <RefreshCwIcon className={syncing ? 'spin size-4' : 'size-4'} /> 지금 동기화
+            </Button>
+          </div>
+          <div className="card-b">
+            <div className="col" style={{ gap: 10 }}>
+              {runningJobs.map((job) => {
+                const progress = Math.max(0, Math.min(100, Number(job.progress || 0)))
+                return (
+                  <div key={job.job_id} className="col" style={{ gap: 8, padding: 12, borderRadius: 'var(--radius-md)', border: '1px solid var(--border-default)', background: '#fff' }}>
+                    <div className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
+                      <StatusBadge status={job.status} />
+                      <div className="grow" style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--fg-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {job.knowledge_title || job.job_type || job.job_id}
+                        </div>
+                        <div className="muted" style={{ fontSize: 12, lineHeight: 1.5, marginTop: 3 }}>
+                          {jobProgressMessage(job)}
+                        </div>
+                      </div>
+                      <span className="num" style={{ fontSize: 18, fontWeight: 800, color: 'var(--accent)' }}>{progress.toFixed(0)}%</span>
+                    </div>
+                    <div className={`bar ${badgeTone(job.status) === 'green' ? 'green' : badgeTone(job.status) === 'red' ? 'red' : ''}`} style={{ height: 8 }}>
+                      <i style={{ width: `${progress}%` }} />
+                    </div>
+                    <div className="row wrap" style={{ gap: 8 }}>
+                      <span className="badge gray">현재 단계 {statusLabel(job.status)}</span>
+                      <span className="badge outline">최근 확인 {shortDate(job.update_time)}</span>
+                      <span className="badge outline mono" title={job.lightrag_task_id || job.job_id}>
+                        Task {job.lightrag_task_id ? job.lightrag_task_id.slice(0, 8) : job.job_id.slice(0, 8)}
+                      </span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid" style={{ gridTemplateColumns: 'minmax(0,1fr) 360px', alignItems: 'start', marginBottom: 'var(--gap)' }}>
         <div className="card">
@@ -4148,98 +4225,100 @@ export function KnowledgeManagement() {
         )}
 
         {view === 'table' ? (
-          <table className="tbl">
-            <thead>
-              <tr>
-                <th style={{ paddingLeft: 14 }}>제목</th>
-                <th>유형</th>
-                <th>출처</th>
-                <th>카테고리</th>
-                <th>상태</th>
-                <th>사용</th>
-                <th>유효기간</th>
-                <th className="num">지표</th>
-                <th>수정일</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {pagedKnowledgeRows.map((row) => (
-                <tr key={`${row.kind}-${row.id}`}>
-                  <td>
-                    <div className="row" style={{ gap: 6, alignItems: 'center' }}>
-                      <div className="ttl">{row.title}</div>
-                      {!row.linked && <span className="badge amber">미연결</span>}
-                    </div>
-                    <div className="muted mono" style={{ fontSize: 11 }}>{row.id} · {row.workspace}</div>
-                    {row.summary && <div className="muted" style={{ maxWidth: 460, marginTop: 4, fontSize: 11.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.summary}</div>}
-                    {row.job && (
-                      <div style={{ marginTop: 8, maxWidth: 360 }}>
-                        <div className={`bar ${badgeTone(row.job.status) === 'green' ? 'green' : badgeTone(row.job.status) === 'red' ? 'red' : ''}`}>
-                          <i style={{ width: `${Math.min(100, Number(row.job.progress || 0))}%` }} />
-                        </div>
-                      </div>
-                    )}
-                  </td>
-                  <td>
-                    <span className={`badge ${row.kind === 'faq' ? 'blue' : 'gray'}`}>
-                      {row.kind === 'faq' ? <BookOpenIcon className="size-3" /> : <FileTextIcon className="size-3" />}
-                      {row.kind === 'faq' ? 'FAQ' : '문서'}
-                    </span>
-                  </td>
-                  <td><span className="badge gray">{row.source}</span></td>
-                  <td className="muted">{row.category}</td>
-                  <td><span className={`badge ${badgeTone(row.status)}`}>{statusLabel(row.status)}</span></td>
-                  <td>{row.enabled ? <span className="badge green"><span className="d" />사용</span> : <span className="badge gray">미사용</span>}</td>
-                  <td><span className="num muted" style={{ fontSize: 12 }}>{shortDate(row.validFrom)} ~ {shortDate(row.validUntil)}</span></td>
-                  <td className="num" style={{ fontWeight: 600, color: 'var(--fg-primary)' }}>{row.metricValue} <span className="muted" style={{ fontSize: 11 }}>{row.metricLabel}</span></td>
-                  <td className="num muted" style={{ fontSize: 12 }}>{shortDate(row.updated)}</td>
-                  <td>
-                    <div className="row" style={{ gap: 4, justifyContent: 'flex-end' }}>
-                      {row.document && (
-                        <>
-                          <Button type="button" size="sm" variant="ghost" title="탐색" onClick={() => openDocumentDetail(row.document!)} disabled={documentDetailLoadingId === row.document.id}>
-                            <LayersIcon className={documentDetailLoadingId === row.document.id ? 'spin size-4' : 'size-4'} />
-                          </Button>
-                          <Button type="button" size="sm" variant="ghost" title="재지식화" onClick={() => openDocumentReingest(row.document!)} disabled={documentReingestLoadingId === row.document.id}>
-                            <RotateCwIcon className={documentReingestLoadingId === row.document.id ? 'spin size-4' : 'size-4'} />
-                          </Button>
-                          <Button type="button" size="sm" variant="ghost" title="삭제" onClick={() => deleteDocument(row.document!)}>
-                            <Trash2Icon className="size-4" />
-                          </Button>
-                        </>
-                      )}
-                      {row.answer && (
-                        <>
-                          <Button type="button" size="sm" variant="ghost" title="설정" onClick={() => openFaqEdit(row.answer!)} disabled={faqEditingLoadingId === row.answer.answer_id}>
-                            <EditIcon className={faqEditingLoadingId === row.answer.answer_id ? 'spin size-4' : 'size-4'} />
-                          </Button>
-                          {row.answer.status !== 'published' && (
-                            <Button type="button" size="sm" variant="ghost" title="게시" onClick={() => runFaqAction(row.answer!, 'publish')}>
-                              <CheckCircleIcon className="size-4" />
-                            </Button>
-                          )}
-                          {row.answer.status !== 'archived' && (
-                            <Button type="button" size="sm" variant="ghost" title="보관" onClick={() => runFaqAction(row.answer!, 'archive')}>
-                              <ArchiveIcon className="size-4" />
-                            </Button>
-                          )}
-                          <Button type="button" size="sm" variant="ghost" title="벡터 재생성" onClick={() => runFaqAction(row.answer!, 'vectors-rebuild')}>
-                            <RotateCwIcon className="size-4" />
-                          </Button>
-                        </>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {!visibleKnowledgeRows.length && (
+          <div className="table-scroll knowledge-table-scroll">
+            <table className="tbl">
+              <thead>
                 <tr>
-                  <td colSpan={10} className="empty">등록된 지식이 없습니다.</td>
+                  <th style={{ paddingLeft: 14 }}>제목</th>
+                  <th>유형</th>
+                  <th>출처</th>
+                  <th>카테고리</th>
+                  <th>상태</th>
+                  <th>사용</th>
+                  <th>유효기간</th>
+                  <th className="num">지표</th>
+                  <th>수정일</th>
+                  <th></th>
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {pagedKnowledgeRows.map((row) => (
+                  <tr key={`${row.kind}-${row.id}`}>
+                    <td>
+                      <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+                        <div className="ttl">{row.title}</div>
+                        {!row.linked && <span className="badge amber">미연결</span>}
+                      </div>
+                      <div className="muted mono" style={{ fontSize: 11 }}>{row.id} · {row.workspace}</div>
+                      {row.summary && <div className="muted" style={{ maxWidth: 460, marginTop: 4, fontSize: 11.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.summary}</div>}
+                      {row.job && (
+                        <div style={{ marginTop: 8, maxWidth: 360 }}>
+                          <div className={`bar ${badgeTone(row.job.status) === 'green' ? 'green' : badgeTone(row.job.status) === 'red' ? 'red' : ''}`}>
+                            <i style={{ width: `${Math.min(100, Number(row.job.progress || 0))}%` }} />
+                          </div>
+                        </div>
+                      )}
+                    </td>
+                    <td>
+                      <span className={`badge ${row.kind === 'faq' ? 'blue' : 'gray'}`}>
+                        {row.kind === 'faq' ? <BookOpenIcon className="size-3" /> : <FileTextIcon className="size-3" />}
+                        {row.kind === 'faq' ? 'FAQ' : '문서'}
+                      </span>
+                    </td>
+                    <td><span className="badge gray">{row.source}</span></td>
+                    <td className="muted">{row.category}</td>
+                    <td><span className={`badge ${badgeTone(row.status)}`}>{statusLabel(row.status)}</span></td>
+                    <td>{row.enabled ? <span className="badge green"><span className="d" />사용</span> : <span className="badge gray">미사용</span>}</td>
+                    <td><span className="num muted" style={{ fontSize: 12 }}>{shortDate(row.validFrom)} ~ {shortDate(row.validUntil)}</span></td>
+                    <td className="num" style={{ fontWeight: 600, color: 'var(--fg-primary)' }}>{row.metricValue} <span className="muted" style={{ fontSize: 11 }}>{row.metricLabel}</span></td>
+                    <td className="num muted" style={{ fontSize: 12 }}>{shortDate(row.updated)}</td>
+                    <td>
+                      <div className="row" style={{ gap: 4, justifyContent: 'flex-end' }}>
+                        {row.document && (
+                          <>
+                            <Button type="button" size="sm" variant="ghost" title="탐색" onClick={() => openDocumentDetail(row.document!)} disabled={documentDetailLoadingId === row.document.id}>
+                              <LayersIcon className={documentDetailLoadingId === row.document.id ? 'spin size-4' : 'size-4'} />
+                            </Button>
+                            <Button type="button" size="sm" variant="ghost" title="재지식화" onClick={() => openDocumentReingest(row.document!)} disabled={documentReingestLoadingId === row.document.id}>
+                              <RotateCwIcon className={documentReingestLoadingId === row.document.id ? 'spin size-4' : 'size-4'} />
+                            </Button>
+                            <Button type="button" size="sm" variant="ghost" title="삭제" onClick={() => deleteDocument(row.document!)}>
+                              <Trash2Icon className="size-4" />
+                            </Button>
+                          </>
+                        )}
+                        {row.answer && (
+                          <>
+                            <Button type="button" size="sm" variant="ghost" title="설정" onClick={() => openFaqEdit(row.answer!)} disabled={faqEditingLoadingId === row.answer.answer_id}>
+                              <EditIcon className={faqEditingLoadingId === row.answer.answer_id ? 'spin size-4' : 'size-4'} />
+                            </Button>
+                            {row.answer.status !== 'published' && (
+                              <Button type="button" size="sm" variant="ghost" title="게시" onClick={() => runFaqAction(row.answer!, 'publish')}>
+                                <CheckCircleIcon className="size-4" />
+                              </Button>
+                            )}
+                            {row.answer.status !== 'archived' && (
+                              <Button type="button" size="sm" variant="ghost" title="보관" onClick={() => runFaqAction(row.answer!, 'archive')}>
+                                <ArchiveIcon className="size-4" />
+                              </Button>
+                            )}
+                            <Button type="button" size="sm" variant="ghost" title="벡터 재생성" onClick={() => runFaqAction(row.answer!, 'vectors-rebuild')}>
+                              <RotateCwIcon className="size-4" />
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {!visibleKnowledgeRows.length && (
+                  <tr>
+                    <td colSpan={10} className="empty">등록된 지식이 없습니다.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         ) : (
           <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(330px,1fr))', padding: '0 8px 8px' }}>
             {pagedKnowledgeRows.map((row) => (
@@ -7560,7 +7639,7 @@ export function Jobs() {
     }
   }
 
-  const runningCount = jobs.filter((job) => ['pending', 'running', 'processing'].includes(String(job.status).toLowerCase())).length
+  const runningCount = jobs.filter(isRunningJob).length
   const failedCount = jobs.filter((job) => ['failed', 'error', 'cancelled'].includes(String(job.status).toLowerCase())).length
   const completedCount = jobs.filter((job) => ['success', 'completed', 'ready', 'processed'].includes(String(job.status).toLowerCase())).length
 
@@ -7600,7 +7679,7 @@ export function Jobs() {
           </thead>
           <tbody>
             {jobs.map((job) => {
-              const canCancel = ['pending', 'running', 'processing'].includes(String(job.status).toLowerCase()) && Boolean(job.lightrag_task_id)
+              const canCancel = isRunningJob(job) && Boolean(job.lightrag_task_id)
               const canRollback = !canCancel && job.rollback_status !== 'completed'
               return (
                 <tr key={job.job_id}>

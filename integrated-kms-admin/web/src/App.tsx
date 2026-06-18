@@ -14,7 +14,8 @@ import {
   ShieldIcon,
   UsersIcon
 } from 'lucide-react'
-import { Toaster } from 'sonner'
+import { Toaster, toast } from 'sonner'
+import { AUTH_EXPIRED_EVENT } from '@/api/client'
 import Login from '@/features/Login'
 import IntegratedSearch from '@/features/IntegratedSearch'
 import { Categories, ExternalClients, Jobs, KnowledgeManagement, Stats, SystemStatus, Tenants, Users } from '@/features/AdminSections'
@@ -65,6 +66,15 @@ export default function App() {
   useEffect(() => {
     load()
   }, [load])
+
+  useEffect(() => {
+    const handleAuthExpired = () => {
+      logout()
+      toast.warning('로그인이 만료되었습니다. 다시 로그인해 주세요.')
+    }
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired)
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired)
+  }, [logout])
 
   useEffect(() => {
     document.body.setAttribute('data-density', 'regular')

@@ -13,11 +13,16 @@ test('integrated search applies selected layout before results exist', () => {
 
 test('integrated search surfaces validity exclusions from trace eligibility', () => {
   const source = readFileSync(resolve(import.meta.dir, 'features/IntegratedSearch.tsx'), 'utf8')
+  const css = readFileSync(resolve(import.meta.dir, 'index.css'), 'utf8')
 
   expect(source).toContain('function EligibilityNotice')
   expect(source).toContain('trace?.eligibility')
   expect(source).toContain('검색 후보 적용 내역')
   expect(source).toContain('유효기간 만료')
+  expect(source).toContain('eligibility-chip')
+  expect(css).toContain('.badge.eligibility-chip')
+  expect(css).toContain('white-space: normal')
+  expect(css).toContain('overflow-wrap: anywhere')
 })
 
 test('integrated search links citation badges to a compact source drawer and source actions', () => {
