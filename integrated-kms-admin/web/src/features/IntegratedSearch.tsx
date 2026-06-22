@@ -21,6 +21,7 @@ import {
 import { api } from '@/api/client'
 import WorkspaceSelect from '@/components/WorkspaceSelect'
 import Button from '@/components/ui/Button'
+import { RelatedHelp } from '@/features/Help'
 import { canChooseWorkspace, resolveEffectiveWorkspaceScope } from '@/lib/workspaceAccess'
 import { useAuthStore } from '@/stores/auth'
 import { useWorkspaceScopeStore } from '@/stores/workspaceScope'
@@ -1459,6 +1460,7 @@ export default function IntegratedSearch() {
           <p>질문 하나로 생성형 AI 답변과 FAQ 답변을 함께 조회합니다.</p>
         </div>
         <div className="sp" />
+        <RelatedHelp topicIds={['HELP-SEARCH-001', 'HELP-SEARCH-002', 'HELP-SEARCH-003', 'HELP-SEARCH-004']} />
         <div className="seg">
           {[
             ['rail', '출처 패널'],

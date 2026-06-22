@@ -5,6 +5,7 @@ import {
   ClipboardListIcon,
   DatabaseIcon,
   FolderTreeIcon,
+  HelpCircleIcon,
   KeyRoundIcon,
   LogOutIcon,
   NetworkIcon,
@@ -19,6 +20,7 @@ import { AUTH_EXPIRED_EVENT } from '@/api/client'
 import Login from '@/features/Login'
 import IntegratedSearch from '@/features/IntegratedSearch'
 import { Categories, ExternalClients, Jobs, KnowledgeManagement, Stats, SystemStatus, Tenants, Users } from '@/features/AdminSections'
+import { HelpAdmin, HelpCenter, OPEN_HELP_TOPIC_EVENT } from '@/features/Help'
 import { publicAsset } from '@/lib/assets'
 import { useAuthStore } from '@/stores/auth'
 import { NavKey, canSeeNav, navGroups, navItems } from '@/navigation'
@@ -32,7 +34,9 @@ const icons: Record<NavKey, typeof SearchIcon> = {
   users: UsersIcon,
   external: KeyRoundIcon,
   jobs: ClipboardListIcon,
-  system: SettingsIcon
+  system: SettingsIcon,
+  help: HelpCircleIcon,
+  helpAdmin: HelpCircleIcon
 }
 
 function roleLabel(role?: string) {
@@ -57,6 +61,7 @@ export default function App() {
   const [active, setActive] = useState<NavKey>('search')
   const [mountedViews, setMountedViews] = useState<Set<NavKey>>(() => new Set(['search']))
   const [collapsed, setCollapsed] = useState(false)
+  const [helpFocusId, setHelpFocusId] = useState('')
   const contentRef = useRef<HTMLElement | null>(null)
   const scrollPositions = useRef<Partial<Record<NavKey, { left: number; top: number }>>>({})
   const user = useAuthStore((state) => state.user)
@@ -75,6 +80,18 @@ export default function App() {
     window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired)
     return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired)
   }, [logout])
+
+  useEffect(() => {
+    const handleOpenHelpTopic = (event: Event) => {
+      const helpId = (event as CustomEvent<{ helpId?: string }>).detail?.helpId || ''
+      if (!helpId) return
+      saveCurrentScroll()
+      setHelpFocusId(helpId)
+      setActive('help')
+    }
+    window.addEventListener(OPEN_HELP_TOPIC_EVENT, handleOpenHelpTopic)
+    return () => window.removeEventListener(OPEN_HELP_TOPIC_EVENT, handleOpenHelpTopic)
+  })
 
   useEffect(() => {
     document.body.setAttribute('data-density', 'regular')
@@ -146,6 +163,10 @@ export default function App() {
         return <Jobs />
       case 'system':
         return <SystemStatus />
+      case 'help':
+        return <HelpCenter focusHelpId={helpFocusId} />
+      case 'helpAdmin':
+        return <HelpAdmin />
     }
   }
 

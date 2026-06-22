@@ -51,6 +51,7 @@ import {
   normalizeFaqWorkspace,
   normalizeKmsWorkspace
 } from '@/config'
+import { RelatedHelp } from '@/features/Help'
 import { selectClass } from '@/lib/form'
 import { PASSWORD_MIN_LENGTH, createUserDisabledReason, passwordRuleFeedback } from '@/lib/passwordPolicy'
 import { compactDateRange, deltaPercent, fillHourRows, ratio, toCountRows, type CountRow } from '@/lib/stats'
@@ -3847,6 +3848,25 @@ export function KnowledgeManagement() {
           <p>FAQ·문서 지식 등록, LightRAG 지식화 진행 상태, KMS/FAQ 원장 연결을 관리합니다.</p>
         </div>
         <div className="sp" />
+        <RelatedHelp
+          topicIds={[
+            'HELP-KNOWLEDGE-001',
+            'HELP-KNOWLEDGE-002',
+            'HELP-KNOWLEDGE-003',
+            'HELP-KNOWLEDGE-004',
+            'HELP-KNOWLEDGE-005',
+            'HELP-KNOWLEDGE-006',
+            'HELP-KNOWLEDGE-007',
+            'HELP-KNOWLEDGE-008',
+            'HELP-KNOWLEDGE-009',
+            'HELP-KNOWLEDGE-010',
+            'HELP-KNOWLEDGE-011',
+            'HELP-KNOWLEDGE-012',
+            'HELP-KNOWLEDGE-013',
+            'HELP-KNOWLEDGE-014',
+            'HELP-KNOWLEDGE-015'
+          ]}
+        />
         <div className="row" style={{ gap: 8, minWidth: 420 }}>
           <WorkspaceSelect
             value={effectiveKmsWorkspace}
@@ -4833,6 +4853,7 @@ export function Categories() {
           <p>고객센터별 지식을 분류하는 트리입니다. 행에서 하위 카테고리를 바로 추가하고 상세 패널에서 구조를 변경합니다.</p>
         </div>
         <div className="sp" />
+        <RelatedHelp topicIds={['HELP-CATEGORY-001']} />
         {canSelectTenant && (
           <div style={{ minWidth: 360 }}>
             <TenantSelect value={selectedTenantId} onChange={setSelectedTenantId} required />
@@ -5375,6 +5396,7 @@ export function ExternalClients() {
           <p>타 시스템이 통합 검색을 호출할 수 있도록 API Key를 발급하고 고객센터·호출 제한을 관리합니다.</p>
         </div>
         <div className="sp" />
+        <RelatedHelp topicIds={['HELP-EXTERNAL-001']} />
         <Button type="button" onClick={startCreate}>
           <KeyRoundIcon className="size-4" /> API Key 발급
         </Button>
@@ -6233,6 +6255,7 @@ export function Stats({ active = true }: { active?: boolean }) {
           <p>카테고리, 일자·시간대, 검색 유형, 조회 키워드 기준으로 이용 현황을 분석합니다.</p>
         </div>
         <div className="sp" />
+        <RelatedHelp topicIds={['HELP-STATS-001']} />
         <span className="badge outline mono" title="통계 기준 기간">{periodRange}</span>
         <div className="seg">
           {[
@@ -6663,6 +6686,7 @@ export function Tenants() {
           <p>테넌트 단위로 KMS/FAQ 워크스페이스 페어와 카테고리 기준을 관리합니다.</p>
         </div>
         <div className="sp" />
+        <RelatedHelp topicIds={['HELP-TENANTS-001']} />
         <Button type="button" onClick={startCreate}>
           <PlusIcon className="size-4" /> 고객센터 생성
         </Button>
@@ -7057,6 +7081,7 @@ export function Users() {
           <p>관리자 계정으로 사용자 생성, 고객센터 매핑, 비밀번호 변경, 사용 이력 다운로드를 관리합니다.</p>
         </div>
         <div className="sp" />
+        <RelatedHelp topicIds={['HELP-USERS-001']} />
         <Button type="button" onClick={startCreate}>
           <PlusIcon className="size-4" /> 사용자 생성
         </Button>
@@ -7651,6 +7676,7 @@ export function Jobs() {
           <p>지식화, 재지식화, 롤백 작업의 진행 상태와 메시지를 추적합니다.</p>
         </div>
         <div className="sp" />
+        <RelatedHelp topicIds={['HELP-JOBS-001']} />
         <Button type="button" variant="outline" onClick={syncAll} disabled={syncingAll}>
           <RefreshCwIcon className={syncingAll ? 'spin size-4' : 'size-4'} /> 진행 작업 동기화
         </Button>
@@ -7804,6 +7830,7 @@ export function SystemStatus() {
           <p>웹서버·LightRAG 연동·DB·워크스페이스 상태를 확인합니다. LightRAG 포트 + 100 기준으로 구동됩니다.</p>
         </div>
         <div className="sp" />
+        <RelatedHelp topicIds={['HELP-SYSTEM-001']} />
         <Button type="button" variant="outline" onClick={() => api.get('/api/system/health').then((response) => setHealth(response.data))}>
           <RefreshCwIcon className="size-4" /> 새로고침
         </Button>

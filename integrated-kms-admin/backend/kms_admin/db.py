@@ -7,6 +7,7 @@ from typing import Any
 import asyncpg
 
 from .config import settings
+from .help_seed import HELP_ROLES, load_help_seed_topics
 from .security import hash_password
 
 logger = logging.getLogger(__name__)
@@ -210,6 +211,41 @@ class Database:
                 create_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
             """,
+            """
+            CREATE TABLE IF NOT EXISTS KMS_ADMIN_HELP_TOPICS (
+                help_id TEXT PRIMARY KEY,
+                nav_key TEXT NOT NULL,
+                menu_label TEXT NOT NULL,
+                title TEXT NOT NULL,
+                summary TEXT NOT NULL DEFAULT '',
+                body_md TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'draft',
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+                create_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                update_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS KMS_ADMIN_HELP_TOPIC_VISIBILITY (
+                help_id TEXT NOT NULL REFERENCES KMS_ADMIN_HELP_TOPICS(help_id) ON DELETE CASCADE,
+                role TEXT NOT NULL,
+                is_visible BOOLEAN NOT NULL DEFAULT FALSE,
+                update_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY(help_id, role)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS KMS_ADMIN_HELP_SCREENSHOTS (
+                screenshot_id TEXT PRIMARY KEY,
+                help_id TEXT NOT NULL REFERENCES KMS_ADMIN_HELP_TOPICS(help_id) ON DELETE CASCADE,
+                file_path TEXT NOT NULL,
+                caption TEXT NOT NULL DEFAULT '',
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                create_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                update_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """,
             "CREATE INDEX IF NOT EXISTS IDX_KMS_ADMIN_ITEMS_CATEGORY ON KMS_ADMIN_KNOWLEDGE_ITEMS(category_id)",
             "CREATE INDEX IF NOT EXISTS IDX_KMS_ADMIN_ITEMS_TENANT ON KMS_ADMIN_KNOWLEDGE_ITEMS(tenant_id)",
             "CREATE INDEX IF NOT EXISTS IDX_KMS_ADMIN_ITEMS_VALIDITY ON KMS_ADMIN_KNOWLEDGE_ITEMS(enabled, valid_from, valid_until)",
@@ -219,6 +255,7 @@ class Database:
             "CREATE INDEX IF NOT EXISTS IDX_KMS_ADMIN_SEARCH_TENANT_TIME ON KMS_ADMIN_SEARCH_LOGS(tenant_id, create_time DESC)",
             "CREATE INDEX IF NOT EXISTS IDX_KMS_ADMIN_SEARCH_TIME ON KMS_ADMIN_SEARCH_LOGS(create_time DESC)",
             "CREATE INDEX IF NOT EXISTS IDX_KMS_ADMIN_AUDIT_TIME ON KMS_ADMIN_AUDIT_LOGS(create_time DESC)",
+            "CREATE INDEX IF NOT EXISTS IDX_KMS_ADMIN_HELP_TOPICS_ORDER ON KMS_ADMIN_HELP_TOPICS(status, sort_order, menu_label)",
             "ALTER TABLE KMS_ADMIN_API_CLIENTS ADD COLUMN IF NOT EXISTS tenant_id TEXT",
             "ALTER TABLE KMS_ADMIN_API_CLIENTS ADD COLUMN IF NOT EXISTS api_key_encrypted TEXT",
             "ALTER TABLE KMS_ADMIN_CATEGORIES ADD COLUMN IF NOT EXISTS tenant_id TEXT",
@@ -232,6 +269,7 @@ class Database:
             await self.execute(statement)
         await self.ensure_default_tenant()
         await self.backfill_tenant_ids()
+        await self.seed_help_topics()
         await self.bootstrap_admin()
         await self.ensure_default_user_tenant()
 
@@ -454,6 +492,88 @@ class Database:
             settings.bootstrap_admin_id,
             settings.default_tenant_id,
         )
+
+    async def seed_help_topics(self) -> None:
+        for topic in load_help_seed_topics():
+            await self.execute(
+                """
+                INSERT INTO KMS_ADMIN_HELP_TOPICS(
+                    help_id, nav_key, menu_label, title, summary, body_md,
+                    status, sort_order, metadata
+                )
+                VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+                ON CONFLICT (help_id) DO UPDATE
+                SET title = CASE
+                        WHEN COALESCE(KMS_ADMIN_HELP_TOPICS.metadata->>'seeded_from', '') = 'docs/help'
+                         AND COALESCE(KMS_ADMIN_HELP_TOPICS.metadata->>'content_customized', 'false') <> 'true'
+                        THEN EXCLUDED.title
+                        ELSE KMS_ADMIN_HELP_TOPICS.title
+                    END,
+                    summary = CASE
+                        WHEN COALESCE(KMS_ADMIN_HELP_TOPICS.metadata->>'seeded_from', '') = 'docs/help'
+                         AND COALESCE(KMS_ADMIN_HELP_TOPICS.metadata->>'content_customized', 'false') <> 'true'
+                        THEN EXCLUDED.summary
+                        ELSE KMS_ADMIN_HELP_TOPICS.summary
+                    END,
+                    body_md = CASE
+                        WHEN COALESCE(KMS_ADMIN_HELP_TOPICS.metadata->>'seeded_from', '') = 'docs/help'
+                         AND COALESCE(KMS_ADMIN_HELP_TOPICS.metadata->>'content_customized', 'false') <> 'true'
+                        THEN EXCLUDED.body_md
+                        ELSE KMS_ADMIN_HELP_TOPICS.body_md
+                    END,
+                    menu_label = CASE
+                        WHEN COALESCE(KMS_ADMIN_HELP_TOPICS.metadata->>'seeded_from', '') = 'docs/help'
+                         AND COALESCE(KMS_ADMIN_HELP_TOPICS.metadata->>'content_customized', 'false') <> 'true'
+                        THEN EXCLUDED.menu_label
+                        ELSE KMS_ADMIN_HELP_TOPICS.menu_label
+                    END,
+                    nav_key = CASE
+                        WHEN COALESCE(KMS_ADMIN_HELP_TOPICS.metadata->>'seeded_from', '') = 'docs/help'
+                         AND COALESCE(KMS_ADMIN_HELP_TOPICS.metadata->>'content_customized', 'false') <> 'true'
+                        THEN EXCLUDED.nav_key
+                        ELSE KMS_ADMIN_HELP_TOPICS.nav_key
+                    END,
+                    update_time = CASE
+                        WHEN COALESCE(KMS_ADMIN_HELP_TOPICS.metadata->>'seeded_from', '') = 'docs/help'
+                         AND COALESCE(KMS_ADMIN_HELP_TOPICS.metadata->>'content_customized', 'false') <> 'true'
+                        THEN NOW()
+                        ELSE KMS_ADMIN_HELP_TOPICS.update_time
+                    END
+                """,
+                topic.help_id,
+                topic.nav_key,
+                topic.menu_label,
+                topic.title,
+                topic.summary,
+                topic.body_md,
+                topic.status,
+                topic.sort_order,
+                json.dumps({"seeded_from": "docs/help", "screenshot_required": True}),
+            )
+            for role in HELP_ROLES:
+                await self.execute(
+                    """
+                    INSERT INTO KMS_ADMIN_HELP_TOPIC_VISIBILITY(help_id, role, is_visible)
+                    VALUES($1, $2, $3)
+                    ON CONFLICT (help_id, role) DO NOTHING
+                    """,
+                    topic.help_id,
+                    role,
+                    topic.visibility.get(role, False),
+                )
+            await self.execute(
+                """
+                INSERT INTO KMS_ADMIN_HELP_SCREENSHOTS(
+                    screenshot_id, help_id, file_path, caption, sort_order
+                )
+                VALUES($1, $2, $3, $4, 10)
+                ON CONFLICT (screenshot_id) DO NOTHING
+                """,
+                f"{topic.help_id}-primary",
+                topic.help_id,
+                topic.screenshot_path,
+                topic.screenshot_caption,
+            )
 
 
 db = Database()

@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import settings
 from .db import db
 from .logging_config import configure_logging
-from .routers import api_clients, auth, categories, jobs, knowledge, lightrag, search, system, tenants, users
+from .routers import api_clients, auth, categories, help, jobs, knowledge, lightrag, search, system, tenants, users
 
 
 @asynccontextmanager
@@ -51,6 +51,7 @@ def create_app() -> FastAPI:
     app.include_router(jobs.router)
     app.include_router(search.router)
     app.include_router(system.router)
+    app.include_router(help.router)
 
     prototype_assets = Path(__file__).resolve().parents[2] / "user-admin-prototype" / "assets"
     if prototype_assets.exists():
@@ -64,6 +65,10 @@ def create_app() -> FastAPI:
             StaticFiles(directory=prototype_assets),
             name="admin-prototype-assets",
         )
+
+    help_assets = Path(__file__).resolve().parents[2] / "docs" / "help"
+    if help_assets.exists():
+        app.mount("/help", StaticFiles(directory=help_assets), name="help-assets")
 
     web_dist = Path(__file__).resolve().parents[2] / "web" / "dist"
     if web_dist.exists():

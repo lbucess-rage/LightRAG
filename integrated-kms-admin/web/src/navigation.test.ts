@@ -10,6 +10,8 @@ test('admin navigation exposes planned top-level sections', () => {
     '카테고리',
     '현황 · 통계',
     '작업 이력',
+    '기능 도움말',
+    '도움말 관리',
     '고객센터 관리',
     '사용자 관리',
     'API 관리',
@@ -27,14 +29,16 @@ test('navigation follows prototype role visibility', () => {
     'categories',
     'stats',
     'jobs',
+    'help',
+    'helpAdmin',
     'tenants',
     'users',
     'external',
     'system'
   ])
-  expect(visibleFor('manager')).toEqual(['search', 'knowledge', 'categories', 'stats', 'jobs'])
-  expect(visibleFor('viewer')).toEqual(['search'])
-  expect(visibleFor('user')).toEqual(['search'])
+  expect(visibleFor('manager')).toEqual(['search', 'knowledge', 'categories', 'stats', 'jobs', 'help'])
+  expect(visibleFor('viewer')).toEqual(['search', 'help'])
+  expect(visibleFor('user')).toEqual(['search', 'help'])
 })
 
 test('app shell renders top navigation as tabs', () => {
