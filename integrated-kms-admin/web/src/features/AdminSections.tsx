@@ -174,6 +174,60 @@ type FaqAnswer = {
   update_time?: string | null
 }
 
+const KNOWLEDGE_DOCUMENT_PAGE_SIZE = 200
+const KNOWLEDGE_FAQ_PAGE_SIZE = 100
+const KNOWLEDGE_MAX_PAGE_FETCHES = 500
+
+type KnowledgePageFetchOptions<T> = {
+  endpoint: string
+  params: URLSearchParams
+  pageSize: number
+  itemKey: string
+  totalPages: (data: any, pageSize: number) => number | null
+}
+
+async function fetchAllKnowledgePages<T>({
+  endpoint,
+  params,
+  pageSize,
+  itemKey,
+  totalPages
+}: KnowledgePageFetchOptions<T>) {
+  const items: T[] = []
+  let lastData: any = {}
+  for (let page = 1; page <= KNOWLEDGE_MAX_PAGE_FETCHES; page += 1) {
+    const pageParams = new URLSearchParams(params)
+    pageParams.set('page', String(page))
+    pageParams.set('page_size', String(pageSize))
+    const response = await api.get(`${endpoint}?${pageParams.toString()}`)
+    const data = response.data || {}
+    lastData = data
+    const pageItems = Array.isArray(data[itemKey]) ? data[itemKey] as T[] : []
+    items.push(...pageItems)
+    const knownTotalPages = totalPages(data, pageSize)
+    if (knownTotalPages !== null) {
+      if (page >= knownTotalPages) break
+    } else if (pageItems.length < pageSize) {
+      break
+    }
+  }
+  return { items, lastData }
+}
+
+const kmsDocumentTotalPages = (data: any) => {
+  const value = Number(data?.pagination?.total_pages)
+  return Number.isFinite(value) && value > 0 ? value : null
+}
+
+const faqAnswerTotalPages = (data: any, pageSize: number) => {
+  const total = Number(data?.total)
+  const effectivePageSize = Number(data?.page_size || pageSize)
+  if (!Number.isFinite(total) || total <= 0 || !Number.isFinite(effectivePageSize) || effectivePageSize <= 0) {
+    return null
+  }
+  return Math.ceil(total / effectivePageSize)
+}
+
 type FaqGuidance = {
   guidance_id: string
   answer_id: string
@@ -3177,12 +3231,11 @@ export function KnowledgeManagement() {
       kms_workspace: effectiveKmsWorkspace,
       faq_workspace: effectiveFaqWorkspace
     })
-    const faqParams = new URLSearchParams({ page_size: '100' })
+    const faqParams = new URLSearchParams()
     if (faqStatus !== 'all') faqParams.set('status', faqStatus)
     if (faqSearch.trim()) faqParams.set('search', faqSearch.trim())
     faqParams.set('faq_workspace', effectiveFaqWorkspace)
     const documentParams = new URLSearchParams({
-      page_size: '100',
       status: documentStatus,
       kms_workspace: effectiveKmsWorkspace
     })
@@ -3196,15 +3249,27 @@ export function KnowledgeManagement() {
     const [knowledgeResponse, categoryResponse, documentResponse, faqResponse, jobsResponse] = await Promise.all([
       api.get(`/api/knowledge?${scopeParams.toString()}`),
       api.get('/api/categories'),
-      api.get(`/api/knowledge/kms-documents?${documentParams.toString()}`),
-      api.get(`/api/knowledge/faq-answers?${faqParams.toString()}`),
+      fetchAllKnowledgePages<KmsDocument>({
+        endpoint: '/api/knowledge/kms-documents',
+        params: documentParams,
+        pageSize: KNOWLEDGE_DOCUMENT_PAGE_SIZE,
+        itemKey: 'documents',
+        totalPages: kmsDocumentTotalPages
+      }),
+      fetchAllKnowledgePages<FaqAnswer>({
+        endpoint: '/api/knowledge/faq-answers',
+        params: faqParams,
+        pageSize: KNOWLEDGE_FAQ_PAGE_SIZE,
+        itemKey: 'answers',
+        totalPages: faqAnswerTotalPages
+      }),
       api.get('/api/jobs')
     ])
     setItems(knowledgeResponse.data.items || [])
     setCategories(categoryResponse.data.categories || [])
-    setDocuments(documentResponse.data.documents || [])
-    setFaqAnswers(faqResponse.data.answers || [])
-    setFaqWorkspaceError(faqResponse.data.workspace_error || '')
+    setDocuments(documentResponse.items || [])
+    setFaqAnswers(faqResponse.items || [])
+    setFaqWorkspaceError(faqResponse.lastData?.workspace_error || '')
     setJobs(jobsResponse.data.jobs || [])
   }
 

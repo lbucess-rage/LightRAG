@@ -30,6 +30,18 @@ test('knowledge list supports paging controls', () => {
   expect(css).toContain('.knowledge-table-scroll .tbl')
 })
 
+test('knowledge list loads every backend page before counting rows', () => {
+  const source = readFileSync(resolve(import.meta.dir, 'features/AdminSections.tsx'), 'utf8')
+
+  expect(source).toContain('fetchAllKnowledgePages')
+  expect(source).toContain('KNOWLEDGE_DOCUMENT_PAGE_SIZE = 200')
+  expect(source).toContain('KNOWLEDGE_FAQ_PAGE_SIZE = 100')
+  expect(source).toContain("endpoint: '/api/knowledge/kms-documents'")
+  expect(source).toContain("endpoint: '/api/knowledge/faq-answers'")
+  expect(source).not.toContain("api.get(`/api/knowledge/kms-documents?${documentParams.toString()}`)")
+  expect(source).not.toContain("api.get(`/api/knowledge/faq-answers?${faqParams.toString()}`)")
+})
+
 test('knowledge management highlights and auto-syncs running ingestion jobs', () => {
   const source = readFileSync(resolve(import.meta.dir, 'features/AdminSections.tsx'), 'utf8')
 

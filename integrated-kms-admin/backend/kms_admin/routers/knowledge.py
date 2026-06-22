@@ -913,7 +913,6 @@ async def list_knowledge(
           AND (i.kms_workspace = $1 OR i.faq_workspace = $2)
         GROUP BY i.item_id
         ORDER BY i.update_time DESC
-        LIMIT 500
         """,
         effective_kms_workspace,
         effective_faq_workspace,
