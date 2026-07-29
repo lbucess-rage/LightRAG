@@ -619,26 +619,7 @@ def create_workspace_routes(rag, api_key: Optional[str] = None):
             if not success:
                 raise HTTPException(status_code=500, detail="Failed to delete workspace")
 
-            # Neo4j 그래프 정리 (PG만 지우면 그래프 고아 잔존하는 갭 보강)
-            graph_cleanup = None
-            if delete_data:
-                try:
-                    graph = getattr(rag, "chunk_entity_relation_graph", None)
-                    if graph is not None and hasattr(graph, "delete_workspace_graph"):
-                        graph_cleanup = await graph.delete_workspace_graph(workspace_id)
-                        logger.info(
-                            f"Deleted Neo4j graph for workspace '{workspace_id}': {graph_cleanup}"
-                        )
-                except Exception as graph_exc:
-                    graph_cleanup = {"error": str(graph_exc)}
-                    logger.warning(
-                        f"Neo4j graph cleanup failed for workspace '{workspace_id}': {graph_exc}"
-                    )
-
-            return {
-                "message": f"Workspace '{workspace_id}' deleted successfully",
-                "graph_cleanup": graph_cleanup,
-            }
+            return {"message": f"Workspace '{workspace_id}' deleted successfully"}
         except HTTPException:
             raise
         except Exception as e:
