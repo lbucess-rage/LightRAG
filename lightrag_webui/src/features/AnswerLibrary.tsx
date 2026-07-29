@@ -4,7 +4,9 @@ import { toast } from 'sonner'
 import {
   ArchiveIcon,
   BookOpenIcon,
+  ChevronDownIcon,
   Edit3Icon,
+  FilterIcon,
   HistoryIcon,
   LinkIcon,
   Loader2Icon,
@@ -13,6 +15,7 @@ import {
   RotateCcwIcon,
   SaveIcon,
   SendIcon,
+  SparklesIcon,
   Trash2Icon,
 } from 'lucide-react'
 
@@ -34,6 +37,7 @@ import {
   listAnswers,
   publishAnswer,
   restoreAnswerRevision,
+  suggestAnswerGuidance,
   updateAnswer,
 } from '@/api/lightrag'
 import AnswerContentPreview from '@/components/answers/AnswerContentPreview'
@@ -122,6 +126,7 @@ export default function AnswerLibrary() {
   const [pageSize, setPageSize] = useState(20)
   const [totalAnswers, setTotalAnswers] = useState(0)
   const [isLoading, setIsLoading] = useState(false)
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false)
   const [selectedAnswer, setSelectedAnswer] = useState<AnswerItem | null>(null)
 
   const fetchAnswers = useCallback(async () => {
@@ -249,9 +254,9 @@ export default function AnswerLibrary() {
     <div className="flex h-full flex-col gap-4 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">{t('answerCatalog.library.title', 'View Answers')}</h1>
+          <h1 className="text-2xl font-bold">{t('answerCatalog.library.title', 'FAQ List')}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {t('answerCatalog.library.description', 'Manage approved answers, versions, validity, and matching hints.')}
+            {t('answerCatalog.library.description', 'Find and manage FAQ content, publication state, search settings, and history.')}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -262,19 +267,19 @@ export default function AnswerLibrary() {
           </Button>
           <Button size="sm" onClick={() => setCurrentTab('answer-sources')}>
             <PlusIcon className="h-4 w-4" />
-            {t('answerCatalog.library.openAddAnswers', '답변 추가 열기')}
+            {t('answerCatalog.library.openAddAnswers', 'FAQ 생성')}
           </Button>
         </div>
       </div>
 
       <div className="grid gap-3 rounded-md border p-3">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(220px,1.6fr)_repeat(4,minmax(140px,1fr))]">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(260px,1fr)_160px_160px_auto_auto_auto]">
           <div className="grid gap-1.5">
             <Label className="text-xs">{t('answerCatalog.library.searchLabel', '검색어')}</Label>
             <Input
               value={search}
               onChange={(event) => handleSearchChange(event.target.value)}
-              placeholder={t('answerCatalog.library.search', 'Search answers...')}
+              placeholder={t('answerCatalog.library.search', 'Search FAQ title or content...')}
             />
           </div>
           <div className="grid gap-1.5">
@@ -292,6 +297,42 @@ export default function AnswerLibrary() {
               </SelectContent>
             </Select>
           </div>
+          <div className="grid gap-1.5">
+            <Label className="text-xs">{t('answerCatalog.library.validity', 'Validity')}</Label>
+            <Select value={validity} onValueChange={(value) => { setValidity(value); setPage(1) }}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t('common.all', 'All')}</SelectItem>
+                <SelectItem value="active">{t('answerCatalog.library.validityActive', '현재 사용 가능')}</SelectItem>
+                <SelectItem value="scheduled">{t('answerCatalog.library.validityScheduled', '예약됨')}</SelectItem>
+                <SelectItem value="expired">{t('answerCatalog.library.validityExpired', '만료됨')}</SelectItem>
+                <SelectItem value="no_period">{t('answerCatalog.library.validityNoPeriod', '기간 없음')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setAdvancedFiltersOpen((open) => !open)}
+            className="self-end"
+          >
+            <FilterIcon className="h-4 w-4" />
+            {t('answerCatalog.library.advancedFilters', 'More filters')}
+            <ChevronDownIcon className={`h-4 w-4 transition-transform ${advancedFiltersOpen ? 'rotate-180' : ''}`} />
+          </Button>
+          <Button variant="outline" onClick={resetFilters} className="self-end">
+            {t('answerCatalog.library.resetFilters', '조건 초기화')}
+          </Button>
+          <Button onClick={fetchAnswers} disabled={isLoading} className="self-end">
+            {isLoading ? <Loader2Icon className="h-4 w-4 animate-spin" /> : <RefreshCwIcon className="h-4 w-4" />}
+            {t('common.search', 'Search')}
+          </Button>
+        </div>
+
+        {advancedFiltersOpen && (
+        <div className="grid gap-3 border-t pt-3 md:grid-cols-2 xl:grid-cols-7">
           <div className="grid gap-1.5">
             <Label className="text-xs">{t('answerCatalog.library.contentFormat', 'Format')}</Label>
             <Select value={contentFormat} onValueChange={(value) => { setContentFormat(value); setPage(1) }}>
@@ -320,23 +361,6 @@ export default function AnswerLibrary() {
               </SelectContent>
             </Select>
           </div>
-          <div className="grid gap-1.5">
-            <Label className="text-xs">{t('answerCatalog.library.validity', 'Validity')}</Label>
-            <Select value={validity} onValueChange={(value) => { setValidity(value); setPage(1) }}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{t('common.all', 'All')}</SelectItem>
-                <SelectItem value="active">{t('answerCatalog.library.validityActive', '현재 사용 가능')}</SelectItem>
-                <SelectItem value="scheduled">{t('answerCatalog.library.validityScheduled', '예약됨')}</SelectItem>
-                <SelectItem value="expired">{t('answerCatalog.library.validityExpired', '만료됨')}</SelectItem>
-                <SelectItem value="no_period">{t('answerCatalog.library.validityNoPeriod', '기간 없음')}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(160px,1fr)_minmax(160px,1fr)_120px_140px_140px_auto_auto]">
           <div className="grid gap-1.5">
             <Label className="text-xs">{t('answerCatalog.library.tagFilter', '태그')}</Label>
             <Input
@@ -396,51 +420,42 @@ export default function AnswerLibrary() {
               </SelectContent>
             </Select>
           </div>
-          <Button variant="outline" onClick={resetFilters} className="self-end">
-            {t('answerCatalog.library.resetFilters', '조건 초기화')}
-          </Button>
-          <Button onClick={fetchAnswers} disabled={isLoading} className="self-end">
-            {isLoading ? <Loader2Icon className="h-4 w-4 animate-spin" /> : <RefreshCwIcon className="h-4 w-4" />}
-            {t('common.search', 'Search')}
-          </Button>
         </div>
+        )}
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto rounded-md border">
         {answers.length === 0 ? (
           <div className="flex h-full min-h-72 flex-col items-center justify-center p-8 text-center">
             <BookOpenIcon className="mb-3 h-8 w-8 text-muted-foreground" />
-            <div className="text-sm font-medium">{t('answerCatalog.library.empty', 'No answers yet')}</div>
+            <div className="text-sm font-medium">{t('answerCatalog.library.empty', 'No FAQs yet')}</div>
             <div className="mt-1 text-sm text-muted-foreground">
-              {t('answerCatalog.library.emptyDesc', 'Create the first answer candidate from Add Answers.')}
+              {t('answerCatalog.library.emptyDesc', 'Create the first FAQ from the FAQ creation screen.')}
             </div>
           </div>
         ) : (
           <div className="divide-y">
             {answers.map((answer) => (
-              <div key={answer.answer_id} className="grid gap-3 p-4 lg:grid-cols-[1fr_auto]">
+              <div key={answer.answer_id} className="grid gap-3 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_auto]">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <h2 className="truncate text-base font-semibold">{answer.title}</h2>
                     <Badge variant={statusVariant(answer.status)}>
                       {t(`answerCatalog.status.${answer.status}`, answer.status)}
                     </Badge>
-                    <Badge variant="outline">v{answer.version}</Badge>
-                    <span className="font-mono text-xs text-muted-foreground">{answer.answer_id}</span>
                   </div>
-                  <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-sm">{answer.body}</p>
-                  {answer.tags.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-1">
-                      {answer.tags.map((tag) => (
-                        <Badge key={tag} variant="outline">{tag}</Badge>
-                      ))}
-                    </div>
-                  )}
+                  <p className="mt-1 line-clamp-1 whitespace-pre-wrap text-sm text-muted-foreground">
+                    {answer.body}
+                  </p>
+                  <div className="mt-2 text-xs text-muted-foreground">
+                    {t('answerCatalog.library.lastUpdated', 'Last updated')}: {' '}
+                    {answer.update_time ? new Date(answer.update_time).toLocaleString() : '-'}
+                  </div>
                 </div>
                 <div className="flex items-start gap-2">
                   <Button size="sm" variant="outline" onClick={() => setSelectedAnswer(answer)}>
                     <Edit3Icon className="h-4 w-4" />
-                    {t('common.edit', 'Edit')}
+                    {t('answerCatalog.library.openDetail', 'Details')}
                   </Button>
                   {answer.status !== 'published' && (
                     <Button size="sm" onClick={() => handlePublish(answer)}>
@@ -497,7 +512,7 @@ function AnswerDetailDialog({
   onChanged: (answer: AnswerItem) => void
 }) {
   const { t } = useTranslation()
-  const [section, setSection] = useState<'content' | 'guidance' | 'sources' | 'revisions'>('content')
+  const [section, setSection] = useState<'content' | 'guidance' | 'history'>('content')
   const [title, setTitle] = useState('')
   const [summary, setSummary] = useState('')
   const [body, setBody] = useState('')
@@ -516,6 +531,10 @@ function AnswerDetailDialog({
   const [guidanceWeight, setGuidanceWeight] = useState('1')
   const [isSaving, setIsSaving] = useState(false)
   const [isLoadingDetails, setIsLoadingDetails] = useState(false)
+  const [isSuggesting, setIsSuggesting] = useState(false)
+  const [suggestions, setSuggestions] = useState<
+    Awaited<ReturnType<typeof suggestAnswerGuidance>>['suggestions']
+  >([])
 
   const resetFromAnswer = useCallback((value: AnswerItem | null) => {
     if (!value) return
@@ -554,6 +573,7 @@ function AnswerDetailDialog({
     if (!open || !answer) return
     resetFromAnswer(answer)
     setSection('content')
+    setSuggestions([])
     reloadDetails()
   }, [answer, open, reloadDetails, resetFromAnswer])
 
@@ -621,6 +641,59 @@ function AnswerDetailDialog({
     }
   }
 
+  const handleSuggestGuidance = async () => {
+    if (!answer) return
+    setIsSuggesting(true)
+    try {
+      const result = await suggestAnswerGuidance(answer.answer_id, {
+        max_suggestions: 10,
+        use_llm: true,
+      })
+      setSuggestions(result.suggestions)
+      toast.success(
+        t(
+          'answerCatalog.library.guidanceSuggestionsReady',
+          'FAQ search suggestions are ready for review.'
+        )
+      )
+    } catch (err) {
+      toast.error(localizedErrorMessage(err, t))
+    } finally {
+      setIsSuggesting(false)
+    }
+  }
+
+  const applyGuidanceSuggestions = async (indexes: number[]) => {
+    if (!answer || indexes.length === 0) return
+    setIsSaving(true)
+    try {
+      await Promise.all(
+        indexes.map((index) => {
+          const suggestion = suggestions[index]
+          return addAnswerGuidance(answer.answer_id, {
+            guidance_type: suggestion.guidance_type || 'keyword',
+            text: suggestion.text,
+            weight: suggestion.weight || 1,
+            metadata: {
+              ...suggestion.metadata,
+              created_from: 'faq_detail_llm_suggestion',
+              source: suggestion.source || 'llm',
+            },
+          })
+        })
+      )
+      setSuggestions((current) => current.filter((_, index) => !indexes.includes(index)))
+      toast.success(
+        t('answerCatalog.library.guidanceSuggestionsApplied', 'Selected search suggestions were applied.')
+      )
+      reloadDetails()
+    } catch (err) {
+      toast.error(localizedErrorMessage(err, t))
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
   const handleRestoreRevision = async (revision: AnswerRevision) => {
     if (!answer) return
     setIsSaving(true)
@@ -643,7 +716,7 @@ function AnswerDetailDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-6xl">
         <DialogHeader>
-          <DialogTitle>{t('answerCatalog.library.detailTitle', 'Answer Details')}</DialogTitle>
+          <DialogTitle>{t('answerCatalog.library.detailTitle', 'FAQ Details')}</DialogTitle>
           <DialogDescription>
             <span className="font-mono">{answer.answer_id}</span>
             <span className="ml-2">v{answer.version}</span>
@@ -651,7 +724,7 @@ function AnswerDetailDialog({
         </DialogHeader>
 
         <div className="flex flex-wrap gap-2">
-          {(['content', 'guidance', 'sources', 'revisions'] as const).map((item) => (
+          {(['content', 'guidance', 'history'] as const).map((item) => (
             <Button
               key={item}
               type="button"
@@ -660,9 +733,8 @@ function AnswerDetailDialog({
               onClick={() => setSection(item)}
             >
               {item === 'content' && t('answerCatalog.library.contentSection', 'Content')}
-              {item === 'guidance' && t('answerCatalog.library.guidanceSection', 'Guidance')}
-              {item === 'sources' && t('answerCatalog.library.sourcesSection', 'Sources')}
-              {item === 'revisions' && t('answerCatalog.library.revisionsSection', 'Revisions')}
+              {item === 'guidance' && t('answerCatalog.library.guidanceSection', 'Search settings')}
+              {item === 'history' && t('answerCatalog.library.historySection', 'Source and history')}
             </Button>
           ))}
         </div>
@@ -749,6 +821,73 @@ function AnswerDetailDialog({
 
         {section === 'guidance' && (
           <div className="grid gap-4 py-2">
+            <div className="rounded-md border bg-muted/20 p-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2 font-medium">
+                    <SparklesIcon className="h-4 w-4 text-emerald-600" />
+                    {t('answerCatalog.library.llmGuidanceTitle', 'Prepare search settings with AI')}
+                  </div>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {t(
+                      'answerCatalog.library.llmGuidanceDescription',
+                      'AI proposes representative questions, keywords, synonyms, and exclusion terms. Review them before applying.'
+                    )}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleSuggestGuidance}
+                  disabled={isSuggesting || isSaving}
+                >
+                  {isSuggesting ? <Loader2Icon className="h-4 w-4 animate-spin" /> : <SparklesIcon className="h-4 w-4" />}
+                  {t('answerCatalog.library.suggestGuidance', 'Generate suggestions')}
+                </Button>
+              </div>
+              {suggestions.length > 0 && (
+                <div className="mt-3 border-t pt-3">
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-sm font-medium">
+                      {t('answerCatalog.library.suggestionCount', '{{count}} suggestions', { count: suggestions.length })}
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => applyGuidanceSuggestions(suggestions.map((_, index) => index))}
+                      disabled={isSaving}
+                    >
+                      {t('answerCatalog.library.applyAllSuggestions', 'Apply all')}
+                    </Button>
+                  </div>
+                  <div className="divide-y rounded-md border bg-background">
+                    {suggestions.map((suggestion, index) => (
+                      <div
+                        key={`${suggestion.guidance_type || 'keyword'}-${suggestion.text}-${index}`}
+                        className="grid gap-2 p-3 sm:grid-cols-[120px_minmax(0,1fr)_auto]"
+                      >
+                        <Badge variant="outline">
+                          {t(
+                            `answerCatalog.guidance.${suggestion.guidance_type || 'keyword'}`,
+                            suggestion.guidance_type || 'keyword'
+                          )}
+                        </Badge>
+                        <div className="text-sm">{suggestion.text}</div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => applyGuidanceSuggestions([index])}
+                          disabled={isSaving}
+                        >
+                          {t('answerCatalog.library.applySuggestion', 'Apply')}
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
             <div className="grid gap-3 rounded-md border p-3 lg:grid-cols-[180px_1fr_120px_auto]">
               <div>
                 <Label>{t('answerCatalog.library.guidanceType', 'Type')}</Label>
@@ -806,7 +945,7 @@ function AnswerDetailDialog({
           </div>
         )}
 
-        {section === 'sources' && (
+        {section === 'history' && (
           <div className="grid gap-3 py-2">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <LinkIcon className="h-4 w-4" />
@@ -860,7 +999,7 @@ function AnswerDetailDialog({
           </div>
         )}
 
-        {section === 'revisions' && (
+        {section === 'history' && (
           <div className="grid gap-3 py-2">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <HistoryIcon className="h-4 w-4" />

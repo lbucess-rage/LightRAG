@@ -335,7 +335,7 @@ const buildCandidate = ({
   }
 }
 
-export default function AnswerSources() {
+export default function AnswerSources({ embedded = false }: { embedded?: boolean }) {
   const { t } = useTranslation()
   const currentWorkspaceId = useWorkspaceStore.use.currentWorkspaceId()
   const [sourceType, setSourceType] = useState<SourceType>('plain')
@@ -361,6 +361,7 @@ export default function AnswerSources() {
   const [connectorName, setConnectorName] = useState('')
   const [connectorType, setConnectorType] = useState<AnswerSourceConnectorType>('db_table')
   const [connectorUri, setConnectorUri] = useState('')
+  const [connectorAuthRef, setConnectorAuthRef] = useState('')
   const [connectorContent, setConnectorContent] = useState('')
   const [connectorMode, setConnectorMode] = useState<ConnectorMaterializationMode>('table_as_dataset')
   const [connectorPreview, setConnectorPreview] = useState<AnswerSourceConnectorMappingPreview | null>(null)
@@ -424,6 +425,7 @@ export default function AnswerSources() {
     setConnectorName('')
     setConnectorType('db_table')
     setConnectorUri('')
+    setConnectorAuthRef('')
     setConnectorContent('')
     setConnectorPreview(null)
     setExcelFile(null)
@@ -515,7 +517,7 @@ export default function AnswerSources() {
       ].filter(Boolean).length
     : guidanceCandidates.length || candidate?.guidance.length || 0
   const exceedsExcelRowLimit = sourceType === 'excel' && structuredMode === 'row_per_answer' && excelPreview
-    ? excelPreview.row_count > maxStructuredRowsPerAnswerBatch
+    ? excelPreview.truncated || excelPreview.row_count > maxStructuredRowsPerAnswerBatch
     : false
   const canCreateDraft = !isSubmitting && !exceedsExcelRowLimit && (
     sourceType === 'excel' ? Boolean(excelPreview && title.trim() && body.trim()) : Boolean(body.trim())
@@ -740,6 +742,7 @@ export default function AnswerSources() {
         connector_type: connectorType,
         status: 'draft',
         enabled: true,
+        auth_ref: connectorType === 'db_table' ? connectorAuthRef.trim() || undefined : undefined,
         config: {
           source_uri: connectorUri.trim() || undefined,
           raw_content: connectorContent.trim() || undefined,
@@ -831,7 +834,7 @@ export default function AnswerSources() {
       if (workspaceId !== useWorkspaceStore.getState().currentWorkspaceId) return
       toast.success(t('answerCatalog.sources.connectorMaterialized', {
           defaultValue: '{{count}} answer candidate(s) were created from the reusable source.',
-        count: result.materialized.answers.length,
+        count: result.materialized.answer_count,
       }))
       fetchConnectors()
       fetchSnapshots()
@@ -851,7 +854,12 @@ export default function AnswerSources() {
       toast.error(t('answerCatalog.sources.excelPreviewRequired', 'Preview the Excel file before creating answer candidates.'))
       return
     }
-    if (sourceType === 'excel' && structuredMode === 'row_per_answer' && excelPreview && excelPreview.row_count > maxStructuredRowsPerAnswerBatch) {
+    if (
+      sourceType === 'excel' &&
+      structuredMode === 'row_per_answer' &&
+      excelPreview &&
+      (excelPreview.truncated || excelPreview.row_count > maxStructuredRowsPerAnswerBatch)
+    ) {
       toast.error(t('answerCatalog.sources.excelRowLimit', 'Row-per-answer candidate creation currently supports up to 1000 rows. Use one dataset answer candidate or reduce the selected sheet.'))
       return
     }
@@ -878,6 +886,7 @@ export default function AnswerSources() {
           ),
           guidance_columns: structuredGuidanceColumns,
           materialization_mode: structuredMode,
+          source_truncated: excelPreview.truncated,
           metadata: {
             created_from: 'answer_excel_source_ui',
             original_source_type: 'excel',
@@ -892,7 +901,7 @@ export default function AnswerSources() {
         setCreatedAnswer(result.answers[0] || result.answer)
         toast.success(t('answerCatalog.sources.excelCreated', {
           defaultValue: 'Created {{count}} answer candidate(s) from Excel.',
-          count: result.answers.length || 1,
+          count: result.answer_count || 1,
         }))
         fetchSnapshots()
         resetForm()
@@ -950,7 +959,8 @@ export default function AnswerSources() {
   }
 
   return (
-    <div className="flex h-full flex-col gap-4 p-4">
+    <div className={`flex h-full flex-col gap-4 ${embedded ? 'p-0' : 'p-4'}`}>
+      {!embedded && (
       <div className="flex items-start gap-3">
         <div className="rounded-md border bg-muted/40 p-2">
           <LinkIcon className="h-5 w-5" />
@@ -991,6 +1001,7 @@ export default function AnswerSources() {
           </div>
         </div>
       </div>
+      )}
 
       <Dialog open={isSupportToolsOpen} onOpenChange={setIsSupportToolsOpen}>
         <DialogContent className="flex max-h-[88vh] w-[calc(100vw-2rem)] max-w-7xl flex-col overflow-hidden">
@@ -1069,6 +1080,22 @@ export default function AnswerSources() {
                 placeholder="db://schema.table, mongo://collection, https://example.com/feed"
               />
             </div>
+            {connectorType === 'db_table' && (
+              <div className="grid gap-2">
+                <Label>{t('answerCatalog.sources.connectorAuthRef', 'Connection Environment Variable')}</Label>
+                <Input
+                  value={connectorAuthRef}
+                  onChange={(event) => setConnectorAuthRef(event.target.value)}
+                  placeholder="FAQ_SOURCE_DATABASE_URL"
+                />
+                <div className="text-xs leading-5 text-muted-foreground">
+                  {t(
+                    'answerCatalog.sources.connectorAuthRefHelp',
+                    'To read another PostgreSQL database, enter the server environment variable containing its connection URL. Leave this empty to read a table from the LightRAG database.'
+                  )}
+                </div>
+              </div>
+            )}
             <div className="grid gap-2">
               <Label>{t('answerCatalog.sources.connectorContent', 'Sample Content')}</Label>
               <Textarea
@@ -1134,9 +1161,18 @@ export default function AnswerSources() {
                 <div className="truncate font-mono text-xs text-muted-foreground">
                   {selectedConnector.config?.source_uri || `connector://${selectedConnector.connector_id}`}
                 </div>
-                {Array.isArray(selectedConnector.metadata?.last_materialized_answer_ids) && (
+                {selectedConnector.auth_ref && (
+                  <div className="font-mono text-xs text-muted-foreground">
+                    {t('answerCatalog.sources.connectorAuthRef', 'Connection Environment Variable')}: {selectedConnector.auth_ref}
+                  </div>
+                )}
+                {(typeof selectedConnector.metadata?.last_materialized_answer_count === 'number'
+                  || Array.isArray(selectedConnector.metadata?.last_materialized_answer_ids)) && (
                   <div className="text-xs text-muted-foreground">
-                    {t('answerCatalog.sources.lastMaterialized', 'Recently created answers')}: {selectedConnector.metadata.last_materialized_answer_ids.length}
+                    {t('answerCatalog.sources.lastMaterialized', 'Recently created answers')}: {
+                      selectedConnector.metadata?.last_materialized_answer_count
+                        ?? selectedConnector.metadata.last_materialized_answer_ids.length
+                    }
                   </div>
                 )}
               </div>
@@ -1168,6 +1204,14 @@ export default function AnswerSources() {
                   <Badge variant="outline">{connectorPreview.sample.row_count.toLocaleString()} {t('answerCatalog.sources.rows', 'Rows')}</Badge>
                   <Badge variant="outline">{connectorPreview.sample.source_type.toUpperCase()}</Badge>
                 </div>
+                {connectorPreview.sample.truncated && (
+                  <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs leading-5 text-amber-950 dark:border-amber-800 dark:bg-amber-950/20 dark:text-amber-100">
+                    {t('answerCatalog.sources.connectorSampleTruncated', {
+                      defaultValue: 'The mapping preview shows the first {{limit}} rows. Creation reads up to 1,000 rows again and stops with an error if the table exceeds the batch limit.',
+                      limit: connectorPreview.sample.row_limit.toLocaleString(),
+                    })}
+                  </div>
+                )}
                 <div className="flex flex-wrap gap-1">
                   {connectorPreview.sample.columns.map((column) => (
                     <Badge key={column} variant="outline">{column}</Badge>
@@ -1274,6 +1318,14 @@ export default function AnswerSources() {
                     {t('answerCatalog.sources.excelLimitHelp', 'Supported formats: .xlsx, .xlsm, .xltx, .xltm. Maximum upload size: 200MB.')}
                   </div>
                   {fileName && <div className="text-xs text-muted-foreground">{fileName}</div>}
+                  {excelPreview?.truncated && (
+                    <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs leading-5 text-amber-950 dark:border-amber-800 dark:bg-amber-950/20 dark:text-amber-100">
+                      {t('answerCatalog.sources.excelTruncated', {
+                        defaultValue: 'This sheet contains more than {{limit}} data rows. Row-per-answer creation is disabled to prevent silent data loss. Split the sheet or create one dataset answer candidate.',
+                        limit: excelPreview.row_limit.toLocaleString(),
+                      })}
+                    </div>
+                  )}
                 </div>
                 {excelPreview && (
                   <>

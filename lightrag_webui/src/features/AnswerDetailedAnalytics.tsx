@@ -89,7 +89,7 @@ const DEFAULT_EVENT_STATS: AnswerEventStatsResponse = {
   hours: [],
 }
 
-export default function AnswerDetailedAnalytics() {
+export default function AnswerDetailedAnalytics({ embedded = false }: { embedded?: boolean }) {
   const { t } = useTranslation()
   const currentWorkspaceId = useWorkspaceStore.use.currentWorkspaceId()
   const timezoneName = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Seoul', [])
@@ -217,7 +217,8 @@ export default function AnswerDetailedAnalytics() {
   }
 
   return (
-    <div className="flex h-full flex-col gap-4 overflow-hidden p-4">
+    <div className={`flex h-full flex-col gap-4 overflow-hidden ${embedded ? 'p-0' : 'p-4'}`}>
+      {!embedded && (
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-start gap-3">
           <div className="rounded-md border bg-muted/40 p-2">
@@ -241,6 +242,7 @@ export default function AnswerDetailedAnalytics() {
           </Button>
         </div>
       </div>
+      )}
 
       <form
         className="rounded-md border bg-card p-3"

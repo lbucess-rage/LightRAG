@@ -88,7 +88,7 @@ const getGuidanceHealth = (items: AnswerGuidance[] = []) => {
   return { level: 'ready', className: 'border-emerald-200 bg-emerald-50 text-emerald-700', labelKey: 'readyHints' }
 }
 
-export default function AnswerMatching() {
+export default function AnswerMatching({ embedded = false }: { embedded?: boolean }) {
   const { t } = useTranslation()
   const currentWorkspaceId = useWorkspaceStore.use.currentWorkspaceId()
   const resolveRequestIdRef = useRef(0)
@@ -196,7 +196,10 @@ export default function AnswerMatching() {
     [answers]
   )
   const selectedAnswer = selectedAnswerId ? answersById[selectedAnswerId] : undefined
-  const selectedGuidance = selectedAnswerId ? guidanceByAnswer[selectedAnswerId] || [] : []
+  const selectedGuidance = useMemo(
+    () => (selectedAnswerId ? guidanceByAnswer[selectedAnswerId] || [] : []),
+    [guidanceByAnswer, selectedAnswerId]
+  )
   const selectedGuidanceSummary = useMemo(() => getGuidanceSummary(selectedGuidance), [selectedGuidance])
   const selectedGuidanceHealth = useMemo(() => getGuidanceHealth(selectedGuidance), [selectedGuidance])
   const selectedGuidanceRows = useMemo(
@@ -293,10 +296,15 @@ export default function AnswerMatching() {
   const handleRebuildVectors = async () => {
     setIsRebuildingVectors(true)
     try {
-      const response = await rebuildAnswerVectors({ status: status === 'all' ? undefined : status, limit: 500 })
+      const response = await rebuildAnswerVectors({
+        status: status === 'all' ? undefined : status,
+        limit: 500,
+        only_missing: true,
+      })
       toast.success(
-        t('answerCatalog.matching.vectorRebuilt', '{{count}} answer vectors were rebuilt.', {
+        t('answerCatalog.matching.vectorRebuilt', '{{count}} answer vectors were rebuilt. {{remaining}} remain.', {
           count: response.rebuilt,
+          remaining: response.remaining,
         })
       )
     } catch (err) {
@@ -353,7 +361,8 @@ export default function AnswerMatching() {
   }
 
   return (
-    <div className="relative flex h-full flex-col gap-4 p-4 pb-56 xl:pb-32">
+    <div className={`relative flex h-full flex-col gap-4 ${embedded ? 'px-0 pt-0 pb-56 xl:pb-32' : 'p-4 pb-56 xl:pb-32'}`}>
+      {!embedded && (
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-start gap-3">
           <div className="rounded-md border bg-muted/40 p-2 text-muted-foreground">
@@ -393,14 +402,24 @@ export default function AnswerMatching() {
           </Button>
         </div>
       </div>
+      )}
 
       <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[460px_1fr]">
         <div className="flex min-h-0 flex-col gap-3 rounded-md border bg-card p-4">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
-              <div className="font-semibold">{t('answerCatalog.matching.answerExplorer', 'Answer Explorer')}</div>
+              <div className="font-semibold">
+                {embedded
+                  ? t('answerCatalog.matching.improvementQueue', 'FAQ to improve')
+                  : t('answerCatalog.matching.answerExplorer', 'Answer Explorer')}
+              </div>
               <div className="mt-1 text-xs text-muted-foreground">
-                {t('answerCatalog.matching.answerExplorerDesc', 'Find an answer first, then edit only that answer’s finding hints.')}
+                {embedded
+                  ? t(
+                    'answerCatalog.matching.improvementQueueDesc',
+                    'Select an FAQ that needs stronger search settings and review AI suggestions.'
+                  )
+                  : t('answerCatalog.matching.answerExplorerDesc', 'Find an answer first, then edit only that answer’s finding hints.')}
               </div>
             </div>
             <Badge variant="outline" className="bg-muted/40">
@@ -411,7 +430,9 @@ export default function AnswerMatching() {
             <Input
               value={search}
               onChange={(event) => handleSearchChange(event.target.value)}
-              placeholder={t('answerCatalog.matching.answerSearch', 'Search title, body, tag, or finding hint...')}
+              placeholder={embedded
+                ? t('answerCatalog.matching.improvementSearch', 'Search FAQ title or content...')
+                : t('answerCatalog.matching.answerSearch', 'Search title, body, tag, or finding hint...')}
             />
             <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
               <Select value={status} onValueChange={handleStatusChange}>
@@ -475,13 +496,19 @@ export default function AnswerMatching() {
                       <div className="mt-3 flex flex-wrap items-center gap-1.5">
                         <Badge variant="outline">{t(`answerCatalog.status.${answer.status}`, answer.status)}</Badge>
                         <Badge variant="outline">{t('answerCatalog.matching.hintCount', '{{count}} hints', { count: summary.total })}</Badge>
-                        <Badge variant="outline">{t('answerCatalog.matching.questionShort', 'Q')} {summary.questions}</Badge>
-                        <Badge variant="outline">{t('answerCatalog.matching.keywordShort', 'K')} {summary.keywords}</Badge>
-                        {answer.tags.slice(0, 3).map((tag) => (
-                          <Badge key={tag} variant="outline" className="bg-muted/30">{tag}</Badge>
-                        ))}
+                        {!embedded && (
+                          <>
+                            <Badge variant="outline">{t('answerCatalog.matching.questionShort', 'Q')} {summary.questions}</Badge>
+                            <Badge variant="outline">{t('answerCatalog.matching.keywordShort', 'K')} {summary.keywords}</Badge>
+                            {answer.tags.slice(0, 3).map((tag) => (
+                              <Badge key={tag} variant="outline" className="bg-muted/30">{tag}</Badge>
+                            ))}
+                          </>
+                        )}
                       </div>
-                      <div className="mt-2 truncate font-mono text-[11px] text-muted-foreground">{answer.answer_id}</div>
+                      {!embedded && (
+                        <div className="mt-2 truncate font-mono text-[11px] text-muted-foreground">{answer.answer_id}</div>
+                      )}
                     </button>
                   )
                 })}
@@ -503,6 +530,7 @@ export default function AnswerMatching() {
         </div>
 
         <Tabs value={detailView} onValueChange={(value) => setDetailView(value as 'selected' | 'all' | 'unguided')} className="flex min-h-0 flex-col rounded-md border bg-card p-4">
+          {!embedded && (
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <TabsList className="h-auto flex-wrap justify-start">
               <TabsTrigger value="selected">{t('answerCatalog.matching.selectedAnswerTab', 'Selected Answer')}</TabsTrigger>
@@ -521,6 +549,7 @@ export default function AnswerMatching() {
               </SelectContent>
             </Select>
           </div>
+          )}
 
           <TabsContent value="selected" className="mt-0 min-h-0 flex-1 overflow-auto">
             {!selectedAnswer ? (
@@ -539,20 +568,32 @@ export default function AnswerMatching() {
                           {t(`answerCatalog.matching.health.${selectedGuidanceHealth.labelKey}`, selectedGuidanceHealth.level)}
                         </Badge>
                       </div>
-                      <div className="mt-1 font-mono text-xs text-muted-foreground">{selectedAnswer.answer_id}</div>
+                      {!embedded && (
+                        <div className="mt-1 font-mono text-xs text-muted-foreground">{selectedAnswer.answer_id}</div>
+                      )}
                     </div>
-                    <div className="text-right text-xs text-muted-foreground">
+                    {!embedded && <div className="text-right text-xs text-muted-foreground">
                       <div>v{selectedAnswer.version}</div>
                       <div>{selectedAnswer.update_time ? new Date(selectedAnswer.update_time).toLocaleString() : '-'}</div>
-                    </div>
+                    </div>}
                   </div>
-                  <div className="mt-4 grid gap-3 md:grid-cols-5">
+                  {embedded ? (
+                    <div className="mt-3 text-sm text-muted-foreground">
+                      {t('answerCatalog.matching.compactHintSummary', 'Search settings: {{total}} total · {{questions}} questions · {{keywords}} keywords · {{synonyms}} synonyms · {{negatives}} exclusions', {
+                        total: selectedGuidanceSummary.total,
+                        questions: selectedGuidanceSummary.questions,
+                        keywords: selectedGuidanceSummary.keywords,
+                        synonyms: selectedGuidanceSummary.synonyms,
+                        negatives: selectedGuidanceSummary.negatives,
+                      })}
+                    </div>
+                  ) : <div className="mt-4 grid gap-3 md:grid-cols-5">
                     <MiniMetric label={t('answerCatalog.matching.totalHints', 'Hints')} value={selectedGuidanceSummary.total} />
                     <MiniMetric label={t('answerCatalog.guidanceTypes.question', 'Question')} value={selectedGuidanceSummary.questions} />
                     <MiniMetric label={t('answerCatalog.guidanceTypes.keyword', 'Keyword')} value={selectedGuidanceSummary.keywords} />
                     <MiniMetric label={t('answerCatalog.guidanceTypes.synonym', 'Synonym')} value={selectedGuidanceSummary.synonyms} />
                     <MiniMetric label={t('answerCatalog.guidanceTypes.negative_keyword', 'Negative')} value={selectedGuidanceSummary.negatives} />
-                  </div>
+                  </div>}
                   <div className="mt-4 grid gap-3 lg:grid-cols-2">
                     <div className="rounded-md border bg-muted/10 p-3">
                       <div className="text-xs font-medium text-muted-foreground">{t('answerCatalog.library.summary', 'Answer Memo')}</div>
@@ -563,13 +604,13 @@ export default function AnswerMatching() {
                       <div className="mt-1 line-clamp-4 text-sm leading-6">{selectedAnswer.body}</div>
                     </div>
                   </div>
-                  <div className="mt-3 flex flex-wrap gap-1.5">
+                  {!embedded && <div className="mt-3 flex flex-wrap gap-1.5">
                     {selectedAnswer.tags.length === 0 ? (
                       <span className="text-xs text-muted-foreground">-</span>
                     ) : selectedAnswer.tags.map((tag) => (
                       <Badge key={tag} variant="outline" className="bg-muted/30">{tag}</Badge>
                     ))}
-                  </div>
+                  </div>}
                 </div>
 
                 <div className="grid gap-4 xl:grid-cols-[360px_1fr]">

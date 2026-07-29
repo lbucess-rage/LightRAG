@@ -49,7 +49,9 @@ function TabsNavigation() {
     workspaceModeReady && !visibleTabs.includes(currentTab)
       ? getDefaultTabForMode(workspaceMode)
       : currentTab
-  const items = navigationItems.filter((item) => visibleTabs.includes(item.value))
+  const items = navigationItems.filter(
+    (item) => visibleTabs.includes(item.value) && item.showInNavigation !== false
+  )
 
   return (
     <div className="flex h-8 max-w-full self-center overflow-x-auto">

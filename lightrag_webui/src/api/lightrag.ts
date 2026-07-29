@@ -2084,6 +2084,8 @@ export type AnswerExcelPreviewResponse = {
   header_row: number
   data_start_row: number
   row_count: number
+  row_limit: number
+  truncated: boolean
   columns: string[]
   raw_content: string
   source_uri: string
@@ -2104,6 +2106,7 @@ export type AnswerStructuredMaterializeRequest = {
   mapping?: Record<string, string>
   guidance_columns?: string[]
   materialization_mode?: 'table_as_dataset' | 'row_per_answer'
+  source_truncated?: boolean
   metadata?: Record<string, any>
 }
 
@@ -2112,8 +2115,12 @@ export type AnswerStructuredMaterializeResponse = {
   dataset: AnswerStructuredDataset
   answers: AnswerItem[]
   datasets: AnswerStructuredDataset[]
+  answer_count: number
+  answers_truncated: boolean
   profile: AnswerStructuredProfileResponse
   guidance: AnswerGuidance[]
+  guidance_count: number
+  guidance_truncated: boolean
   snapshot?: AnswerSourceSnapshot | null
   source_link?: AnswerSourceLink | null
 }
@@ -2171,6 +2178,8 @@ export type AnswerSourceConnectorSample = {
   rows: Record<string, any>[]
   columns: string[]
   row_count: number
+  row_limit: number
+  truncated: boolean
   warnings: string[]
 }
 
@@ -2434,7 +2443,8 @@ export const suggestAnswerGuidance = async (
 export const rebuildAnswerVectors = async (params?: {
   status?: string
   limit?: number
-}): Promise<{ message: string; rebuilt: number; failed: string[] }> => {
+  only_missing?: boolean
+}): Promise<{ message: string; processed: number; rebuilt: number; failed: string[]; remaining: number }> => {
   const response = await axiosInstance.post('/api/answers/vectors/rebuild', null, { params })
   return response.data
 }

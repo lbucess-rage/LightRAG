@@ -6,6 +6,7 @@ import csv
 import hashlib
 import io
 import json
+import os
 import re
 import time
 import traceback
@@ -44,6 +45,8 @@ MAX_EXCEL_UPLOAD_BYTES = 200 * 1024 * 1024
 MAX_EXCEL_ROWS_PER_PREVIEW = 1000
 MAX_EXCEL_COLUMNS_PER_PREVIEW = 300
 MAX_STRUCTURED_ROWS_PER_ANSWER_BATCH = 1000
+MAX_KEYWORD_SEARCH_CANDIDATES = 5000
+ANSWER_VECTOR_PROJECTION_VERSION = 2
 TOKEN_RE = re.compile(r"[0-9A-Za-z가-힣_]+")
 GUIDANCE_TYPE_MULTIPLIER = {
     "question": 1.25,
@@ -160,6 +163,7 @@ async def _ensure_tables(db) -> None:
         return
 
     statements = [
+        "CREATE EXTENSION IF NOT EXISTS vector",
         """
         CREATE TABLE IF NOT EXISTS LIGHTRAG_ANSWER_ITEMS (
             workspace TEXT NOT NULL,
@@ -227,10 +231,17 @@ async def _ensure_tables(db) -> None:
             content_hash TEXT NOT NULL,
             content TEXT NOT NULL,
             embedding JSONB NOT NULL,
+            embedding_vector vector,
             metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
             create_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             update_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
+        """,
+        "ALTER TABLE LIGHTRAG_ANSWER_VECTORS ADD COLUMN IF NOT EXISTS embedding_vector vector",
+        """
+        UPDATE LIGHTRAG_ANSWER_VECTORS
+        SET embedding_vector = (embedding::text)::vector
+        WHERE embedding_vector IS NULL
         """,
         """
         CREATE TABLE IF NOT EXISTS LIGHTRAG_ANSWER_SOURCE_SNAPSHOTS (
@@ -679,6 +690,8 @@ class ExcelPreviewResponse(BaseModel):
     header_row: int
     data_start_row: int
     row_count: int
+    row_limit: int = MAX_EXCEL_ROWS_PER_PREVIEW
+    truncated: bool = False
     columns: list[str] = Field(default_factory=list)
     raw_content: str
     source_uri: str
@@ -699,6 +712,7 @@ class StructuredMaterializeRequest(BaseModel):
     mapping: dict[str, str] = Field(default_factory=dict)
     guidance_columns: list[str] = Field(default_factory=list)
     materialization_mode: StructuredMaterializationMode = "table_as_dataset"
+    source_truncated: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -707,8 +721,12 @@ class StructuredMaterializeResponse(BaseModel):
     dataset: StructuredDataset
     answers: list[AnswerItem] = Field(default_factory=list)
     datasets: list[StructuredDataset] = Field(default_factory=list)
+    answer_count: int = 0
+    answers_truncated: bool = False
     profile: StructuredProfileResponse
     guidance: list[AnswerGuidance] = Field(default_factory=list)
+    guidance_count: int = 0
+    guidance_truncated: bool = False
     snapshot: Optional[AnswerSourceSnapshot] = None
     source_link: Optional[AnswerSourceLink] = None
 
@@ -777,6 +795,8 @@ class SourceConnectorSampleResponse(BaseModel):
     rows: list[dict[str, Any]] = Field(default_factory=list)
     columns: list[str] = Field(default_factory=list)
     row_count: int = 0
+    row_limit: int = 1000
+    truncated: bool = False
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -1158,6 +1178,20 @@ def _row_value(value: Any) -> Any:
     return json.dumps(value, ensure_ascii=False)
 
 
+def _excel_cell_value(cell: Any) -> Any:
+    value = cell.value
+    if isinstance(value, datetime) and getattr(cell, "is_date", False):
+        number_format = str(getattr(cell, "number_format", "") or "").lower()
+        has_time_format = (
+            "am/pm" in number_format
+            or "a/p" in number_format
+            or bool(re.search(r"[hs]", number_format))
+        )
+        if not has_time_format:
+            return value.date().isoformat()
+    return _row_value(value)
+
+
 async def _read_upload_limited(file: UploadFile, max_bytes: int) -> tuple[bytes, int]:
     total = 0
     chunks: list[bytes] = []
@@ -1195,9 +1229,10 @@ def _extract_excel_rows(
     header_row: int = 1,
     data_start_row: Optional[int] = None,
     max_rows: int = MAX_EXCEL_ROWS_PER_PREVIEW,
-) -> tuple[list[ExcelSheetInfo], str, int, int, list[dict[str, Any]], list[str], list[str]]:
+) -> tuple[list[ExcelSheetInfo], str, int, int, list[dict[str, Any]], list[str], list[str], bool]:
     try:
         from openpyxl import load_workbook  # type: ignore
+        from openpyxl.utils.cell import range_boundaries  # type: ignore
     except ImportError as exc:
         raise HTTPException(
             status_code=500,
@@ -1213,10 +1248,25 @@ def _extract_excel_rows(
         raise HTTPException(status_code=400, detail=f"Invalid Excel workbook: {exc}") from exc
 
     try:
-        sheets = [
-            ExcelSheetInfo(name=worksheet.title, max_row=worksheet.max_row or 0, max_column=worksheet.max_column or 0)
-            for worksheet in workbook.worksheets
-        ]
+        sheets: list[ExcelSheetInfo] = []
+        for worksheet in workbook.worksheets:
+            max_row = worksheet.max_row or 0
+            max_column = worksheet.max_column or 0
+            if not max_row or not max_column:
+                try:
+                    _, _, max_column, max_row = range_boundaries(
+                        worksheet.calculate_dimension(force=True)
+                    )
+                except (TypeError, ValueError):
+                    max_row = max_row or 0
+                    max_column = max_column or 0
+            sheets.append(
+                ExcelSheetInfo(
+                    name=worksheet.title,
+                    max_row=max_row,
+                    max_column=max_column,
+                )
+            )
         if not sheets:
             raise HTTPException(status_code=400, detail="Excel workbook has no sheets")
 
@@ -1254,17 +1304,18 @@ def _extract_excel_rows(
         rows: list[dict[str, Any]] = []
         skipped_empty = 0
         reached_limit = False
-        for values in worksheet.iter_rows(min_row=start_row, values_only=True):
+        for cells in worksheet.iter_rows(min_row=start_row, values_only=False):
             if len(rows) >= max_rows:
                 reached_limit = True
                 break
-            sliced_values = list(values[: len(columns)])
+            sliced_cells = list(cells[: len(columns)])
+            sliced_values = [cell.value for cell in sliced_cells]
             if all(_is_empty_cell(value) for value in sliced_values):
                 skipped_empty += 1
                 continue
             rows.append(
                 {
-                    column: _row_value(sliced_values[index]) if index < len(sliced_values) else ""
+                    column: _excel_cell_value(sliced_cells[index]) if index < len(sliced_cells) else ""
                     for index, column in enumerate(columns)
                 }
             )
@@ -1276,7 +1327,7 @@ def _extract_excel_rows(
         if not rows:
             raise HTTPException(status_code=400, detail="Excel sheet must include at least one data row")
 
-        return sheets, selected_sheet, header_row, start_row, rows, columns, warnings
+        return sheets, selected_sheet, header_row, start_row, rows, columns, warnings, reached_limit
     finally:
         workbook.close()
 
@@ -1385,6 +1436,8 @@ def _parse_db_table_ref(source_uri: Any) -> tuple[str, str]:
     table_ref = table_ref.split("?", 1)[0].strip().strip("/")
     table_ref = table_ref.replace("/", ".")
     parts = [part for part in table_ref.split(".") if part]
+    for part in parts:
+        _quote_pg_identifier(part)
     if len(parts) == 1:
         return "public", parts[0]
     if len(parts) == 2:
@@ -1399,7 +1452,7 @@ async def _connector_raw_content_from_db(
     db: Any,
     connector: SourceConnector,
     limit: int,
-) -> tuple[StructuredSourceType, str, Optional[str], list[str]]:
+) -> tuple[StructuredSourceType, str, Optional[str], list[str], bool]:
     config = connector.config
     if connector.connector_type != "db_table" or _connector_has_inline_sample(config):
         return _connector_raw_content(connector, limit)
@@ -1411,28 +1464,85 @@ async def _connector_raw_content_from_db(
     schema, table = _parse_db_table_ref(source_uri)
     row_limit = max(1, min(int(limit or 100), 1000))
     qualified_table = f"{_quote_pg_identifier(schema)}.{_quote_pg_identifier(table)}"
-    rows = await db.query(
-        f"SELECT * FROM {qualified_table} LIMIT {row_limit}",
-        multirows=True,
-    )
+    if connector.auth_ref:
+        auth_ref = connector.auth_ref.strip()
+        if not re.fullmatch(r"[A-Z][A-Z0-9_]{1,127}", auth_ref):
+            raise HTTPException(
+                status_code=400,
+                detail="DB connector auth_ref must be an environment variable name such as FAQ_SOURCE_DATABASE_URL.",
+            )
+        connection_url = os.getenv(auth_ref)
+        if not connection_url:
+            raise HTTPException(
+                status_code=400,
+                detail=f"DB connector environment variable '{auth_ref}' is not configured.",
+            )
+        try:
+            import asyncpg  # type: ignore
+
+            connection = await asyncpg.connect(
+                dsn=connection_url,
+                timeout=10,
+                command_timeout=30,
+            )
+            try:
+                async with connection.transaction(readonly=True):
+                    rows = await connection.fetch(
+                        f"SELECT * FROM {qualified_table} LIMIT $1",
+                        row_limit + 1,
+                    )
+            finally:
+                await connection.close()
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "[Answers] Failed to read external DB connector %s using %s: %s",
+                connector.connector_id,
+                auth_ref,
+                exc,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to read DB connector '{connector.name}'. Check its connection environment and table.",
+            ) from exc
+    else:
+        rows = await db.query(
+            f"SELECT * FROM {qualified_table} LIMIT {row_limit + 1}",
+            multirows=True,
+        )
+    truncated = len(rows or []) > row_limit
+    rows = list(rows or [])[:row_limit]
     object_rows = [
         {str(key): _row_value(value) for key, value in row.items()}
-        for row in rows or []
+        for row in rows
     ]
     if not object_rows:
         raise HTTPException(
             status_code=400,
             detail=f"DB table '{schema}.{table}' returned no rows.",
         )
+    warnings = [
+        f"Loaded {len(object_rows)} row(s) from "
+        f"{'external ' if connector.auth_ref else ''}DB table {schema}.{table}"
+    ]
+    if truncated:
+        warnings.append(
+            f"DB table contains more than {row_limit} rows; additional rows were not loaded"
+        )
     return (
         "json",
         json.dumps(object_rows, ensure_ascii=False),
         str(source_uri),
-        [f"Loaded {len(object_rows)} row(s) from DB table {schema}.{table}"],
+        warnings,
+        truncated,
     )
 
 
-def _connector_raw_content(connector: SourceConnector, limit: int) -> tuple[StructuredSourceType, str, Optional[str], list[str]]:
+def _connector_raw_content(
+    connector: SourceConnector,
+    limit: int,
+) -> tuple[StructuredSourceType, str, Optional[str], list[str], bool]:
     config = connector.config
     warnings: list[str] = []
     source_uri = config.get("source_uri") or config.get("uri") or config.get("url") or config.get("table") or config.get("collection")
@@ -1442,7 +1552,7 @@ def _connector_raw_content(connector: SourceConnector, limit: int) -> tuple[Stru
         source_type = str(config.get("source_type") or "").lower()
         if source_type not in {"csv", "json"}:
             source_type = "json" if raw_content.startswith(("{", "[")) else "csv"
-        return source_type, raw_content, source_uri, warnings
+        return source_type, raw_content, source_uri, warnings, False
 
     rows = config.get("sample_rows") or config.get("rows") or config.get("documents")
     if isinstance(rows, dict):
@@ -1453,7 +1563,7 @@ def _connector_raw_content(connector: SourceConnector, limit: int) -> tuple[Stru
             sliced_rows = [{str(key): _row_value(value) for key, value in row.items()} for row in object_rows[:limit]]
             if len(object_rows) > limit:
                 warnings.append(f"Only the first {limit} connector rows were sampled")
-            return "json", json.dumps(sliced_rows, ensure_ascii=False), source_uri, warnings
+            return "json", json.dumps(sliced_rows, ensure_ascii=False), source_uri, warnings, len(object_rows) > limit
         array_rows = [row for row in rows if isinstance(row, list)]
         columns = config.get("columns")
         if array_rows and isinstance(columns, list) and columns:
@@ -1461,7 +1571,7 @@ def _connector_raw_content(connector: SourceConnector, limit: int) -> tuple[Stru
                 {str(column): _row_value(row[index]) if index < len(row) else "" for index, column in enumerate(columns)}
                 for row in array_rows[:limit]
             ]
-            return "csv", _rows_to_csv(dict_rows, [str(column) for column in columns]), source_uri, warnings
+            return "csv", _rows_to_csv(dict_rows, [str(column) for column in columns]), source_uri, warnings, len(array_rows) > limit
 
     tables = config.get("tables")
     if isinstance(tables, list) and tables:
@@ -1477,7 +1587,7 @@ def _connector_raw_content(connector: SourceConnector, limit: int) -> tuple[Stru
                 if isinstance(row, dict):
                     flattened.append({"table": table_name, **{str(key): _row_value(value) for key, value in row.items()}})
         if flattened:
-            return "json", json.dumps(flattened[:limit], ensure_ascii=False), source_uri, warnings
+            return "json", json.dumps(flattened[:limit], ensure_ascii=False), source_uri, warnings, len(flattened) > limit
 
     if connector.connector_type == "web":
         row = {
@@ -1485,7 +1595,7 @@ def _connector_raw_content(connector: SourceConnector, limit: int) -> tuple[Stru
             "url": config.get("url") or source_uri or "",
             "content": config.get("content") or config.get("summary") or "",
         }
-        return "json", json.dumps([row], ensure_ascii=False), source_uri, warnings
+        return "json", json.dumps([row], ensure_ascii=False), source_uri, warnings, False
 
     row = {
         "name": connector.name,
@@ -1494,7 +1604,7 @@ def _connector_raw_content(connector: SourceConnector, limit: int) -> tuple[Stru
         "description": config.get("description") or connector.metadata.get("description") or "",
     }
     warnings.append("Connector has no raw_content or sample_rows; generated a metadata sample row")
-    return "json", json.dumps([row], ensure_ascii=False), source_uri, warnings
+    return "json", json.dumps([row], ensure_ascii=False), source_uri, warnings, False
 
 
 def _connector_sample_response_from_raw(
@@ -1503,6 +1613,7 @@ def _connector_sample_response_from_raw(
     raw_content: str,
     source_uri: Optional[str],
     warnings: list[str],
+    truncated: bool,
     limit: int = 1000,
 ) -> SourceConnectorSampleResponse:
     rows, _, parse_warnings = _parse_structured_rows(source_type, raw_content, max_rows=limit)
@@ -1516,7 +1627,35 @@ def _connector_sample_response_from_raw(
         rows=rows,
         columns=_column_order_from_rows(rows),
         row_count=len(rows),
+        row_limit=limit,
+        truncated=truncated,
         warnings=warnings,
+    )
+
+
+def _compact_connector_materialization_sample(
+    sample: SourceConnectorSampleResponse,
+    profile: StructuredProfileResponse,
+    *,
+    limit: int = 20,
+) -> SourceConnectorSampleResponse:
+    rows = profile.sample_rows[:limit]
+    if sample.source_type == "csv":
+        raw_content = _rows_to_csv(rows, profile.columns)
+    else:
+        raw_content = json.dumps(rows, ensure_ascii=False)
+    warnings = list(sample.warnings)
+    if sample.row_count > len(rows):
+        warnings.append(
+            f"Materialization response includes {len(rows)} of {sample.row_count} sample rows. "
+            "Use the connector sample or mapping preview API to inspect source rows."
+        )
+    return sample.model_copy(
+        update={
+            "raw_content": raw_content,
+            "rows": rows,
+            "warnings": warnings,
+        }
     )
 
 
@@ -1748,7 +1887,38 @@ def _guidance_from_structured_profile(
         if answer_column:
             add("note", row.get(answer_column), 0.45, answer_column)
         for column in guidance_columns:
-            add("keyword", row.get(column), 0.75, column)
+            column_name = _normalise_text(column)
+            if any(
+                marker in column_name
+                for marker in ("synonym", "alias", "동의어", "유사어", "별칭")
+            ):
+                guidance_type: GuidanceType = "synonym"
+                weight = 1.2
+            elif any(
+                marker in column_name
+                for marker in (
+                    "negative",
+                    "exclude",
+                    "block",
+                    "제외어",
+                    "금지어",
+                    "차단어",
+                )
+            ):
+                guidance_type = "negative_keyword"
+                weight = 1.0
+            else:
+                guidance_type = "keyword"
+                weight = 1.0
+
+            raw_guidance = str(row.get(column) or "").strip()
+            split_values = [
+                value.strip()
+                for value in re.split(r"[,;|\n]+", raw_guidance)
+                if value.strip()
+            ]
+            for value in split_values or [raw_guidance]:
+                add(guidance_type, value, weight, column)
         if len(candidates) >= 80:
             break
     return candidates[:80]
@@ -1980,6 +2150,18 @@ def _tokens(value: Any) -> list[str]:
     return [token for token in TOKEN_RE.findall(_normalise_text(value)) if len(token) >= 2]
 
 
+def _candidate_query_terms(value: Any) -> list[str]:
+    terms: list[str] = []
+    for token in _tokens(value):
+        variants = [token]
+        if len(token) >= 4 and re.fullmatch(r"[가-힣]+", token):
+            variants.extend([token[:-1], token[:-2]])
+        for variant in variants:
+            if len(variant) >= 2 and variant not in terms:
+                terms.append(variant)
+    return terms[:64]
+
+
 def _partial_overlap(query_tokens: list[str], text: str) -> float:
     if not query_tokens:
         return 0.0
@@ -2013,6 +2195,23 @@ def _safe_float(value: Any, default: float, minimum: Optional[float] = None, max
     return number
 
 
+def _compact_answer_metadata(metadata: Any) -> dict[str, Any]:
+    if not isinstance(metadata, dict):
+        return {}
+    return {
+        key: value
+        for key, value in metadata.items()
+        if key not in {"source_profile", "raw_content"}
+    }
+
+
+def _search_answer_view(answer: AnswerItem) -> AnswerItem:
+    compact_metadata = _compact_answer_metadata(answer.metadata)
+    if hasattr(answer, "model_copy"):
+        return answer.model_copy(update={"metadata": compact_metadata})
+    return answer.copy(update={"metadata": compact_metadata})
+
+
 def _embedding_func_from_rag(rag):
     if hasattr(rag, "embedding_func") and rag.embedding_func:
         return rag.embedding_func
@@ -2039,18 +2238,8 @@ def _embedding_to_list(value: Any) -> list[float]:
     return converted
 
 
-def _cosine_similarity(left: list[float], right: list[float]) -> float:
-    if not left or not right:
-        return 0.0
-    pairs = list(zip(left, right))
-    if not pairs:
-        return 0.0
-    dot = sum(a * b for a, b in pairs)
-    left_norm = sum(a * a for a, _ in pairs) ** 0.5
-    right_norm = sum(b * b for _, b in pairs) ** 0.5
-    if left_norm == 0 or right_norm == 0:
-        return 0.0
-    return max(0.0, min(1.0, dot / (left_norm * right_norm)))
+def _embedding_to_pgvector(value: list[float]) -> str:
+    return json.dumps(value, ensure_ascii=True, separators=(",", ":"))
 
 
 def _answer_vector_content(answer: AnswerItem, guidance: list[AnswerGuidance]) -> str:
@@ -2065,7 +2254,6 @@ def _answer_vector_content(answer: AnswerItem, guidance: list[AnswerGuidance]) -
         part
         for part in [
             f"Title: {answer.title}",
-            f"Summary: {answer.approved_summary or ''}",
             f"Tags: {tags}",
             f"Matching hints:\n{guidance_text}",
             f"Answer:\n{body_preview}",
@@ -2100,13 +2288,18 @@ async def _ensure_answer_vector(
     content_hash = _answer_vector_hash(answer, content)
     existing = await db.query(
         """
-        SELECT embedding, content_hash
+        SELECT embedding, content_hash, metadata
         FROM LIGHTRAG_ANSWER_VECTORS
         WHERE workspace = $1 AND answer_id = $2 AND vector_kind = 'combined'
         """,
         [workspace, answer.answer_id],
     )
-    if existing and existing.get("content_hash") == content_hash:
+    existing_metadata = _coerce_json(existing.get("metadata"), {}) if existing else {}
+    if (
+        existing
+        and existing.get("content_hash") == content_hash
+        and existing_metadata.get("projection_version") == ANSWER_VECTOR_PROJECTION_VERSION
+    ):
         embedding = _coerce_json(existing.get("embedding"), [])
         return _embedding_to_list(embedding)
 
@@ -2127,14 +2320,18 @@ async def _ensure_answer_vector(
     await db.query(
         """
         INSERT INTO LIGHTRAG_ANSWER_VECTORS
-            (vector_id, workspace, answer_id, answer_version, vector_kind, content_hash, content, embedding, metadata)
-        VALUES ($1, $2, $3, $4, 'combined', $5, $6, $7::jsonb, $8::jsonb)
+            (
+                vector_id, workspace, answer_id, answer_version, vector_kind,
+                content_hash, content, embedding, embedding_vector, metadata
+            )
+        VALUES ($1, $2, $3, $4, 'combined', $5, $6, $7::jsonb, $8::vector, $9::jsonb)
         ON CONFLICT (workspace, answer_id, vector_kind)
         DO UPDATE SET
             answer_version = EXCLUDED.answer_version,
             content_hash = EXCLUDED.content_hash,
             content = EXCLUDED.content,
             embedding = EXCLUDED.embedding,
+            embedding_vector = EXCLUDED.embedding_vector,
             metadata = EXCLUDED.metadata,
             update_time = NOW()
         """,
@@ -2146,7 +2343,13 @@ async def _ensure_answer_vector(
             content_hash,
             content,
             _json_list(embedding),
-            _json({"source": "answer_catalog_hybrid"}),
+            _embedding_to_pgvector(embedding),
+            _json(
+                {
+                    "source": "answer_catalog_hybrid",
+                    "projection_version": ANSWER_VECTOR_PROJECTION_VERSION,
+                }
+            ),
         ],
     )
     return embedding
@@ -2157,9 +2360,9 @@ async def _answer_vector_scores(
     workspace: str,
     rag,
     query: str,
-    answers: list[AnswerItem],
-    guidance_by_answer: dict[str, list[AnswerGuidance]],
     top_k: int,
+    status_filter: list[str],
+    allowed_answer_ids: Optional[list[str]],
 ) -> tuple[dict[str, float], str]:
     embedding_func = _embedding_func_from_rag(rag)
     if embedding_func is None:
@@ -2174,23 +2377,51 @@ async def _answer_vector_scores(
     if not query_embedding:
         return {}, "vector_query_empty"
 
-    scores: dict[str, float] = {}
-    for answer in answers:
-        answer_embedding = await _ensure_answer_vector(
-            db,
+    vector_rows = await db.query(
+        """
+        SELECT
+            vectors.answer_id,
+            GREATEST(
+                0.0,
+                1.0 - (vectors.embedding_vector <=> $4::vector)
+            ) AS score
+        FROM LIGHTRAG_ANSWER_VECTORS AS vectors
+        JOIN LIGHTRAG_ANSWER_ITEMS AS answers
+          ON answers.workspace = vectors.workspace
+         AND answers.answer_id = vectors.answer_id
+         AND answers.version = vectors.answer_version
+        WHERE vectors.workspace = $1
+          AND vectors.vector_kind = 'combined'
+          AND answers.status = ANY($2::text[])
+          AND (answers.valid_from IS NULL OR answers.valid_from <= NOW())
+          AND (answers.valid_until IS NULL OR answers.valid_until >= NOW())
+          AND ($3::text[] IS NULL OR answers.answer_id = ANY($3::text[]))
+          AND vectors.embedding_vector IS NOT NULL
+          AND COALESCE((vectors.metadata->>'projection_version')::integer, 0) = $7
+          AND vector_dims(vectors.embedding_vector) = $5
+        ORDER BY vectors.embedding_vector <=> $4::vector
+        LIMIT $6
+        """,
+        [
             workspace,
-            rag,
-            answer,
-            guidance_by_answer.get(answer.answer_id, []),
-        )
-        if not answer_embedding:
-            continue
-        score = _cosine_similarity(query_embedding, answer_embedding)
-        if score > 0:
-            scores[answer.answer_id] = round(score, 4)
+            status_filter,
+            allowed_answer_ids,
+            _embedding_to_pgvector(query_embedding),
+            len(query_embedding),
+            top_k,
+            ANSWER_VECTOR_PROJECTION_VERSION,
+        ],
+        multirows=True,
+    )
+    if not vector_rows:
+        return {}, "vector_not_built"
 
-    top_scores = sorted(scores.items(), key=lambda item: item[1], reverse=True)[:top_k]
-    return dict(top_scores), "vector_ready"
+    scores = {
+        str(row["answer_id"]): round(float(row.get("score") or 0.0), 4)
+        for row in vector_rows
+        if float(row.get("score") or 0.0) > 0
+    }
+    return scores, "vector_ready"
 
 
 def _extract_json_object(text: str) -> Optional[dict[str, Any]]:
@@ -2230,7 +2461,6 @@ async def _llm_select_candidate(rag, query: str, candidates: list[ResolveCandida
         {
             "answer_id": item.answer.answer_id,
             "title": item.answer.title,
-            "summary": item.answer.approved_summary,
             "score": item.score,
             "matched_guidance": item.matched_guidance,
             "reason": item.reason,
@@ -2311,8 +2541,6 @@ def _heuristic_guidance_suggestions(
         add("keyword", tag, 0.85, "tag")
     for example in query_examples:
         add("question", example, 1.0, "query_example")
-    for sentence in _sentence_candidates(answer.approved_summary or "", 4):
-        add("keyword", sentence, 0.75, "summary")
     for sentence in _sentence_candidates(answer.body, 4):
         add("synonym", sentence, 0.65, "body")
 
@@ -2623,21 +2851,17 @@ def _score_candidate(
     matched_guidance: list[str] = []
 
     title = _normalise_text(answer.title)
-    summary = _normalise_text(answer.approved_summary)
     body = _normalise_text(answer.body)
     tags = _normalise_text(" ".join(answer.tags))
 
     if normalized_query and normalized_query in title:
         _add_score(details, "title_exact", 0.42)
-    if normalized_query and normalized_query in summary:
-        _add_score(details, "summary_exact", 0.24)
     if normalized_query and normalized_query in body:
         _add_score(details, "body_exact", 0.16)
     if normalized_query and normalized_query in tags:
         _add_score(details, "tag_exact", 0.2)
 
     _add_score(details, "title_overlap", _partial_overlap(query_tokens, title) * 0.26)
-    _add_score(details, "summary_overlap", _partial_overlap(query_tokens, summary) * 0.16)
     _add_score(details, "body_overlap", _partial_overlap(query_tokens, body) * 0.1)
     _add_score(details, "tag_overlap", _partial_overlap(query_tokens, tags) * 0.18)
 
@@ -2669,7 +2893,9 @@ def _score_candidate(
         matched_guidance.append(f"{prefix}{item.text}")
 
     if strategy == "balanced":
-        metadata_text = _normalise_text(json.dumps(answer.metadata, ensure_ascii=False))
+        metadata_text = _normalise_text(
+            json.dumps(_compact_answer_metadata(answer.metadata), ensure_ascii=False)
+        )
         _add_score(details, "metadata_overlap", _partial_overlap(query_tokens, metadata_text) * 0.08)
 
     _add_score(details, "priority", min(0.07, max(answer.priority, 0) * 0.01))
@@ -2681,6 +2907,99 @@ def _score_candidate(
     if not reason and details:
         reason = ", ".join(f"{key}:{value:.2f}" for key, value in sorted(details.items()))
     return score, matched_guidance[:8], reason or "weak_match", details
+
+
+async def _keyword_candidate_ids(
+    db,
+    workspace: str,
+    query: str,
+    status_filter: list[str],
+    allowed_answer_ids: Optional[list[str]],
+) -> tuple[list[str], bool]:
+    normalized_query = _normalise_text(query)
+    query_terms = _candidate_query_terms(query)
+    rows = await db.query(
+        """
+        WITH guidance_text AS (
+            SELECT answer_id, LOWER(STRING_AGG(text, ' ' ORDER BY guidance_id)) AS search_text
+            FROM LIGHTRAG_ANSWER_GUIDANCE
+            WHERE workspace = $1
+            GROUP BY answer_id
+        ),
+        eligible AS (
+            SELECT
+                answers.answer_id,
+                answers.priority,
+                answers.update_time,
+                LOWER(
+                    CONCAT_WS(
+                        ' ',
+                        answers.answer_id,
+                        answers.title,
+                        answers.body,
+                        answers.tags::text,
+                        (
+                            answers.metadata
+                            - 'source_profile'
+                            - 'raw_content'
+                        )::text
+                    )
+                ) AS answer_text,
+                COALESCE(guidance_text.search_text, '') AS guidance_text
+            FROM LIGHTRAG_ANSWER_ITEMS AS answers
+            LEFT JOIN guidance_text ON guidance_text.answer_id = answers.answer_id
+            WHERE answers.workspace = $1
+              AND answers.status = ANY($2::text[])
+              AND (answers.valid_from IS NULL OR answers.valid_from <= NOW())
+              AND (answers.valid_until IS NULL OR answers.valid_until >= NOW())
+              AND ($3::text[] IS NULL OR answers.answer_id = ANY($3::text[]))
+        ),
+        ranked AS (
+            SELECT
+                answer_id,
+                priority,
+                update_time,
+                (
+                    CASE
+                        WHEN $4 <> '' AND STRPOS(answer_text, $4) > 0 THEN 30
+                        ELSE 0
+                    END
+                    + CASE
+                        WHEN $4 <> '' AND STRPOS(guidance_text, $4) > 0 THEN 40
+                        ELSE 0
+                    END
+                    + (
+                        SELECT COUNT(*) * 3
+                        FROM UNNEST($5::text[]) AS term
+                        WHERE STRPOS(answer_text, term) > 0
+                    )
+                    + (
+                        SELECT COUNT(*) * 4
+                        FROM UNNEST($5::text[]) AS term
+                        WHERE STRPOS(guidance_text, term) > 0
+                    )
+                ) AS prefilter_score
+            FROM eligible
+        )
+        SELECT answer_id
+        FROM ranked
+        WHERE prefilter_score > 0
+        ORDER BY prefilter_score DESC, priority DESC, update_time DESC, answer_id ASC
+        LIMIT $6
+        """,
+        [
+            workspace,
+            status_filter,
+            allowed_answer_ids,
+            normalized_query,
+            query_terms,
+            MAX_KEYWORD_SEARCH_CANDIDATES + 1,
+        ],
+        multirows=True,
+    )
+    candidate_ids = [str(row["answer_id"]) for row in rows or []]
+    truncated = len(candidate_ids) > MAX_KEYWORD_SEARCH_CANDIDATES
+    return candidate_ids[:MAX_KEYWORD_SEARCH_CANDIDATES], truncated
 
 
 def _render_answer_response(answer: AnswerItem, display_policy: Optional[DisplayPolicy] = None) -> tuple[str, DisplayPolicy]:
@@ -3204,7 +3523,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             )
 
         content, file_size = await _read_upload_limited(file, MAX_EXCEL_UPLOAD_BYTES)
-        sheets, selected_sheet, header, start_row, rows, columns, warnings = _extract_excel_rows(
+        sheets, selected_sheet, header, start_row, rows, columns, warnings, truncated = _extract_excel_rows(
             content,
             sheet_name=sheet_name,
             header_row=header_row,
@@ -3223,6 +3542,8 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             header_row=header,
             data_start_row=start_row,
             row_count=len(rows),
+            row_limit=max_rows,
+            truncated=truncated,
             columns=columns,
             raw_content=raw_content,
             source_uri=source_uri,
@@ -3266,6 +3587,14 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             if text and text not in tags:
                 tags.append(text)
 
+        if payload.materialization_mode == "row_per_answer" and payload.source_truncated:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "The source preview was truncated. Split or filter the source before "
+                    "creating one answer per row."
+                ),
+            )
         if payload.materialization_mode == "row_per_answer" and len(rows) > MAX_STRUCTURED_ROWS_PER_ANSWER_BATCH:
             raise HTTPException(
                 status_code=400,
@@ -3317,6 +3646,12 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
         )
         source_metadata["source_snapshot_id"] = snapshot.snapshot_id
         source_metadata["source_content_hash"] = snapshot.content_hash
+        row_source_metadata = {
+            key: value
+            for key, value in source_metadata.items()
+            if key != "source_profile"
+        }
+        row_source_metadata["source_profile_ref"] = snapshot.snapshot_id
 
         created_guidance: list[AnswerGuidance] = []
         created_answers: list[AnswerItem] = []
@@ -3370,7 +3705,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                     row_valid_from = _datetime_for_structured_row(row_data, mapping, "valid_from")
                     row_valid_until = _datetime_for_structured_row(row_data, mapping, "valid_until")
                     row_metadata = {
-                        **source_metadata,
+                        **row_source_metadata,
                         "source_row_index": row_index,
                         "source_row_hash": _content_hash(json.dumps(row_data, ensure_ascii=False, sort_keys=True)),
                         "source_row": row_data,
@@ -3424,13 +3759,18 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                         )
                     )
 
+            response_item_limit = 20
             return StructuredMaterializeResponse(
                 answer=created_answers[0],
                 dataset=created_datasets[0],
-                answers=created_answers,
-                datasets=created_datasets,
+                answers=created_answers[:response_item_limit],
+                datasets=created_datasets[:response_item_limit],
+                answer_count=len(created_answers),
+                answers_truncated=len(created_answers) > response_item_limit,
                 profile=profile,
-                guidance=created_guidance,
+                guidance=created_guidance[:response_item_limit],
+                guidance_count=len(created_guidance),
+                guidance_truncated=len(created_guidance) > response_item_limit,
                 snapshot=snapshot,
                 source_link=first_source_link,
             )
@@ -3789,6 +4129,14 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             *await _connector_raw_content_from_db(db, connector, 1000),
             limit=1000,
         )
+        if payload.materialization_mode == "row_per_answer" and sample.truncated:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"DB row-per-answer materialization supports up to {sample.row_limit} rows per request. "
+                    "Filter or split the source table before creating answer candidates."
+                ),
+            )
         profile = _profile_structured_source(sample.source_type, sample.raw_content, sample_limit=20)
         mapping = _mapping_from_profile(profile, payload.mapping)
         guidance_columns = _guidance_columns_from_profile(profile, mapping, payload.guidance_columns)
@@ -3835,6 +4183,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 _json({
                     "last_materialized_at": _now().isoformat(),
                     "last_materialized_answer_ids": [answer.answer_id for answer in materialized.answers],
+                    "last_materialized_answer_count": materialized.answer_count,
                     "last_materialization_mode": payload.materialization_mode,
                 }),
             ],
@@ -3842,7 +4191,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
         refreshed = _source_connector_from_row(await _get_connector_row(db, workspace, connector_id))
         return SourceConnectorMaterializeResponse(
             connector=refreshed,
-            sample=sample,
+            sample=_compact_connector_materialization_sample(sample, profile),
             materialized=materialized,
         )
 
@@ -4327,32 +4676,69 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
     async def rebuild_answer_vectors(
         request: Request,
         status: Optional[str] = Query(default=None),
-        limit: int = Query(default=100, ge=1, le=500),
+        limit: int = Query(default=500, ge=1, le=1000),
+        only_missing: bool = Query(
+            default=True,
+            description="Build the next answers without a current vector instead of rebuilding the same latest answers.",
+        ),
     ):
         workspace, db = await db_for_request(request)
         status_filter = [status] if status and status != "all" else ["draft", "published"]
         rows = await db.query(
             """
-            SELECT workspace, answer_id, title, body, approved_summary, content_format,
-                   display_policy, status, version, valid_from, valid_until, priority,
-                   tags, metadata, publish_time, create_time, update_time
-            FROM LIGHTRAG_ANSWER_ITEMS
-            WHERE workspace = $1 AND status = ANY($2::text[])
-            ORDER BY priority DESC, update_time DESC
-            LIMIT $3
+            SELECT
+                answers.workspace,
+                answers.answer_id,
+                answers.title,
+                answers.body,
+                answers.approved_summary,
+                answers.content_format,
+                answers.display_policy,
+                answers.status,
+                answers.version,
+                answers.valid_from,
+                answers.valid_until,
+                answers.priority,
+                answers.tags,
+                answers.metadata,
+                answers.publish_time,
+                answers.create_time,
+                answers.update_time
+            FROM LIGHTRAG_ANSWER_ITEMS AS answers
+            LEFT JOIN LIGHTRAG_ANSWER_VECTORS AS vectors
+              ON vectors.workspace = answers.workspace
+             AND vectors.answer_id = answers.answer_id
+             AND vectors.answer_version = answers.version
+             AND vectors.vector_kind = 'combined'
+             AND COALESCE((vectors.metadata->>'projection_version')::integer, 0) = $5
+            WHERE answers.workspace = $1
+              AND answers.status = ANY($2::text[])
+              AND ($3::boolean = FALSE OR vectors.answer_id IS NULL)
+            ORDER BY answers.priority DESC, answers.update_time DESC
+            LIMIT $4
             """,
-            [workspace, status_filter, limit],
+            [
+                workspace,
+                status_filter,
+                only_missing,
+                limit,
+                ANSWER_VECTOR_PROJECTION_VERSION,
+            ],
             multirows=True,
         )
-        guidance_rows = await db.query(
-            """
-            SELECT guidance_id, workspace, answer_id, guidance_type, text, weight, metadata, create_time
-            FROM LIGHTRAG_ANSWER_GUIDANCE
-            WHERE workspace = $1
-            """,
-            [workspace],
-            multirows=True,
-        )
+        answer_ids = [str(row["answer_id"]) for row in rows or []]
+        guidance_rows = []
+        if answer_ids:
+            guidance_rows = await db.query(
+                """
+                SELECT guidance_id, workspace, answer_id, guidance_type, text, weight, metadata, create_time
+                FROM LIGHTRAG_ANSWER_GUIDANCE
+                WHERE workspace = $1
+                  AND answer_id = ANY($2::text[])
+                """,
+                [workspace, answer_ids],
+                multirows=True,
+            )
         guidance_by_answer: dict[str, list[AnswerGuidance]] = {}
         for row in guidance_rows or []:
             guidance = _guidance_from_row(dict(row))
@@ -4374,7 +4760,29 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 rebuilt += 1
             else:
                 failed.append(answer.answer_id)
-        return {"message": "Answer vectors rebuild completed", "rebuilt": rebuilt, "failed": failed}
+        remaining = await db.query(
+            """
+            SELECT COUNT(*) AS count
+            FROM LIGHTRAG_ANSWER_ITEMS AS answers
+            LEFT JOIN LIGHTRAG_ANSWER_VECTORS AS vectors
+              ON vectors.workspace = answers.workspace
+             AND vectors.answer_id = answers.answer_id
+             AND vectors.answer_version = answers.version
+             AND vectors.vector_kind = 'combined'
+             AND COALESCE((vectors.metadata->>'projection_version')::integer, 0) = $3
+            WHERE answers.workspace = $1
+              AND answers.status = ANY($2::text[])
+              AND vectors.answer_id IS NULL
+            """,
+            [workspace, status_filter, ANSWER_VECTOR_PROJECTION_VERSION],
+        )
+        return {
+            "message": "Answer vectors rebuild completed",
+            "processed": len(answer_ids),
+            "rebuilt": rebuilt,
+            "failed": failed,
+            "remaining": int(remaining.get("count") or 0) if remaining else 0,
+        }
 
     async def resolve_answer_candidates(
         workspace: str,
@@ -4391,40 +4799,13 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             if payload.allowed_answer_ids is not None
             else None
         )
-        rows = await db.query(
-            """
-            SELECT workspace, answer_id, title, body, approved_summary, content_format,
-                   display_policy, status, version, valid_from, valid_until, priority,
-                   tags, metadata, publish_time, create_time, update_time
-            FROM LIGHTRAG_ANSWER_ITEMS
-            WHERE workspace = $1
-              AND status = ANY($2::text[])
-              AND (valid_from IS NULL OR valid_from <= NOW())
-              AND (valid_until IS NULL OR valid_until >= NOW())
-              AND ($3::text[] IS NULL OR answer_id = ANY($3::text[]))
-            ORDER BY priority DESC, update_time DESC
-            LIMIT 500
-            """,
-            [workspace, status_filter, allowed_answer_ids],
-            multirows=True,
+        keyword_candidate_ids, keyword_candidates_truncated = await _keyword_candidate_ids(
+            db,
+            workspace,
+            payload.query,
+            status_filter,
+            allowed_answer_ids,
         )
-        guidance_rows = await db.query(
-            """
-            SELECT guidance_id, workspace, answer_id, guidance_type, text, weight, metadata, create_time
-            FROM LIGHTRAG_ANSWER_GUIDANCE
-            WHERE workspace = $1
-            """,
-            [workspace],
-            multirows=True,
-        )
-        guidance_by_answer: dict[str, list[AnswerGuidance]] = {}
-        for row in guidance_rows or []:
-            guidance = _guidance_from_row(dict(row))
-            guidance_by_answer.setdefault(guidance.answer_id, []).append(guidance)
-
-        answers = [_answer_from_row(dict(row)) for row in rows or []]
-        answer_by_id = {answer.answer_id: answer for answer in answers}
-        keyword_scores: dict[str, tuple[float, list[str], str, dict[str, float]]] = {}
         vector_scores: dict[str, float] = {}
         vector_status = "not_requested"
         workspace_rag = await rag_for_workspace(workspace)
@@ -4435,10 +4816,46 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 workspace,
                 workspace_rag,
                 payload.query,
-                answers,
-                guidance_by_answer,
                 payload.vector_top_k,
+                status_filter,
+                allowed_answer_ids,
             )
+
+        candidate_answer_ids = list(
+            dict.fromkeys([*keyword_candidate_ids, *vector_scores.keys()])
+        )
+        rows = await db.query(
+            """
+            SELECT workspace, answer_id, title, body, approved_summary, content_format,
+                   display_policy, status, version, valid_from, valid_until, priority,
+                   tags, metadata, publish_time, create_time, update_time
+            FROM LIGHTRAG_ANSWER_ITEMS
+            WHERE workspace = $1
+              AND answer_id = ANY($2::text[])
+            """,
+            [workspace, candidate_answer_ids],
+            multirows=True,
+        )
+        guidance_rows = []
+        if candidate_answer_ids:
+            guidance_rows = await db.query(
+                """
+                SELECT guidance_id, workspace, answer_id, guidance_type, text, weight, metadata, create_time
+                FROM LIGHTRAG_ANSWER_GUIDANCE
+                WHERE workspace = $1
+                  AND answer_id = ANY($2::text[])
+                """,
+                [workspace, candidate_answer_ids],
+                multirows=True,
+            )
+        guidance_by_answer: dict[str, list[AnswerGuidance]] = {}
+        for row in guidance_rows or []:
+            guidance = _guidance_from_row(dict(row))
+            guidance_by_answer.setdefault(guidance.answer_id, []).append(guidance)
+
+        answers = [_answer_from_row(dict(row)) for row in rows or []]
+        answer_by_id = {answer.answer_id: answer for answer in answers}
+        keyword_scores: dict[str, tuple[float, list[str], str, dict[str, float]]] = {}
 
         for row in rows or []:
             answer = answer_by_id[str(row["answer_id"])]
@@ -4487,7 +4904,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 )
             candidates.append(
                 ResolveCandidate(
-                    answer=answer,
+                    answer=_search_answer_view(answer),
                     score=round(final_score, 4),
                     matched_guidance=matched_guidance,
                     reason=reason,
@@ -4548,6 +4965,9 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 "strategy": payload.strategy,
                 "selected_by": selected_by,
                 "vector_status": vector_status,
+                "keyword_candidate_count": len(keyword_candidate_ids),
+                "keyword_candidates_truncated": keyword_candidates_truncated,
+                "keyword_candidate_limit": MAX_KEYWORD_SEARCH_CANDIDATES,
                 "llm_selection": llm_selection,
                 "score_details": {item.answer.answer_id: item.score_details for item in candidates},
             },

@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { localizedErrorMessage } from '@/lib/utils'
 import { useWorkspaceStore } from '@/stores/workspace'
 
-export default function AnswerTestConsole() {
+export default function AnswerTestConsole({ embedded = false }: { embedded?: boolean }) {
   const { t } = useTranslation()
   const currentWorkspaceId = useWorkspaceStore.use.currentWorkspaceId()
   const [query, setQuery] = useState('')
@@ -59,7 +59,8 @@ export default function AnswerTestConsole() {
   }
 
   return (
-    <div className="flex h-full flex-col gap-4 p-4">
+    <div className={`flex h-full flex-col gap-4 ${embedded ? 'p-0' : 'p-4'}`}>
+      {!embedded && (
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold">{t('answerCatalog.test.title', 'Answer Test Console')}</h1>
@@ -69,6 +70,7 @@ export default function AnswerTestConsole() {
         </div>
         <AnswerHelpButton />
       </div>
+      )}
 
       <div className="rounded-md border p-4">
         <div className="grid gap-3 lg:grid-cols-[1fr_140px_150px_170px_160px_auto]">
