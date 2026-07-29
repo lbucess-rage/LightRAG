@@ -202,6 +202,16 @@ async def get_rag_for_workspace(workspace: str) -> LightRAG:
         return _default_rag_instance
 
 
+async def release_rag_for_workspace(workspace: str) -> None:
+    """Finalize and remove a cached non-default workspace RAG instance."""
+    global _rag_instance_cache, _default_rag_instance
+
+    cached_rag = _rag_instance_cache.pop(workspace, None)
+    if cached_rag is None or cached_rag is _default_rag_instance:
+        return
+    await cached_rag.finalize_storages()
+
+
 def get_default_rag() -> LightRAG | None:
     """Get the default RAG instance."""
     return _default_rag_instance
@@ -1326,7 +1336,14 @@ def create_app(args):
     app.include_router(create_history_routes(rag, api_key))
     app.include_router(create_answer_routes(rag, api_key))
     logger.info("Operational deletion, chunk, history, and answer routes initialized")
-    app.include_router(create_workspace_routes(rag, api_key))
+    app.include_router(
+        create_workspace_routes(
+            rag,
+            api_key,
+            get_rag_for_workspace,
+            release_rag_for_workspace,
+        )
+    )
 
     # Add Schema API routes
     app.include_router(schema_router, prefix="/api/schema")

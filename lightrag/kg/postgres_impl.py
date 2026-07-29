@@ -2045,43 +2045,50 @@ class PostgreSQLDB:
         Returns:
             True if deleted successfully
         """
-        try:
-            if delete_data:
-                # Delete all data from workspace across all tables
-                tables_to_clean = [
-                    "LIGHTRAG_DOC_FULL",
-                    "LIGHTRAG_DOC_CHUNKS",
-                    "LIGHTRAG_DOC_STATUS",
-                    "LIGHTRAG_VDB_CHUNKS",
-                    "LIGHTRAG_VDB_ENTITY",
-                    "LIGHTRAG_VDB_RELATION",
-                    "LIGHTRAG_LLM_CACHE",
-                    "LIGHTRAG_FULL_ENTITIES",
-                    "LIGHTRAG_FULL_RELATIONS",
-                    "LIGHTRAG_ENTITY_CHUNKS",
-                    "LIGHTRAG_RELATION_CHUNKS",
-                    "LIGHTRAG_PROMPTS",
-                    "LIGHTRAG_USER_PROMPT_TEMPLATES",
-                    "LIGHTRAG_ANSWER_SOURCE_LINKS",
-                    "LIGHTRAG_ANSWER_SOURCE_SNAPSHOTS",
-                    "LIGHTRAG_ANSWER_EVENTS",
-                    "LIGHTRAG_ANSWER_GUIDANCE",
-                    "LIGHTRAG_ANSWER_REVISIONS",
-                    "LIGHTRAG_ANSWER_ITEMS",
-                ]
-                for table in tables_to_clean:
-                    try:
-                        delete_sql = SQL_TEMPLATES["drop_specifiy_table_workspace"].format(
-                            table_name=table
-                        )
-                        await self.execute(delete_sql, {"workspace": workspace_id})
-                        logger.debug(f"Deleted data from {table} for workspace {workspace_id}")
-                    except Exception as e:
-                        logger.warning(f"Failed to delete from {table}: {e}")
 
-            # Delete workspace record
-            sql = SQL_TEMPLATES["delete_workspace"]
-            await self.execute(sql, {"workspace_id": workspace_id})
+        async def _delete_operation(connection: asyncpg.Connection) -> None:
+            async with connection.transaction():
+                if delete_data:
+                    workspace_tables = await connection.fetch(
+                        """
+                        SELECT c.table_schema, c.table_name
+                        FROM information_schema.columns c
+                        JOIN information_schema.tables t
+                          ON t.table_schema = c.table_schema
+                         AND t.table_name = c.table_name
+                        WHERE c.column_name = 'workspace'
+                          AND t.table_type = 'BASE TABLE'
+                          AND c.table_schema = current_schema()
+                          AND (
+                              lower(c.table_name) LIKE 'lightrag\\_%' ESCAPE '\\'
+                              OR lower(c.table_name) LIKE 'kms\\_admin\\_%' ESCAPE '\\'
+                          )
+                        ORDER BY c.table_name
+                        """
+                    )
+
+                    for row in workspace_tables:
+                        schema_name = str(row["table_schema"]).replace('"', '""')
+                        table_name = str(row["table_name"]).replace('"', '""')
+                        await connection.execute(
+                            f'DELETE FROM "{schema_name}"."{table_name}" '
+                            "WHERE workspace = $1",
+                            workspace_id,
+                        )
+                        logger.debug(
+                            "Deleted workspace data from %s.%s for %s",
+                            schema_name,
+                            table_name,
+                            workspace_id,
+                        )
+
+                await connection.execute(
+                    SQL_TEMPLATES["delete_workspace"],
+                    workspace_id,
+                )
+
+        try:
+            await self._run_with_retry(_delete_operation)
             logger.info(f"Deleted workspace: {workspace_id}")
             return True
         except Exception as e:
