@@ -6640,6 +6640,8 @@ export function Tenants() {
   const [copyTarget, setCopyTarget] = useState<Tenant | null>(null)
   const [copySourceTenantId, setCopySourceTenantId] = useState('')
   const [form, setForm] = useState(emptyTenantForm)
+  const [autoProvision, setAutoProvision] = useState(false)
+  const [provisionWsId, setProvisionWsId] = useState('')
 
   const loadTenants = async () => {
     setLoading(true)
@@ -6660,6 +6662,8 @@ export function Tenants() {
 
   const startCreate = () => {
     setForm(emptyTenantForm)
+    setAutoProvision(false)
+    setProvisionWsId('')
     setError('')
     setShowCreate(true)
   }
@@ -6678,17 +6682,29 @@ export function Tenants() {
 
   const createTenant = async (event: FormEvent) => {
     event.preventDefault()
-    if (!form.name.trim() || !form.kms_workspace || !form.faq_workspace) return
+    if (!form.name.trim()) return
+    if (!autoProvision && (!form.kms_workspace || !form.faq_workspace)) return
     setSaving(true)
     setError('')
     try {
-      await api.post('/api/tenants', {
-        name: form.name.trim(),
-        kms_workspace: form.kms_workspace,
-        faq_workspace: form.faq_workspace,
-        is_active: form.is_active,
-        copy_categories_from_tenant_id: form.copy_categories_from_tenant_id || undefined
-      })
+      if (autoProvision) {
+        const wsId = provisionWsId.trim()
+        await api.post('/api/tenants/provision', {
+          name: form.name.trim(),
+          kms_workspace: wsId || undefined,
+          faq_workspace: wsId ? `${wsId}_faq` : undefined,
+          is_active: form.is_active,
+          copy_categories_from_tenant_id: form.copy_categories_from_tenant_id || undefined
+        })
+      } else {
+        await api.post('/api/tenants', {
+          name: form.name.trim(),
+          kms_workspace: form.kms_workspace,
+          faq_workspace: form.faq_workspace,
+          is_active: form.is_active,
+          copy_categories_from_tenant_id: form.copy_categories_from_tenant_id || undefined
+        })
+      }
       setShowCreate(false)
       setForm(emptyTenantForm)
       await loadTenants()
@@ -6742,6 +6758,7 @@ export function Tenants() {
   const uniquePairs = new Set(tenants.map((tenant) => `${tenant.kms_workspace}|${tenant.faq_workspace}`)).size
   const copySourceOptions = tenants.filter((tenant) => tenant.tenant_id !== copyTarget?.tenant_id)
   const formDisabled = !form.name.trim() || !form.kms_workspace || !form.faq_workspace || saving
+  const createDisabled = !form.name.trim() || (!autoProvision && (!form.kms_workspace || !form.faq_workspace)) || saving
 
   return (
     <div className="content-inner wide fadein">
@@ -6852,7 +6869,7 @@ export function Tenants() {
         <Modal title="고객센터 생성" icon={NetworkIcon} onClose={() => setShowCreate(false)} footer={
           <>
             <Button type="button" variant="outline" onClick={() => setShowCreate(false)}>취소</Button>
-            <Button type="submit" form="tenant-create-form" disabled={formDisabled}>
+            <Button type="submit" form="tenant-create-form" disabled={createDisabled}>
               <PlusIcon className="size-4" /> 생성
             </Button>
           </>
@@ -6862,6 +6879,24 @@ export function Tenants() {
               <span>고객센터명</span>
               <Input value={form.name} onChange={(event) => setForm((value) => ({ ...value, name: event.target.value }))} placeholder="예) 전기차충전 고객센터" />
             </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={autoProvision}
+                onChange={(event) => setAutoProvision(event.target.checked)}
+              />
+              신규 워크스페이스 자동 생성 (새 프로젝트)
+            </label>
+            {autoProvision ? (
+              <label className="field">
+                <span>워크스페이스 ID (영문 소문자, 비우면 자동 생성)</span>
+                <Input
+                  value={provisionWsId}
+                  onChange={(event) => setProvisionWsId(event.target.value)}
+                  placeholder="예) sugar  →  sugar / sugar_faq 워크스페이스가 만들어집니다"
+                />
+              </label>
+            ) : (
             <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 14 }}>
               <label className="field">
                 <span>KMS 워크스페이스</span>
@@ -6882,6 +6917,7 @@ export function Tenants() {
                 />
               </label>
             </div>
+            )}
             <label className="field">
               <span>카테고리 복사</span>
               <select
