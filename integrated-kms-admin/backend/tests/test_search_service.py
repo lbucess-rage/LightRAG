@@ -123,6 +123,64 @@ def test_integrated_search_trace_includes_workspace_scope(monkeypatch):
     assert "eligibility" in result["trace"]
 
 
+def test_integrated_search_preserves_faq_alias_expansion_metadata(monkeypatch):
+    class FakeDb:
+        async def execute(self, query, *params):
+            return "INSERT 0 1"
+
+    class FakeLightRagClient:
+        async def request_json(self, method, path, *, workspace=None, json_body=None):
+            assert method == "POST"
+            assert path == "/api/answers/search"
+            assert workspace == "faq-helpdesk"
+            assert json_body["retrieval_mode"] == "hybrid"
+            return {
+                "matched": True,
+                "matched_id": "ANS-TEAMS-1",
+                "confidence": 0.91,
+                "retrieval_mode": "hybrid",
+                "selected_by": "hybrid",
+                "alias_expansions": [
+                    {"source": "팀즈", "canonical": "Microsoft Teams"},
+                ],
+                "title": "Teams 연결 오류",
+            }
+
+    async def fake_candidate_scope(**_):
+        return CandidateScope(
+            allowed_doc_ids=[],
+            allowed_answer_ids=None,
+            eligibility={
+                "kms": {"allowed_count": 0, "excluded_count": 0, "excluded_by_reason": {}},
+                "faq": {"allowed_count": 1, "excluded_count": 0, "excluded_by_reason": {}},
+            },
+        )
+
+    monkeypatch.setattr(search_service, "db", FakeDb())
+    monkeypatch.setattr(search_service, "lightrag_client", FakeLightRagClient())
+    monkeypatch.setattr(search_service, "resolve_candidate_scope", fake_candidate_scope)
+
+    result = asyncio.run(
+        search_service.integrated_search(
+            actor_type="user",
+            actor_id="manager-1",
+            scope=WorkspaceScope("default", "kms-helpdesk", "faq-helpdesk"),
+            payload={
+                "query": "팀즈 연결이 안 돼요",
+                "include_generative": False,
+                "include_faq": True,
+                "faq_options": {"retrieval_mode": "hybrid"},
+            },
+        )
+    )
+
+    assert result["faq_metadata"]["matched_id"] == "ANS-TEAMS-1"
+    assert result["faq_metadata"]["alias_expansions"] == [
+        {"source": "팀즈", "canonical": "Microsoft Teams"}
+    ]
+    assert result["faq_results"][0]["title"] == "Teams 연결 오류"
+
+
 def test_integrated_search_stream_metadata_includes_workspace_scope(monkeypatch):
     class FakeDb:
         async def execute(self, query, *params):

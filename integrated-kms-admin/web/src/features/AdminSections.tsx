@@ -52,6 +52,8 @@ import {
   normalizeKmsWorkspace
 } from '@/config'
 import { RelatedHelp } from '@/features/Help'
+import FaqBulkCreate from '@/features/FaqBulkCreate'
+import FaqTerminologyManager from '@/features/FaqTerminologyManager'
 import { selectClass } from '@/lib/form'
 import { PASSWORD_MIN_LENGTH, createUserDisabledReason, passwordRuleFeedback } from '@/lib/passwordPolicy'
 import { compactDateRange, deltaPercent, fillHourRows, ratio, toCountRows, type CountRow } from '@/lib/stats'
@@ -3206,12 +3208,15 @@ export function KnowledgeManagement() {
   const [faqCandidateQuery, setFaqCandidateQuery] = useState('')
   const [faqCandidateTopK, setFaqCandidateTopK] = useState('5')
   const [faqCandidateIncludeDrafts, setFaqCandidateIncludeDrafts] = useState(true)
+  const [faqCandidateRetrievalMode, setFaqCandidateRetrievalMode] = useState('hybrid')
   const [faqCandidateResult, setFaqCandidateResult] = useState<any>(null)
   const [faqCandidateLoading, setFaqCandidateLoading] = useState(false)
   const [faqCandidateError, setFaqCandidateError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [formError, setFormError] = useState('')
+  const [faqBulkCreateOpen, setFaqBulkCreateOpen] = useState(false)
+  const [faqTerminologyOpen, setFaqTerminologyOpen] = useState(false)
   const canChooseWorkspaceForUser = canChooseWorkspace(user?.role)
   const { kmsWorkspace: effectiveKmsWorkspace, faqWorkspace: effectiveFaqWorkspace } = resolveEffectiveWorkspaceScope({
     role: user?.role,
@@ -3470,7 +3475,7 @@ export function KnowledgeManagement() {
       const job = latestJobByItem.get(item.item_id)
       return {
         id: item.item_id,
-        title: item.title || '제목 없음',
+        title: answer?.title || item.title || '제목 없음',
         kind,
         source: sourceLabel(sourceType),
         status: job?.status || answer?.status || document?.status || item.status,
@@ -3736,7 +3741,7 @@ export function KnowledgeManagement() {
           include_drafts: faqCandidateIncludeDrafts,
           include_candidates: true,
           strategy: 'balanced',
-          retrieval_mode: 'keyword'
+          retrieval_mode: faqCandidateRetrievalMode
         },
         { params: { faq_workspace: effectiveFaqWorkspace } }
       )
@@ -3929,7 +3934,9 @@ export function KnowledgeManagement() {
             'HELP-KNOWLEDGE-012',
             'HELP-KNOWLEDGE-013',
             'HELP-KNOWLEDGE-014',
-            'HELP-KNOWLEDGE-015'
+            'HELP-KNOWLEDGE-015',
+            'HELP-KNOWLEDGE-016',
+            'HELP-KNOWLEDGE-017'
           ]}
         />
         <div className="row" style={{ gap: 8, minWidth: 420 }}>
@@ -3953,6 +3960,12 @@ export function KnowledgeManagement() {
         </Button>
         <Button type="button" variant="outline" onClick={openExistingLink}>
           <LinkIcon className="size-4" /> 기존 지식 연결
+        </Button>
+        <Button type="button" variant="outline" onClick={() => setFaqTerminologyOpen(true)}>
+          <TagIcon className="size-4" /> 공통 용어
+        </Button>
+        <Button type="button" variant="outline" onClick={() => setFaqBulkCreateOpen(true)}>
+          <DatabaseIcon className="size-4" /> FAQ 일괄 생성
         </Button>
         <div className="seg">
           <button className={view === 'table' ? 'on' : ''} type="button" onClick={() => setView('table')}>
@@ -4188,9 +4201,20 @@ export function KnowledgeManagement() {
                 <option value="5">Top 5</option>
                 <option value="10">Top 10</option>
               </select>
+              <select
+                className={selectClass}
+                style={{ width: 150 }}
+                value={faqCandidateRetrievalMode}
+                onChange={(event) => setFaqCandidateRetrievalMode(event.target.value)}
+              >
+                <option value="hybrid">하이브리드 · 권장</option>
+                <option value="keyword">키워드</option>
+                <option value="vector">벡터</option>
+                <option value="llm_rerank">LLM 최종 선택</option>
+              </select>
               <label className="check" style={{ minHeight: 32 }}>
                 <input type="checkbox" checked={faqCandidateIncludeDrafts} onChange={(event) => setFaqCandidateIncludeDrafts(event.target.checked)} />
-                초안 포함
+                검토 필요 포함
               </label>
               <Button type="submit" disabled={faqCandidateLoading || !faqCandidateQuery.trim()}>
                 <SearchIcon className={faqCandidateLoading ? 'spin size-4' : 'size-4'} /> 검수
@@ -4216,6 +4240,18 @@ export function KnowledgeManagement() {
                   <div className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}>
                     {faqCandidateResult.response || faqCandidateResult.summary || faqCandidateResult.rationale || '응답 본문이 없습니다.'}
                   </div>
+                  {Array.isArray(faqCandidateResult.alias_expansions) && faqCandidateResult.alias_expansions.length > 0 && (
+                    <div style={{ marginTop: 10, paddingTop: 9, borderTop: '1px solid var(--border-subtle)' }}>
+                      <div className="eyebrow" style={{ marginBottom: 6 }}>적용된 공통 용어</div>
+                      <div className="row wrap" style={{ gap: 6 }}>
+                        {faqCandidateResult.alias_expansions.map((expansion: any, index: number) => (
+                          <span key={`${expansion.matched_term}-${index}`} className="badge blue">
+                            {expansion.matched_term} → {expansion.canonical_term}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
                   <table className="tbl">
@@ -4573,6 +4609,20 @@ export function KnowledgeManagement() {
           guidanceLoading={faqGuidanceLoading}
           onCreateGuidance={createFaqGuidance}
           onDeleteGuidance={deleteFaqGuidance}
+        />
+      )}
+      {faqTerminologyOpen && (
+        <FaqTerminologyManager
+          workspace={effectiveFaqWorkspace}
+          onClose={() => setFaqTerminologyOpen(false)}
+        />
+      )}
+      {faqBulkCreateOpen && (
+        <FaqBulkCreate
+          workspace={effectiveFaqWorkspace}
+          categories={categories}
+          onClose={() => setFaqBulkCreateOpen(false)}
+          onCreated={() => load()}
         />
       )}
     </div>

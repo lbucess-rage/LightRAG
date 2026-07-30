@@ -71,6 +71,20 @@ def _job_metadata(job: dict[str, Any]) -> dict[str, Any]:
     return _json_object(job.get("metadata"))
 
 
+def _job_workspace(job: dict[str, Any], metadata: dict[str, Any] | None = None) -> str:
+    metadata = metadata or _job_metadata(job)
+    metadata_workspace = str(metadata.get("workspace") or "").strip()
+    if metadata_workspace:
+        return metadata_workspace
+    if str(job.get("job_type") or "").startswith("faq_") and job.get("faq_workspace"):
+        return str(job["faq_workspace"])
+    return str(
+        job.get("kms_workspace")
+        or job.get("faq_workspace")
+        or settings.default_kms_workspace
+    )
+
+
 def _normalize_job_row(row: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(row)
     normalized["metadata"] = _job_metadata(normalized)
@@ -236,7 +250,7 @@ async def _sync_track_refs(job: dict[str, Any], task: dict[str, Any] | None = No
     if not track_id or not job.get("item_id"):
         return None
 
-    workspace = job.get("kms_workspace") or settings.default_kms_workspace
+    workspace = _job_workspace(job, metadata)
     track = await lightrag_client.request_json(
         "GET",
         f"/documents/track_status/{track_id}",
@@ -267,7 +281,7 @@ async def _sync_file_label_ref(job: dict[str, Any], task: dict[str, Any] | None 
     if not file_path_label:
         return None
     normalized_label = str(file_path_label).strip()
-    workspace = job.get("kms_workspace") or settings.default_kms_workspace
+    workspace = _job_workspace(job, job_metadata)
     response = await lightrag_client.request_json(
         "POST",
         "/documents/paginated",
@@ -315,7 +329,7 @@ async def _sync_board_refs(job: dict[str, Any], task: dict[str, Any] | None = No
         return None
     api_path = parsed.path.rstrip("/")
     base_label = f"{parsed.scheme}://{parsed.netloc}{api_path}"
-    workspace = job.get("kms_workspace") or settings.default_kms_workspace
+    workspace = _job_workspace(job)
     response = await lightrag_client.request_json(
         "POST",
         "/documents/paginated",
@@ -366,7 +380,7 @@ async def _cleanup_replaced_document(
     if not new_doc_ids:
         return metadata
 
-    workspace = replacement.get("previous_workspace") or job.get("kms_workspace") or settings.default_kms_workspace
+    workspace = replacement.get("previous_workspace") or _job_workspace(job, metadata)
     next_replacement = dict(replacement)
     if previous_doc_id in new_doc_ids:
         next_replacement.update(
@@ -482,7 +496,7 @@ async def _sync_job(job: dict[str, Any]) -> dict[str, Any]:
                 synced_task = await lightrag_client.request_json(
                     "GET",
                     f"/api/tasks/{task_id}",
-                    workspace=job.get("kms_workspace") or settings.default_kms_workspace,
+                    workspace=_job_workspace(job, metadata),
                 )
                 tasks.append(synced_task)
             task = tasks[0] if tasks else None
@@ -744,7 +758,7 @@ async def cancel_job(job_id: str, request: Request, user: dict = Depends(get_cur
             await lightrag_client.request_json(
                 "POST",
                 f"/api/tasks/{task_id}/cancel",
-                workspace=job.get("kms_workspace") or settings.default_kms_workspace,
+                workspace=_job_workspace(job),
                 json_body={},
             )
         )
@@ -868,7 +882,7 @@ async def stream_job_progress(
     if not task_ids:
         raise HTTPException(status_code=404, detail="LightRAG task id not found")
 
-    workspace = job.get("kms_workspace") or settings.default_kms_workspace
+    workspace = _job_workspace(job, metadata)
 
     async def stream():
         last_persisted_progress: dict[str, float] = {}
