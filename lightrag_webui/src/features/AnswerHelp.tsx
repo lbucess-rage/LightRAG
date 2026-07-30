@@ -13,6 +13,7 @@ import {
   GaugeIcon,
   HelpCircleIcon,
   InfoIcon,
+  KeyRoundIcon,
   LibraryIcon,
   MousePointerClickIcon,
   PlayCircleIcon,
@@ -37,7 +38,7 @@ type GuideStep = {
   action: string
 }
 
-type HelpTopic = 'overview' | 'screens' | 'matching' | 'testing' | 'detailedAnalytics' | 'operations' | 'glossary'
+type HelpTopic = 'overview' | 'screens' | 'building' | 'matching' | 'testing' | 'detailedAnalytics' | 'operations' | 'glossary'
 
 type TopicConfig = {
   id: HelpTopic
@@ -80,12 +81,32 @@ const terms = [
     description: 'Excel이나 표의 각 행을 답변 후보로 바꿀 때 어떤 컬럼을 제목, 질문, 본문, 분류, 상태, 유효기간으로 사용할지 정하는 규칙입니다.',
   },
   {
+    term: 'ID 찾기 FAQ',
+    description: 'DB나 Excel의 상세정보 컬럼으로 행을 찾고, 일반 답변 문장 대신 해당 행의 업무 ID를 반환하는 FAQ 변환 방식입니다.',
+  },
+  {
+    term: '업무 ID (matched_id)',
+    description: '원본 DB나 Excel에서 사용하는 상품번호, 장애코드, 정책번호 같은 값입니다. 시스템 내부 FAQ 식별자인 answer_id와 구분해 API의 matched_id로 반환합니다.',
+  },
+  {
     term: '매핑 템플릿',
     description: '답변 자체가 아니라 컬럼 매핑 규칙을 재사용하기 위한 개념입니다. 같은 형식의 Excel이나 DB 샘플을 반복 처리할 때 사용합니다.',
   },
   {
     term: '찾기 힌트',
     description: '답변을 찾기 쉽게 만드는 질문, 키워드, 동의어, 메모입니다. 대표 질문은 더 높은 기준으로 선택됩니다.',
+  },
+  {
+    term: '공통 용어·동의어',
+    description: '여러 FAQ에 공통으로 적용되는 제품명, 약어, 한영 별칭 묶음입니다. 예를 들어 Teams, MS Teams, 팀즈를 같은 용어로 인식합니다.',
+  },
+  {
+    term: 'AI 용어 후보',
+    description: 'AI가 FAQ와 찾지 못한 질문을 비교해 제안한 동의어, 약어, 신조어입니다. 검토 대기 상태에서는 검색에 영향을 주지 않으며 운영자가 승인한 뒤에만 공통 용어로 적용됩니다.',
+  },
+  {
+    term: 'LLM 일괄 보완',
+    description: 'Excel 행별 FAQ를 미게시 상태로 만든 뒤, 답변 본문은 바꾸지 않고 구어체 질문·키워드·동의어·한영 제품명 별칭만 여러 FAQ에 나누어 추가하는 선택 기능입니다.',
   },
   {
     term: '제외어',
@@ -105,11 +126,11 @@ const terms = [
   },
   {
     term: '빠른 키워드 방식',
-    description: '현재 기본 방식입니다. 대표 질문, 키워드, 동의어, 제외어를 가중치로 계산해 빠르게 후보 답변을 찾습니다.',
+    description: '대표 질문, 키워드, 동의어, 제외어와 공통 용어 사전을 가중치로 계산해 빠르게 후보 답변을 찾는 방식입니다.',
   },
   {
     term: '의미 보강 검색',
-    description: '키워드가 정확히 같지 않아도 뜻이 비슷한 답변을 찾기 위해 답변별 벡터를 함께 비교하는 선택 방식입니다.',
+    description: '키워드와 용어 확장 결과에 답변별 벡터 유사도를 함께 적용하는 기본 조회 방식입니다. 표현이 달라도 뜻이 비슷한 후보를 보강합니다.',
   },
   {
     term: 'LLM ID 선택',
@@ -162,8 +183,8 @@ const screenshotGuides = [
     title: 'FAQ 생성',
     caption: '직접 작성하거나 텍스트, URL, Excel, DB 표 데이터를 검토 가능한 FAQ로 변환하는 화면입니다.',
     image: 'help/answer-catalog/sources-screen.png',
-    points: ['FAQ 작성·변환', '표 데이터 연결', '생성 결과 확인'],
-    example: '응대가이드 Excel 파일에서 시트와 “질문/답변/분류/키워드” 컬럼을 선택해 행마다 FAQ를 생성합니다.',
+    points: ['FAQ 작성·변환', '표 데이터 연결', 'LLM 힌트 보완'],
+    example: '응대가이드 Excel에서 “질문/답변/분류” 컬럼을 매핑하고, 질문 표현이 부족한 행만 LLM으로 보완한 뒤 미게시 FAQ를 생성합니다.',
     tab: 'answer-sources' as AppTab,
   },
   {
@@ -204,7 +225,7 @@ const featureGuides = [
     title: 'FAQ 생성',
     purpose: '직접 작성하거나 텍스트, Excel, 파일, URL, DB/NoSQL 표 데이터를 검토 가능한 FAQ로 바꿉니다.',
     when: '하나의 FAQ를 작성하거나 외부 자료에서 여러 FAQ를 한 번에 생성할 때 사용합니다.',
-    example: '고객센터 백과사전 Excel의 “응대가이드” 시트를 업로드하고 행별 FAQ로 변환합니다.',
+    example: '고객센터 백과사전 Excel의 “응대가이드” 시트를 행별 FAQ로 변환하고, 필요한 행만 LLM으로 대표 질문과 동의어를 보완합니다.',
     tab: 'answer-sources' as AppTab,
   },
   {
@@ -223,14 +244,14 @@ const advancedMatchingGuideTemplates = [
     tab: 'answer-test' as AppTab,
     image: 'help/answer-catalog/matching-hybrid-controls.png',
     alt: '품질 관리 화면의 벡터 갱신, 힌트 추천, 조회 방식 선택 영역',
-    summary: '기본 키워드 방식을 유지하면서, 필요할 때만 의미 보강 검색과 LLM ID 선택을 켤 수 있습니다.',
+    summary: '기본 하이브리드 방식은 키워드·용어 확장·벡터 검색을 함께 사용하며, 필요할 때만 LLM ID 선택을 켤 수 있습니다.',
     points: ['벡터 갱신', '힌트 추천', '조회 방식'],
     bullets: [
-      '벡터 갱신은 답변 제목, 요약, 본문 일부, 태그, 찾기 힌트를 합쳐 답변별 검색 벡터를 다시 만듭니다.',
-      '힌트 추천은 대표 질문, 키워드, 동의어 후보를 제안합니다. 추천 결과는 자동 반영되지 않고 운영자가 추가해야 반영됩니다.',
-      '조회 방식은 키워드, 키워드+벡터, LLM ID 선택으로 나뉩니다. 기본값은 가장 빠른 키워드 방식입니다.',
+      'FAQ를 생성하거나 수정하면 의미 검색용 벡터가 백그라운드에서 자동 갱신됩니다. 벡터 갱신 버튼은 기존 FAQ를 일괄 재생성할 때 사용합니다.',
+      '용어·동의어 탭에서 Teams/팀즈처럼 여러 FAQ에 공통인 한영 표현과 약어를 관리할 수 있습니다. ‘AI로 용어 찾기’를 실행하면 FAQ와 찾지 못한 질문을 근거로 후보를 제안하며, 승인한 후보만 검색에 적용됩니다.',
+      '조회 방식은 키워드, 키워드+벡터, LLM ID 선택으로 나뉩니다. 기본값은 속도와 표현 대응을 함께 고려한 키워드+벡터 방식입니다.',
     ],
-    note: '답변을 대량 등록했거나 찾기 힌트를 많이 수정한 뒤에는 벡터 갱신을 먼저 실행한 다음 하이브리드 테스트를 진행하는 흐름이 안정적입니다.',
+    note: '기존에 등록된 FAQ가 많고 벡터가 없는 경우에만 벡터 갱신을 한 번 실행하세요. 이후 신규·수정 FAQ는 자동으로 갱신됩니다.',
   },
   {
     key: 'hybrid',
@@ -318,6 +339,21 @@ export default function AnswerHelp() {
         '새 자료를 넣을 때는 FAQ 생성에서 시작합니다. Excel과 DB 표 데이터도 같은 화면에서 연결합니다.',
         '등록된 FAQ의 내용과 검색 설정은 FAQ 목록의 상세 화면에서 함께 확인합니다.',
         '테스트, 개선 대상, 이용 현황은 품질 관리 안에서 목적에 맞게 선택합니다.',
+      ],
+    },
+    {
+      id: 'building',
+      title: '구축 예시',
+      description: 'DB와 Excel의 상세정보로 업무 ID를 찾는 FAQ를 실제 예시로 구성합니다.',
+      icon: <KeyRoundIcon className="h-4 w-4" />,
+      actionTab: 'answer-sources',
+      actionLabel: 'FAQ 생성 열기',
+      summaryTitle: 'ID 찾기 FAQ 핵심',
+      summaryBullets: [
+        '반환 ID 컬럼과 사용자가 검색할 상세정보 컬럼을 분리해 매핑합니다.',
+        '내부 answer_id는 FAQ 관리용이고, 업무 ID는 matched_id로 별도 반환됩니다.',
+        '빈 ID와 같은 상세정보가 서로 다른 ID를 가리키는 행은 생성 전에 정리합니다.',
+        '자연어 질문 컬럼이 부족하면 LLM 일괄 보완을 선택해 대표 질문·키워드·동의어만 추가합니다.',
       ],
     },
     {
@@ -428,6 +464,10 @@ export default function AnswerHelp() {
             goToTab={goToTab}
           />
         )
+      case 'building':
+        return (
+          <BuildingExamplesTopic goToTab={goToTab} />
+        )
       case 'testing':
         return (
           <TestingTopic goToTab={goToTab} />
@@ -482,7 +522,7 @@ export default function AnswerHelp() {
             </Button>
           </div>
 
-          <div className="mt-4 grid w-full gap-3 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7">
+          <div className="mt-4 grid w-full gap-3 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-8">
             {topics.map((topic) => (
               <QuickTopicCard
                 key={topic.id}
@@ -639,6 +679,133 @@ function ScreensTopic({ goToTab }: { goToTab: (tab: AppTab) => void }) {
           <FlowCard title="FAQ 생성" text="직접 작성하거나 텍스트, Excel, URL, DB 표 데이터를 FAQ로 변환합니다." />
           <FlowCard title="품질 관리" text="실제 질문을 테스트하고 개선 대상과 이용 현황을 확인해 찾기 힌트를 보강합니다." />
         </div>
+      </section>
+    </div>
+  )
+}
+
+function BuildingExamplesTopic({ goToTab }: { goToTab: (tab: AppTab) => void }) {
+  const sampleRows = [
+    ['PRD-1042', '삼성', 'AX100', '전원이 켜지지 않음', '공기청정기'],
+    ['PRD-2088', 'LG', 'BX200', '작동 중 큰 소음', '공기청정기'],
+    ['PRD-3110', '삼성', 'CW310', '필터 교체 알림', '공기청정기'],
+  ]
+  return (
+    <div className="grid gap-5">
+      <section className="grid gap-4 rounded-md border p-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)]">
+        <div className="min-w-0">
+          <SectionTitle
+            icon={<KeyRoundIcon className="h-4 w-4" />}
+            title="DB 상세정보로 업무 ID 찾기"
+            description="상품명이나 증상을 질문하면 설명문을 새로 만들지 않고 원본 테이블의 상품 ID를 반환하는 구성입니다."
+            trailing={<Badge variant="outline">ID 찾기 FAQ</Badge>}
+          />
+          <div className="mt-4 overflow-x-auto rounded-md border">
+            <table className="min-w-[720px] w-full text-xs">
+              <thead className="bg-muted/40 text-left">
+                <tr>
+                  {['product_id', 'manufacturer', 'model_name', 'symptom', 'category'].map((column) => (
+                    <th key={column} className="border-b px-3 py-2 font-medium">{column}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {sampleRows.map((row) => (
+                  <tr key={row[0]}>
+                    {row.map((value) => <td key={value} className="px-3 py-2">{value}</td>)}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 text-xs leading-5 text-muted-foreground">
+            실제 DB 연결 위치는 <code className="rounded bg-muted px-1 py-0.5">db://public.product_support</code>처럼 등록합니다.
+            외부 PostgreSQL은 서버 환경변수에 연결 URL을 저장하고 해당 환경변수 이름만 반복 입력 설정에 지정합니다.
+          </p>
+        </div>
+        <div className="min-w-0 overflow-hidden rounded-md border bg-muted/20">
+          <img
+            src={`${webuiPrefix}help/answer-catalog/sources-screen.png`}
+            alt="FAQ 생성 화면에서 Excel과 DB 표 데이터를 매핑하는 화면"
+            className="h-full min-h-64 w-full object-cover object-top"
+            loading="lazy"
+          />
+        </div>
+      </section>
+
+      <section className="rounded-md border bg-muted/20 p-4">
+        <SectionTitle
+          icon={<WorkflowIcon className="h-4 w-4" />}
+          title="화면에서 설정하는 순서"
+          description="FAQ 생성의 Excel 행별 매핑과 반복 입력 설정에서 동일한 기준을 사용합니다."
+        />
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <FlowCard title="1. 변환 목적" text="‘상세정보로 ID 찾기’를 선택합니다. 이 유형은 자동으로 행마다 FAQ 1개를 만드는 방식으로 고정됩니다." />
+          <FlowCard title="2. 반환 ID" text="product_id를 반환 ID로 선택합니다. 이 값은 원본 업무 ID이며 FAQ 내부 answer_id와 다릅니다." />
+          <FlowCard title="3. 검색 상세정보" text="manufacturer, model_name, symptom, category를 제목·대표 질문·분류·찾기 힌트로 매핑합니다." />
+          <FlowCard title="4. 데이터 점검" text="빈 ID, 중복 ID, 같은 상세정보가 서로 다른 ID를 가리키는 행을 확인한 뒤 미게시 FAQ를 생성합니다." />
+        </div>
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-2">
+        <div className="rounded-md border p-4">
+          <SectionTitle
+            icon={<SearchIcon className="h-4 w-4" />}
+            title="질문과 반환 예시"
+            description="상세정보의 표현이 일치하거나 찾기 힌트·벡터가 보강하면 해당 행의 업무 ID가 선택됩니다."
+          />
+          <div className="mt-4 grid gap-3 text-sm">
+            <div className="rounded-md border bg-muted/20 p-3">
+              <div className="text-xs text-muted-foreground">사용자 질문</div>
+              <div className="mt-1 font-medium">삼성 공기청정기인데 전원이 안 켜지는 모델 ID를 알려주세요.</div>
+            </div>
+            <div className="rounded-md border border-emerald-200 bg-emerald-50/60 p-3 dark:border-emerald-900 dark:bg-emerald-950/10">
+              <div className="text-xs text-muted-foreground">선택 결과</div>
+              <div className="mt-1 font-mono font-semibold">matched_id: PRD-1042</div>
+              <div className="mt-2 text-xs leading-5 text-muted-foreground">
+                응답 본문도 PRD-1042이며, 내부 answer_id는 FAQ 버전·게시·이력 관리를 위해 별도로 유지됩니다.
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="rounded-md border p-4">
+          <SectionTitle
+            icon={<FileInputIcon className="h-4 w-4" />}
+            title="API 응답에서 확인할 값"
+            description="외부 시스템은 answer_id 대신 matched_id를 업무 키로 사용합니다."
+          />
+          <pre className="mt-4 overflow-x-auto rounded-md bg-neutral-950 p-4 text-xs leading-5 text-neutral-100">{`{
+  "matched": true,
+  "answer_id": "ANS-7d6a09c1e042",
+  "matched_id": "PRD-1042",
+  "title": "AX100",
+  "response": "PRD-1042",
+  "confidence": 0.91
+}`}</pre>
+          <div className="mt-3 text-xs leading-5 text-muted-foreground">
+            <strong className="text-foreground">answer_id</strong>는 KMS 내부 FAQ 식별자이고,
+            <strong className="ml-1 text-foreground">matched_id</strong>는 원본 테이블의 업무 ID입니다.
+            일반 FAQ에는 matched_id가 비어 있습니다.
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-md border border-amber-200 bg-amber-50/60 p-4 dark:border-amber-900 dark:bg-amber-950/10">
+        <SectionTitle
+          icon={<InfoIcon className="h-4 w-4" />}
+          title="대량 데이터와 정확도 주의사항"
+          description="ID 찾기 FAQ는 자연어 유사도 검색이며 SQL의 다중 조건 정확 조회를 완전히 대체하지 않습니다."
+        />
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <ChecklistItem title="현재 1회 최대 1,000행" text="1,000행을 넘는 Excel 시트나 DB 테이블은 필터 또는 배치로 나누어 변환합니다. 일부 행을 조용히 누락하지 않고 생성 전에 중단합니다." />
+          <ChecklistItem title="모순 데이터 우선 정리" text="같은 제조사·모델·증상 조합이 서로 다른 ID를 가리키면 어떤 ID가 맞는지 결정할 수 없으므로 생성이 차단됩니다." />
+          <ChecklistItem title="힌트가 부족할 때만 LLM 사용" text="제목과 본문만 있어도 기본 검색은 가능합니다. 대표 질문이나 동의어가 부족한 대량 Excel은 ‘힌트가 부족한 FAQ만’을 선택하면 답변 본문을 바꾸지 않고 검색 힌트만 보완합니다." />
+          <ChecklistItem title="정확 조건 조회는 별도 사용" text="코드, 날짜, 수치 조건을 반드시 정확히 비교해야 하면 구조화 데이터 안전 조회 API를 사용하고, 자연어 질문은 FAQ 검색으로 보완합니다." />
+        </div>
+        <Button className="mt-4" onClick={() => goToTab('answer-sources')}>
+          <MousePointerClickIcon className="h-4 w-4" />
+          FAQ 생성에서 예시 적용
+        </Button>
       </section>
     </div>
   )

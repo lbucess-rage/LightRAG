@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import hashlib
 import io
@@ -10,6 +11,7 @@ import os
 import re
 import time
 import traceback
+import unicodedata
 import uuid
 from datetime import date, datetime, timezone
 from typing import Any, Literal, Optional
@@ -36,6 +38,10 @@ RetrievalMode = Literal["keyword", "hybrid", "llm_rerank"]
 StructuredOperator = Literal["contains", "equals", "starts_with", "ends_with"]
 StructuredSourceType = Literal["csv", "json"]
 StructuredMaterializationMode = Literal["table_as_dataset", "row_per_answer"]
+StructuredConversionPurpose = Literal["faq", "id_lookup"]
+GuidanceEnrichmentScope = Literal["missing_or_weak", "coverage", "all"]
+TermCandidateType = Literal["synonym", "abbreviation", "neologism"]
+TermCandidateStatus = Literal["suggested", "approved", "rejected"]
 SourceConnectorType = Literal["manual_table", "db_table", "multi_table", "nosql_collection", "web"]
 SourceConnectorStatus = Literal["draft", "active", "paused", "error"]
 
@@ -55,6 +61,38 @@ GUIDANCE_TYPE_MULTIPLIER = {
     "note": 0.55,
     "negative_keyword": -1.4,
 }
+BUILTIN_ANSWER_ALIAS_GROUPS = [
+    {
+        "alias_id": "builtin-microsoft-teams",
+        "canonical_term": "Microsoft Teams",
+        "aliases": ["Teams", "MS Teams", "팀즈", "마이크로소프트 팀즈"],
+    },
+    {
+        "alias_id": "builtin-microsoft-outlook",
+        "canonical_term": "Microsoft Outlook",
+        "aliases": ["Outlook", "MS Outlook", "아웃룩", "마이크로소프트 아웃룩"],
+    },
+    {
+        "alias_id": "builtin-microsoft-onedrive",
+        "canonical_term": "Microsoft OneDrive",
+        "aliases": ["OneDrive", "원드라이브", "마이크로소프트 원드라이브"],
+    },
+    {
+        "alias_id": "builtin-wifi",
+        "canonical_term": "Wi-Fi",
+        "aliases": ["WiFi", "와이파이", "무선랜", "무선 네트워크"],
+    },
+    {
+        "alias_id": "builtin-bluetooth",
+        "canonical_term": "Bluetooth",
+        "aliases": ["블루투스", "BT"],
+    },
+    {
+        "alias_id": "builtin-vpn",
+        "canonical_term": "VPN",
+        "aliases": ["가상 사설망", "가상사설망", "사내 VPN"],
+    },
+]
 
 
 def set_rag_workspace_getter(getter_func):
@@ -209,6 +247,37 @@ async def _ensure_tables(db) -> None:
         )
         """,
         """
+        CREATE TABLE IF NOT EXISTS LIGHTRAG_ANSWER_TERM_ALIASES (
+            alias_id TEXT PRIMARY KEY,
+            workspace TEXT NOT NULL,
+            canonical_term TEXT NOT NULL,
+            aliases JSONB NOT NULL DEFAULT '[]'::jsonb,
+            enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            source TEXT NOT NULL DEFAULT 'workspace',
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            create_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            update_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS LIGHTRAG_ANSWER_TERM_CANDIDATES (
+            candidate_id TEXT PRIMARY KEY,
+            workspace TEXT NOT NULL,
+            candidate_key TEXT NOT NULL,
+            canonical_term TEXT NOT NULL,
+            aliases JSONB NOT NULL DEFAULT '[]'::jsonb,
+            term_type TEXT NOT NULL DEFAULT 'synonym',
+            status TEXT NOT NULL DEFAULT 'suggested',
+            confidence DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+            rationale TEXT,
+            evidence JSONB NOT NULL DEFAULT '[]'::jsonb,
+            source TEXT NOT NULL DEFAULT 'llm',
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            create_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            update_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        """
         CREATE TABLE IF NOT EXISTS LIGHTRAG_ANSWER_EVENTS (
             event_id TEXT PRIMARY KEY,
             workspace TEXT NOT NULL,
@@ -308,6 +377,10 @@ async def _ensure_tables(db) -> None:
         "CREATE INDEX IF NOT EXISTS IDX_ANSWERS_WORKSPACE_STATUS ON LIGHTRAG_ANSWER_ITEMS(workspace, status)",
         "CREATE INDEX IF NOT EXISTS IDX_ANSWERS_WORKSPACE_UPDATE ON LIGHTRAG_ANSWER_ITEMS(workspace, update_time DESC)",
         "CREATE INDEX IF NOT EXISTS IDX_ANSWER_GUIDANCE_WORKSPACE_ANSWER ON LIGHTRAG_ANSWER_GUIDANCE(workspace, answer_id)",
+        "CREATE INDEX IF NOT EXISTS IDX_ANSWER_TERM_ALIASES_WORKSPACE ON LIGHTRAG_ANSWER_TERM_ALIASES(workspace, enabled)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS UIDX_ANSWER_TERM_ALIASES_WORKSPACE_CANONICAL ON LIGHTRAG_ANSWER_TERM_ALIASES(workspace, LOWER(canonical_term))",
+        "CREATE INDEX IF NOT EXISTS IDX_ANSWER_TERM_CANDIDATES_WORKSPACE_STATUS ON LIGHTRAG_ANSWER_TERM_CANDIDATES(workspace, status, update_time DESC)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS UIDX_ANSWER_TERM_CANDIDATES_WORKSPACE_KEY ON LIGHTRAG_ANSWER_TERM_CANDIDATES(workspace, candidate_key)",
         "CREATE INDEX IF NOT EXISTS IDX_ANSWER_EVENTS_WORKSPACE_TIME ON LIGHTRAG_ANSWER_EVENTS(workspace, create_time DESC)",
         "CREATE UNIQUE INDEX IF NOT EXISTS UIDX_ANSWER_VECTORS_WORKSPACE_ANSWER_KIND ON LIGHTRAG_ANSWER_VECTORS(workspace, answer_id, vector_kind)",
         "CREATE INDEX IF NOT EXISTS IDX_ANSWER_VECTORS_WORKSPACE_UPDATE ON LIGHTRAG_ANSWER_VECTORS(workspace, update_time DESC)",
@@ -354,6 +427,67 @@ class AnswerGuidance(BaseModel):
     weight: float = 1.0
     metadata: dict[str, Any] = Field(default_factory=dict)
     create_time: Optional[str] = None
+
+
+class AnswerAliasGroup(BaseModel):
+    alias_id: str
+    workspace: str
+    canonical_term: str
+    aliases: list[str] = Field(default_factory=list)
+    enabled: bool = True
+    source: str = "workspace"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    create_time: Optional[str] = None
+    update_time: Optional[str] = None
+
+
+class AnswerAliasCreateRequest(BaseModel):
+    canonical_term: str = Field(..., min_length=2, max_length=200)
+    aliases: list[str] = Field(default_factory=list, max_length=30)
+    enabled: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AnswerAliasExpansion(BaseModel):
+    canonical_term: str
+    matched_term: str
+    expanded_terms: list[str] = Field(default_factory=list)
+    source: str = "workspace"
+
+
+class AnswerTermCandidate(BaseModel):
+    candidate_id: str
+    workspace: str
+    canonical_term: str
+    aliases: list[str] = Field(default_factory=list)
+    term_type: TermCandidateType = "synonym"
+    status: TermCandidateStatus = "suggested"
+    confidence: float = 0.0
+    rationale: Optional[str] = None
+    evidence: list[dict[str, Any]] = Field(default_factory=list)
+    source: str = "llm"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    create_time: Optional[str] = None
+    update_time: Optional[str] = None
+
+
+class AnswerTermDiscoveryRequest(BaseModel):
+    include_drafts: bool = True
+    include_no_match_queries: bool = True
+    answer_limit: int = Field(default=1000, ge=1, le=5000)
+    event_limit: int = Field(default=300, ge=0, le=2000)
+    batch_size: int = Field(default=20, ge=5, le=40)
+
+
+class AnswerTermDiscoveryResponse(BaseModel):
+    task_id: str
+    stream_url: str
+    message: str
+
+
+class AnswerTermCandidateActionResponse(BaseModel):
+    candidate: AnswerTermCandidate
+    alias_group: Optional[AnswerAliasGroup] = None
 
 
 class AnswerRevision(BaseModel):
@@ -456,7 +590,7 @@ class ResolveRequest(BaseModel):
     include_drafts: bool = False
     strategy: ResolveStrategy = "balanced"
     retrieval_mode: RetrievalMode = Field(
-        default="keyword",
+        default="hybrid",
         description="keyword keeps the current deterministic scorer, hybrid adds optional answer vectors, llm_rerank lets the LLM choose only from candidate IDs.",
     )
     vector_top_k: int = Field(default=8, ge=1, le=50)
@@ -478,12 +612,17 @@ class ResolveCandidate(BaseModel):
 
 class ResolveResponse(BaseModel):
     selected_answer: Optional[AnswerItem]
+    matched_id: Optional[str] = Field(
+        default=None,
+        description="Business ID returned by an ID-lookup FAQ. This is separate from the internal answer_id.",
+    )
     confidence: float
     candidates: list[ResolveCandidate]
     trace_id: str
     rationale: str
-    retrieval_mode: RetrievalMode = "keyword"
+    retrieval_mode: RetrievalMode = "hybrid"
     selected_by: str = "keyword"
+    alias_expansions: list[AnswerAliasExpansion] = Field(default_factory=list)
 
 
 class AnswerSearchRequest(BaseModel):
@@ -492,7 +631,7 @@ class AnswerSearchRequest(BaseModel):
     min_score: float = Field(default=0.18, ge=0.0, le=1.0)
     include_drafts: bool = False
     strategy: ResolveStrategy = "balanced"
-    retrieval_mode: RetrievalMode = "keyword"
+    retrieval_mode: RetrievalMode = "hybrid"
     vector_top_k: int = Field(default=8, ge=1, le=50)
     llm_candidate_count: int = Field(default=5, ge=1, le=10)
     allowed_answer_ids: Optional[list[str]] = None
@@ -503,6 +642,10 @@ class AnswerSearchRequest(BaseModel):
 class AnswerSearchResponse(BaseModel):
     matched: bool
     answer_id: Optional[str] = None
+    matched_id: Optional[str] = Field(
+        default=None,
+        description="Business ID returned by an ID-lookup FAQ. This is separate from the internal answer_id.",
+    )
     title: Optional[str] = None
     response: Optional[str] = None
     summary: Optional[str] = None
@@ -520,8 +663,9 @@ class AnswerSearchResponse(BaseModel):
     candidates: list[ResolveCandidate] = Field(default_factory=list)
     trace_id: str
     rationale: str
-    retrieval_mode: RetrievalMode = "keyword"
+    retrieval_mode: RetrievalMode = "hybrid"
     selected_by: str = "keyword"
+    alias_expansions: list[AnswerAliasExpansion] = Field(default_factory=list)
 
 
 class AnswerViewRequest(BaseModel):
@@ -699,6 +843,36 @@ class ExcelPreviewResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class BatchGuidanceEnrichmentConfig(BaseModel):
+    enabled: bool = Field(
+        default=False,
+        description=(
+            "After FAQ drafts are created, add LLM-generated representative questions, "
+            "keywords, and synonyms without changing answer content."
+        ),
+    )
+    scope: GuidanceEnrichmentScope = Field(
+        default="coverage",
+        description=(
+            "missing_or_weak enriches only answers missing a question or keyword/synonym; "
+            "coverage also checks representative-question, synonym, colloquial, and bilingual "
+            "search coverage; all enriches every generated answer."
+        ),
+    )
+    batch_size: int = Field(
+        default=10,
+        ge=1,
+        le=20,
+        description="Number of FAQ answers included in each LLM request.",
+    )
+    max_suggestions: int = Field(
+        default=5,
+        ge=1,
+        le=8,
+        description="Maximum new finding hints accepted per FAQ answer.",
+    )
+
+
 class StructuredMaterializeRequest(BaseModel):
     source_type: StructuredSourceType = "csv"
     raw_content: str = Field(..., min_length=1)
@@ -712,8 +886,25 @@ class StructuredMaterializeRequest(BaseModel):
     mapping: dict[str, str] = Field(default_factory=dict)
     guidance_columns: list[str] = Field(default_factory=list)
     materialization_mode: StructuredMaterializationMode = "table_as_dataset"
+    conversion_purpose: StructuredConversionPurpose = "faq"
     source_truncated: bool = False
+    llm_guidance_enrichment: BatchGuidanceEnrichmentConfig = Field(
+        default_factory=BatchGuidanceEnrichmentConfig
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class StructuredIdLookupValidation(BaseModel):
+    enabled: bool = False
+    ready: bool = True
+    id_column: Optional[str] = None
+    searchable_columns: list[str] = Field(default_factory=list)
+    row_count: int = 0
+    valid_id_count: int = 0
+    blank_id_rows: list[int] = Field(default_factory=list)
+    duplicate_ids: list[str] = Field(default_factory=list)
+    ambiguous_detail_groups: list[dict[str, Any]] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class StructuredMaterializeResponse(BaseModel):
@@ -729,6 +920,11 @@ class StructuredMaterializeResponse(BaseModel):
     guidance_truncated: bool = False
     snapshot: Optional[AnswerSourceSnapshot] = None
     source_link: Optional[AnswerSourceLink] = None
+    validation: StructuredIdLookupValidation = Field(default_factory=StructuredIdLookupValidation)
+    guidance_enrichment_task_id: Optional[str] = None
+    guidance_enrichment_stream_url: Optional[str] = None
+    vector_rebuild_task_id: Optional[str] = None
+    vector_rebuild_stream_url: Optional[str] = None
 
 
 class StructuredLookupLog(BaseModel):
@@ -802,7 +998,9 @@ class SourceConnectorSampleResponse(BaseModel):
 
 class SourceConnectorMappingPreviewRequest(BaseModel):
     mapping: dict[str, str] = Field(default_factory=dict)
+    guidance_columns: list[str] = Field(default_factory=list)
     materialization_mode: StructuredMaterializationMode = "table_as_dataset"
+    conversion_purpose: StructuredConversionPurpose = "faq"
 
 
 class SourceConnectorMappingPreviewResponse(BaseModel):
@@ -812,6 +1010,7 @@ class SourceConnectorMappingPreviewResponse(BaseModel):
     mapping: dict[str, str] = Field(default_factory=dict)
     guidance_columns: list[str] = Field(default_factory=list)
     materialization_modes: list[StructuredMaterializationMode] = Field(default_factory=list)
+    validation: StructuredIdLookupValidation = Field(default_factory=StructuredIdLookupValidation)
 
 
 class SourceConnectorMaterializeRequest(BaseModel):
@@ -819,6 +1018,7 @@ class SourceConnectorMaterializeRequest(BaseModel):
     mapping: dict[str, str] = Field(default_factory=dict)
     guidance_columns: list[str] = Field(default_factory=list)
     materialization_mode: StructuredMaterializationMode = "table_as_dataset"
+    conversion_purpose: StructuredConversionPurpose = "faq"
     status: AnswerStatus = "draft"
     tags: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -873,6 +1073,53 @@ def _guidance_from_row(row: dict[str, Any]) -> AnswerGuidance:
         weight=float(row.get("weight") or 1.0),
         metadata=metadata,
         create_time=_iso(row.get("create_time")),
+    )
+
+
+def _alias_group_from_row(row: dict[str, Any]) -> AnswerAliasGroup:
+    aliases = _coerce_json(row.get("aliases"), [])
+    if not isinstance(aliases, list):
+        aliases = []
+    metadata = _coerce_json(row.get("metadata"), {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+    return AnswerAliasGroup(
+        alias_id=str(row["alias_id"]),
+        workspace=str(row["workspace"]),
+        canonical_term=str(row["canonical_term"]),
+        aliases=[str(item) for item in aliases if str(item).strip()],
+        enabled=bool(row.get("enabled", True)),
+        source=str(row.get("source") or "workspace"),
+        metadata=metadata,
+        create_time=_iso(row.get("create_time")),
+        update_time=_iso(row.get("update_time")),
+    )
+
+
+def _term_candidate_from_row(row: dict[str, Any]) -> AnswerTermCandidate:
+    aliases = _coerce_json(row.get("aliases"), [])
+    evidence = _coerce_json(row.get("evidence"), [])
+    metadata = _coerce_json(row.get("metadata"), {})
+    return AnswerTermCandidate(
+        candidate_id=str(row["candidate_id"]),
+        workspace=str(row["workspace"]),
+        canonical_term=str(row["canonical_term"]),
+        aliases=[str(item) for item in aliases if str(item).strip()]
+        if isinstance(aliases, list)
+        else [],
+        term_type=str(row.get("term_type") or "synonym"),
+        status=str(row.get("status") or "suggested"),
+        confidence=_safe_float(row.get("confidence"), 0.0, 0.0, 1.0),
+        rationale=str(row.get("rationale") or "") or None,
+        evidence=[
+            dict(item) for item in evidence if isinstance(item, dict)
+        ]
+        if isinstance(evidence, list)
+        else [],
+        source=str(row.get("source") or "llm"),
+        metadata=metadata if isinstance(metadata, dict) else {},
+        create_time=_iso(row.get("create_time")),
+        update_time=_iso(row.get("update_time")),
     )
 
 
@@ -1851,6 +2098,7 @@ def _guidance_from_structured_profile(
     rows: list[dict[str, Any]],
     mapping: dict[str, str],
     guidance_columns: list[str],
+    conversion_purpose: StructuredConversionPurpose = "faq",
 ) -> list[SourceGuidanceCandidate]:
     candidates: list[SourceGuidanceCandidate] = []
     seen: set[tuple[str, str]] = set()
@@ -1877,7 +2125,17 @@ def _guidance_from_structured_profile(
     title_column = mapping.get("title")
     category_column = mapping.get("category")
     answer_column = mapping.get("answer")
+    lookup_columns = _id_lookup_searchable_columns(mapping, guidance_columns)
     for row in rows[:100]:
+        if conversion_purpose == "id_lookup":
+            combined_details = " ".join(
+                dict.fromkeys(
+                    str(row.get(column) or "").strip()
+                    for column in lookup_columns
+                    if str(row.get(column) or "").strip()
+                )
+            )
+            add("question", combined_details, 1.35, "id_lookup_details")
         if question_column:
             add("question", row.get(question_column), 1.25, question_column)
         if title_column:
@@ -1924,6 +2182,111 @@ def _guidance_from_structured_profile(
     return candidates[:80]
 
 
+def _id_lookup_searchable_columns(
+    mapping: dict[str, str],
+    guidance_columns: list[str],
+) -> list[str]:
+    id_column = mapping.get("id")
+    columns: list[str] = []
+    for role in ("question", "title", "category", "answer"):
+        column = mapping.get(role)
+        if column and column != id_column and column not in columns:
+            columns.append(column)
+    for column in guidance_columns:
+        if column and column != id_column and column not in columns:
+            columns.append(column)
+    return columns
+
+
+def _validate_id_lookup_rows(
+    rows: list[dict[str, Any]],
+    mapping: dict[str, str],
+    guidance_columns: list[str],
+    conversion_purpose: StructuredConversionPurpose,
+) -> StructuredIdLookupValidation:
+    if conversion_purpose != "id_lookup":
+        return StructuredIdLookupValidation()
+
+    id_column = mapping.get("id")
+    searchable_columns = _id_lookup_searchable_columns(mapping, guidance_columns)
+    blank_id_rows: list[int] = []
+    id_rows: dict[str, list[int]] = {}
+    detail_groups: dict[tuple[str, ...], dict[str, Any]] = {}
+
+    if id_column:
+        for row_index, row in enumerate(rows, start=1):
+            source_id = str(row.get(id_column) or "").strip()
+            if not source_id:
+                blank_id_rows.append(row_index)
+                continue
+            id_rows.setdefault(source_id, []).append(row_index)
+            fingerprint = tuple(
+                _normalise_text(str(row.get(column) or ""))
+                for column in searchable_columns
+            )
+            if any(fingerprint):
+                group = detail_groups.setdefault(
+                    fingerprint,
+                    {
+                        "values": {
+                            column: str(row.get(column) or "").strip()
+                            for column in searchable_columns
+                        },
+                        "ids": set(),
+                        "rows": [],
+                    },
+                )
+                group["ids"].add(source_id)
+                group["rows"].append(row_index)
+
+    duplicate_ids = sorted(
+        source_id
+        for source_id, source_rows in id_rows.items()
+        if len(source_rows) > 1
+    )
+    ambiguous_detail_groups = [
+        {
+            "values": group["values"],
+            "ids": sorted(group["ids"]),
+            "rows": group["rows"][:20],
+        }
+        for group in detail_groups.values()
+        if len(group["ids"]) > 1
+    ][:20]
+
+    warnings: list[str] = []
+    if not id_column:
+        warnings.append("Select the business ID column to return.")
+    if not searchable_columns:
+        warnings.append("Select at least one detail column to search.")
+    if blank_id_rows:
+        warnings.append(f"{len(blank_id_rows)} rows have an empty business ID.")
+    if duplicate_ids:
+        warnings.append(
+            f"{len(duplicate_ids)} business IDs appear in more than one row. "
+            "They can be created, but duplicate FAQ candidates may be returned."
+        )
+    if ambiguous_detail_groups:
+        warnings.append(
+            f"{len(ambiguous_detail_groups)} detail combinations point to different business IDs."
+        )
+
+    return StructuredIdLookupValidation(
+        enabled=True,
+        ready=bool(id_column and searchable_columns)
+        and not blank_id_rows
+        and not ambiguous_detail_groups,
+        id_column=id_column,
+        searchable_columns=searchable_columns,
+        row_count=len(rows),
+        valid_id_count=sum(len(source_rows) for source_rows in id_rows.values()),
+        blank_id_rows=blank_id_rows[:100],
+        duplicate_ids=duplicate_ids[:100],
+        ambiguous_detail_groups=ambiguous_detail_groups,
+        warnings=warnings,
+    )
+
+
 def _structured_row_text(row: dict[str, Any], column: Optional[str]) -> str:
     if not column:
         return ""
@@ -1943,7 +2306,13 @@ def _title_for_structured_row(
     return f"{base_title} #{row_index + 1}"
 
 
-def _body_for_structured_row(row: dict[str, Any], mapping: dict[str, str]) -> str:
+def _body_for_structured_row(
+    row: dict[str, Any],
+    mapping: dict[str, str],
+    conversion_purpose: StructuredConversionPurpose = "faq",
+) -> str:
+    if conversion_purpose == "id_lookup":
+        return _structured_row_text(row, mapping.get("id"))
     body = _structured_row_text(row, mapping.get("answer"))
     if body:
         return body
@@ -1954,7 +2323,10 @@ def _summary_for_structured_row(
     row: dict[str, Any],
     mapping: dict[str, str],
     fallback: Optional[str],
+    conversion_purpose: StructuredConversionPurpose = "faq",
 ) -> Optional[str]:
+    if conversion_purpose == "id_lookup":
+        return None
     summary = _structured_row_text(row, mapping.get("answer"))
     return summary or fallback
 
@@ -2143,7 +2515,8 @@ def _normalise_answer_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
 
 
 def _normalise_text(value: Any) -> str:
-    return " ".join(str(value or "").lower().split())
+    normalized = unicodedata.normalize("NFKC", str(value or ""))
+    return " ".join(normalized.lower().split())
 
 
 def _tokens(value: Any) -> list[str]:
@@ -2160,6 +2533,116 @@ def _candidate_query_terms(value: Any) -> list[str]:
             if len(variant) >= 2 and variant not in terms:
                 terms.append(variant)
     return terms[:64]
+
+
+def _builtin_alias_groups() -> list[AnswerAliasGroup]:
+    return [
+        AnswerAliasGroup(
+            alias_id=str(item["alias_id"]),
+            workspace="*",
+            canonical_term=str(item["canonical_term"]),
+            aliases=[str(alias) for alias in item["aliases"]],
+            enabled=True,
+            source="builtin",
+            metadata={"read_only": True},
+        )
+        for item in BUILTIN_ANSWER_ALIAS_GROUPS
+    ]
+
+
+def _alias_member_matches_query(normalized_query: str, member: str) -> bool:
+    normalized_member = _normalise_text(member)
+    if len(normalized_member) < 2:
+        return False
+    if re.search(r"[가-힣]", normalized_member):
+        return normalized_member in normalized_query
+    pattern = rf"(?<![0-9a-z_]){re.escape(normalized_member)}(?![0-9a-z_])"
+    return re.search(pattern, normalized_query) is not None
+
+
+async def _answer_alias_groups(db, workspace: str) -> list[AnswerAliasGroup]:
+    rows = await db.query(
+        """
+        SELECT alias_id, workspace, canonical_term, aliases, enabled, source,
+               metadata, create_time, update_time
+        FROM LIGHTRAG_ANSWER_TERM_ALIASES
+        WHERE workspace = $1 AND enabled = TRUE
+        ORDER BY LOWER(canonical_term), alias_id
+        """,
+        [workspace],
+        multirows=True,
+    )
+    return [*_builtin_alias_groups(), *[_alias_group_from_row(dict(row)) for row in rows or []]]
+
+
+async def _expand_query_aliases(
+    db,
+    workspace: str,
+    query: str,
+) -> list[AnswerAliasExpansion]:
+    normalized_query = _normalise_text(query)
+    expansions: list[AnswerAliasExpansion] = []
+    seen_canonical: set[str] = set()
+    for group in await _answer_alias_groups(db, workspace):
+        members = [group.canonical_term, *group.aliases]
+        matched_term = next(
+            (
+                member
+                for member in members
+                if _alias_member_matches_query(normalized_query, member)
+            ),
+            None,
+        )
+        canonical_key = _normalise_text(group.canonical_term)
+        if not matched_term or canonical_key in seen_canonical:
+            continue
+        seen_canonical.add(canonical_key)
+        expanded_terms: list[str] = []
+        for member in members:
+            value = " ".join(str(member or "").split())
+            if value and _normalise_text(value) not in {
+                _normalise_text(item) for item in expanded_terms
+            }:
+                expanded_terms.append(value)
+        expansions.append(
+            AnswerAliasExpansion(
+                canonical_term=group.canonical_term,
+                matched_term=matched_term,
+                expanded_terms=expanded_terms,
+                source=group.source,
+            )
+        )
+    return expansions
+
+
+def _alias_query_variants(
+    query: str,
+    alias_expansions: Optional[list[AnswerAliasExpansion]] = None,
+) -> list[str]:
+    variants = [_normalise_text(query)]
+    for expansion in alias_expansions or []:
+        matched_term = _normalise_text(expansion.matched_term)
+        if not matched_term:
+            continue
+        current_variants = list(variants)
+        for current in current_variants:
+            if not _alias_member_matches_query(current, matched_term):
+                continue
+            for expanded_term in expansion.expanded_terms:
+                replacement = _normalise_text(expanded_term)
+                if not replacement:
+                    continue
+                if re.search(r"[가-힣]", matched_term):
+                    candidate = current.replace(matched_term, replacement)
+                else:
+                    pattern = rf"(?<![0-9a-z_]){re.escape(matched_term)}(?![0-9a-z_])"
+                    candidate = re.sub(pattern, replacement, current)
+                candidate = " ".join(candidate.split())
+                if candidate and candidate not in variants:
+                    variants.append(candidate)
+                if len(variants) >= 32:
+                    return variants
+    return variants
 
 
 def _partial_overlap(query_tokens: list[str], text: str) -> float:
@@ -2210,6 +2693,16 @@ def _search_answer_view(answer: AnswerItem) -> AnswerItem:
     if hasattr(answer, "model_copy"):
         return answer.model_copy(update={"metadata": compact_metadata})
     return answer.copy(update={"metadata": compact_metadata})
+
+
+def _matched_business_id(answer: Optional[AnswerItem]) -> Optional[str]:
+    if answer is None or not isinstance(answer.metadata, dict):
+        return None
+    if answer.metadata.get("conversion_purpose") != "id_lookup":
+        return None
+    matched_id = answer.metadata.get("matched_id") or answer.metadata.get("source_id")
+    text = str(matched_id or "").strip()
+    return text or None
 
 
 def _embedding_func_from_rag(rag):
@@ -2355,6 +2848,141 @@ async def _ensure_answer_vector(
     return embedding
 
 
+async def _rebuild_answer_vectors_for_ids(
+    *,
+    db,
+    workspace: str,
+    rag,
+    answer_ids: list[str],
+    task_id: Optional[str] = None,
+    progress_start: float = 0.0,
+    progress_span: float = 95.0,
+) -> dict[str, Any]:
+    if not answer_ids:
+        return {"processed": 0, "rebuilt": 0, "failed": []}
+    if _embedding_func_from_rag(rag) is None:
+        return {
+            "processed": 0,
+            "rebuilt": 0,
+            "failed": list(answer_ids),
+            "status": "embedding_unavailable",
+        }
+    rows = await db.query(
+        """
+        SELECT workspace, answer_id, title, body, approved_summary, content_format,
+               display_policy, status, version, valid_from, valid_until, priority,
+               tags, metadata, publish_time, create_time, update_time
+        FROM LIGHTRAG_ANSWER_ITEMS
+        WHERE workspace = $1 AND answer_id = ANY($2::text[])
+        ORDER BY update_time DESC, answer_id
+        """,
+        [workspace, answer_ids],
+        multirows=True,
+    )
+    existing_ids = [str(row["answer_id"]) for row in rows or []]
+    guidance_rows = await db.query(
+        """
+        SELECT guidance_id, workspace, answer_id, guidance_type, text, weight,
+               metadata, create_time
+        FROM LIGHTRAG_ANSWER_GUIDANCE
+        WHERE workspace = $1 AND answer_id = ANY($2::text[])
+        """,
+        [workspace, existing_ids],
+        multirows=True,
+    )
+    guidance_by_answer: dict[str, list[AnswerGuidance]] = {}
+    for row in guidance_rows or []:
+        guidance = _guidance_from_row(dict(row))
+        guidance_by_answer.setdefault(guidance.answer_id, []).append(guidance)
+
+    service = None
+    if task_id:
+        from lightrag.api.task_manager import get_task_service
+
+        service = get_task_service()
+    rebuilt = 0
+    failed: list[str] = []
+    total = len(rows or [])
+    for index, row in enumerate(rows or []):
+        answer = _answer_from_row(dict(row))
+        embedding = await _ensure_answer_vector(
+            db,
+            workspace,
+            rag,
+            answer,
+            guidance_by_answer.get(answer.answer_id, []),
+        )
+        if embedding:
+            rebuilt += 1
+        else:
+            failed.append(answer.answer_id)
+        if service and task_id:
+            await service.update_progress(
+                task_id,
+                min(
+                    99.0,
+                    progress_start + ((index + 1) / max(total, 1)) * progress_span,
+                ),
+                f"FAQ vector {index + 1}/{total} prepared",
+                detail={
+                    "vector_processed": index + 1,
+                    "vector_rebuilt": rebuilt,
+                    "vector_failed": len(failed),
+                },
+            )
+    return {
+        "processed": total,
+        "rebuilt": rebuilt,
+        "failed": failed,
+    }
+
+
+async def _rebuild_answer_vectors_background(
+    *,
+    task_id: str,
+    workspace: str,
+    db,
+    rag,
+    answer_ids: list[str],
+) -> None:
+    from lightrag.api.task_manager import get_task_service
+
+    service = get_task_service()
+    result = await _rebuild_answer_vectors_for_ids(
+        db=db,
+        workspace=workspace,
+        rag=rag,
+        answer_ids=answer_ids,
+        task_id=task_id,
+    )
+    await service.complete_task(task_id, result=result)
+
+
+async def _refresh_answer_vector_safely(
+    *,
+    db,
+    workspace: str,
+    answer_id: str,
+) -> None:
+    try:
+        workspace_rag = await get_workspace_rag(workspace)
+        if workspace_rag is None:
+            return
+        await _rebuild_answer_vectors_for_ids(
+            db=db,
+            workspace=workspace,
+            rag=workspace_rag,
+            answer_ids=[answer_id],
+        )
+    except Exception as exc:
+        logger.warning(
+            "[Answers] Automatic vector refresh failed workspace=%s answer=%s: %s",
+            workspace,
+            answer_id,
+            exc,
+        )
+
+
 async def _answer_vector_scores(
     db,
     workspace: str,
@@ -2450,6 +3078,395 @@ def _extract_json_array(text: str) -> list[Any]:
     except json.JSONDecodeError:
         return []
     return parsed if isinstance(parsed, list) else []
+
+
+def _parse_term_discovery_candidates(
+    raw: str,
+    known_groups: list[AnswerAliasGroup],
+    evidence_lookup: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    member_to_canonical: dict[str, str] = {}
+    canonical_members: dict[str, set[str]] = {}
+    for group in known_groups:
+        canonical_key = _normalise_text(group.canonical_term)
+        members = {canonical_key}
+        members.update(_normalise_text(alias) for alias in group.aliases)
+        canonical_members.setdefault(canonical_key, set()).update(members)
+        for member in members:
+            member_to_canonical.setdefault(member, group.canonical_term)
+
+    candidates_by_key: dict[str, dict[str, Any]] = {}
+    allowed_types = {"synonym", "abbreviation", "neologism"}
+    for item in _extract_json_array(raw):
+        if not isinstance(item, dict):
+            continue
+        canonical_term = " ".join(str(item.get("canonical_term") or "").split())
+        canonical_key = _normalise_text(canonical_term)
+        if len(canonical_term) < 2 or len(canonical_term) > 200:
+            continue
+
+        known_canonical = member_to_canonical.get(canonical_key)
+        if known_canonical:
+            canonical_term = known_canonical
+            canonical_key = _normalise_text(known_canonical)
+
+        aliases: list[str] = []
+        seen = {canonical_key}
+        for raw_alias in item.get("aliases") or []:
+            alias = " ".join(str(raw_alias or "").split())
+            alias_key = _normalise_text(alias)
+            if len(alias) < 2 or len(alias) > 200 or alias_key in seen:
+                continue
+            existing_canonical = member_to_canonical.get(alias_key)
+            if (
+                existing_canonical
+                and _normalise_text(existing_canonical) != canonical_key
+            ):
+                continue
+            if alias_key in canonical_members.get(canonical_key, set()):
+                continue
+            seen.add(alias_key)
+            aliases.append(alias)
+        if not aliases:
+            continue
+
+        evidence_refs = item.get("evidence_refs") or []
+        evidence = [
+            evidence_lookup[str(ref)]
+            for ref in evidence_refs
+            if str(ref) in evidence_lookup
+        ][:20]
+        term_type = str(item.get("term_type") or "synonym")
+        if term_type not in allowed_types:
+            term_type = "synonym"
+        confidence = _safe_float(item.get("confidence"), 0.5, 0.0, 1.0)
+        rationale = " ".join(str(item.get("rationale") or "").split())[:1000]
+
+        existing = candidates_by_key.get(canonical_key)
+        if existing is None:
+            candidates_by_key[canonical_key] = {
+                "candidate_key": canonical_key,
+                "canonical_term": canonical_term,
+                "aliases": aliases,
+                "term_type": term_type,
+                "confidence": confidence,
+                "rationale": rationale,
+                "evidence": evidence,
+            }
+            continue
+
+        existing_alias_keys = {
+            _normalise_text(alias) for alias in existing["aliases"]
+        }
+        existing["aliases"].extend(
+            alias
+            for alias in aliases
+            if _normalise_text(alias) not in existing_alias_keys
+        )
+        existing["confidence"] = max(existing["confidence"], confidence)
+        if len(rationale) > len(existing["rationale"]):
+            existing["rationale"] = rationale
+        existing_evidence_refs = {
+            str(entry.get("ref")) for entry in existing["evidence"]
+        }
+        existing["evidence"].extend(
+            entry
+            for entry in evidence
+            if str(entry.get("ref")) not in existing_evidence_refs
+        )
+
+    return list(candidates_by_key.values())
+
+
+async def _upsert_term_discovery_candidate(
+    *,
+    db,
+    workspace: str,
+    candidate: dict[str, Any],
+    task_id: str,
+) -> bool:
+    existing = await db.query(
+        """
+        SELECT candidate_id, status, aliases, evidence, confidence, rationale
+        FROM LIGHTRAG_ANSWER_TERM_CANDIDATES
+        WHERE workspace = $1 AND candidate_key = $2
+        """,
+        [workspace, candidate["candidate_key"]],
+    )
+    if existing and str(existing.get("status")) in {"approved", "rejected"}:
+        return False
+
+    aliases = list(candidate["aliases"])
+    evidence = list(candidate["evidence"])
+    confidence = float(candidate["confidence"])
+    rationale = str(candidate["rationale"])
+    if existing:
+        existing_aliases = _coerce_json(existing.get("aliases"), [])
+        alias_keys = {_normalise_text(alias) for alias in aliases}
+        for alias in existing_aliases if isinstance(existing_aliases, list) else []:
+            if _normalise_text(alias) not in alias_keys:
+                aliases.append(str(alias))
+                alias_keys.add(_normalise_text(alias))
+        existing_evidence = _coerce_json(existing.get("evidence"), [])
+        evidence_refs = {str(item.get("ref")) for item in evidence}
+        for item in existing_evidence if isinstance(existing_evidence, list) else []:
+            if isinstance(item, dict) and str(item.get("ref")) not in evidence_refs:
+                evidence.append(item)
+        confidence = max(
+            confidence,
+            _safe_float(existing.get("confidence"), 0.0, 0.0, 1.0),
+        )
+        if not rationale:
+            rationale = str(existing.get("rationale") or "")
+
+    await db.query(
+        """
+        INSERT INTO LIGHTRAG_ANSWER_TERM_CANDIDATES
+            (
+                candidate_id, workspace, candidate_key, canonical_term, aliases,
+                term_type, status, confidence, rationale, evidence, source, metadata
+            )
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6, 'suggested', $7, $8,
+                $9::jsonb, 'llm', $10::jsonb)
+        ON CONFLICT (workspace, candidate_key)
+        DO UPDATE SET
+            canonical_term = EXCLUDED.canonical_term,
+            aliases = EXCLUDED.aliases,
+            term_type = EXCLUDED.term_type,
+            confidence = EXCLUDED.confidence,
+            rationale = EXCLUDED.rationale,
+            evidence = EXCLUDED.evidence,
+            metadata = LIGHTRAG_ANSWER_TERM_CANDIDATES.metadata || EXCLUDED.metadata,
+            update_time = NOW()
+        """,
+        [
+            str(existing.get("candidate_id"))
+            if existing
+            else f"aterm-{uuid.uuid4().hex[:16]}",
+            workspace,
+            candidate["candidate_key"],
+            candidate["canonical_term"],
+            _json_list(aliases[:30]),
+            candidate["term_type"],
+            confidence,
+            rationale,
+            _json(evidence[:30]),
+            _json({"last_task_id": task_id}),
+        ],
+    )
+    return True
+
+
+async def _discover_answer_terms_background(
+    *,
+    task_id: str,
+    workspace: str,
+    db,
+    rag,
+    include_drafts: bool,
+    include_no_match_queries: bool,
+    answer_limit: int,
+    event_limit: int,
+    batch_size: int,
+) -> None:
+    from lightrag.api.task_manager import TaskStatus, get_task_service
+
+    service = get_task_service()
+    llm_func = getattr(rag, "llm_model_func", None)
+    if llm_func is None:
+        raise RuntimeError("LLM is not configured for this workspace")
+
+    statuses = ["published", "draft"] if include_drafts else ["published"]
+    answer_rows = await db.query(
+        """
+        SELECT answer_id, title, LEFT(body, 1200) AS body, tags
+        FROM LIGHTRAG_ANSWER_ITEMS
+        WHERE workspace = $1 AND status = ANY($2::text[])
+        ORDER BY update_time DESC, answer_id
+        LIMIT $3
+        """,
+        [workspace, statuses, answer_limit],
+        multirows=True,
+    )
+    answer_ids = [str(row["answer_id"]) for row in answer_rows or []]
+    guidance_rows = []
+    if answer_ids:
+        guidance_rows = await db.query(
+            """
+            SELECT answer_id, guidance_type, text
+            FROM LIGHTRAG_ANSWER_GUIDANCE
+            WHERE workspace = $1
+              AND answer_id = ANY($2::text[])
+              AND guidance_type IN ('question', 'keyword', 'synonym')
+            ORDER BY create_time DESC
+            """,
+            [workspace, answer_ids],
+            multirows=True,
+        )
+    guidance_by_answer: dict[str, list[str]] = {}
+    for row in guidance_rows or []:
+        guidance_by_answer.setdefault(str(row["answer_id"]), []).append(
+            str(row["text"])
+        )
+
+    discovery_items: list[dict[str, Any]] = []
+    evidence_lookup: dict[str, dict[str, Any]] = {}
+    for row in answer_rows or []:
+        ref = f"faq:{row['answer_id']}"
+        item = {
+            "ref": ref,
+            "kind": "faq",
+            "answer_id": str(row["answer_id"]),
+            "title": str(row.get("title") or ""),
+            "body": str(row.get("body") or ""),
+            "tags": _coerce_json(row.get("tags"), []),
+            "search_hints": guidance_by_answer.get(str(row["answer_id"]), [])[
+                :12
+            ],
+        }
+        discovery_items.append(item)
+        evidence_lookup[ref] = {
+            "ref": ref,
+            "kind": "faq",
+            "answer_id": str(row["answer_id"]),
+            "label": str(row.get("title") or ""),
+        }
+
+    if include_no_match_queries and event_limit > 0:
+        event_rows = await db.query(
+            """
+            SELECT event_id, query, create_time
+            FROM LIGHTRAG_ANSWER_EVENTS
+            WHERE workspace = $1
+              AND selected_answer_id IS NULL
+              AND query IS NOT NULL
+              AND LENGTH(TRIM(query)) >= 2
+            ORDER BY create_time DESC
+            LIMIT $2
+            """,
+            [workspace, event_limit],
+            multirows=True,
+        )
+        for row in event_rows or []:
+            ref = f"query:{row['event_id']}"
+            item = {
+                "ref": ref,
+                "kind": "unmatched_query",
+                "query": str(row.get("query") or ""),
+            }
+            discovery_items.append(item)
+            evidence_lookup[ref] = {
+                "ref": ref,
+                "kind": "unmatched_query",
+                "label": str(row.get("query") or ""),
+                "create_time": _iso(row.get("create_time")),
+            }
+
+    if not discovery_items:
+        await service.complete_task(
+            task_id,
+            result={
+                "analyzed_count": 0,
+                "suggested_count": 0,
+                "message": "No FAQ or unmatched queries were available.",
+            },
+        )
+        return
+
+    known_groups = await _answer_alias_groups(db, workspace)
+    known_payload = [
+        {
+            "canonical_term": group.canonical_term,
+            "aliases": group.aliases,
+        }
+        for group in known_groups
+    ]
+    batch_count = (len(discovery_items) + batch_size - 1) // batch_size
+    suggested_count = 0
+    failed_batches: list[dict[str, Any]] = []
+    for batch_index in range(batch_count):
+        task = service.get_task(task_id)
+        if task and task.status == TaskStatus.CANCELLED:
+            return
+        batch = discovery_items[
+            batch_index * batch_size : (batch_index + 1) * batch_size
+        ]
+        prompt = (
+            "Discover shared Korean FAQ search terms from the evidence below. "
+            "Return only a JSON array. Each item must be "
+            "{\"canonical_term\": string, \"aliases\": [string], "
+            "\"term_type\": \"synonym|abbreviation|neologism\", "
+            "\"confidence\": number, \"rationale\": string, "
+            "\"evidence_refs\": [string]}. "
+            "Propose only expressions that refer to the same product, service, feature, "
+            "or concept. Include useful Korean-English names, abbreviations, common spoken "
+            "forms, spacing/spelling variants, and new workplace expressions. "
+            "Every alias must be safely interchangeable with the canonical term without "
+            "changing the user's intent. Never include related actions, symptoms, causes, "
+            "resolutions, commands, components, or broad category words as aliases. "
+            "Do not repeat a known group unless the evidence contains a genuinely new alias. "
+            "Use only provided evidence_refs, do not invent product names, and write the "
+            "rationale in Korean.\n\n"
+            f"Known term groups:\n{json.dumps(known_payload, ensure_ascii=False)}\n\n"
+            f"Evidence:\n{json.dumps(batch, ensure_ascii=False)}"
+        )
+        try:
+            raw = await llm_func(
+                prompt,
+                system_prompt=(
+                    "You are a Korean enterprise terminology curator. Extract conservative "
+                    "synonym, abbreviation, and neologism candidates for FAQ retrieval. "
+                    "Return strict JSON only."
+                ),
+            )
+            parsed = _parse_term_discovery_candidates(
+                str(raw),
+                known_groups,
+                evidence_lookup,
+            )
+            for candidate in parsed:
+                if await _upsert_term_discovery_candidate(
+                    db=db,
+                    workspace=workspace,
+                    candidate=candidate,
+                    task_id=task_id,
+                ):
+                    suggested_count += 1
+        except Exception as exc:
+            logger.warning(
+                "[Answers] Term discovery failed task=%s batch=%s: %s",
+                task_id,
+                batch_index + 1,
+                exc,
+            )
+            failed_batches.append(
+                {"batch": batch_index + 1, "error": str(exc)[:500]}
+            )
+
+        await service.update_progress(
+            task_id,
+            ((batch_index + 1) / batch_count) * 100.0,
+            f"AI term discovery batch {batch_index + 1}/{batch_count} completed",
+            detail={
+                "analyzed_count": min(
+                    (batch_index + 1) * batch_size, len(discovery_items)
+                ),
+                "suggested_count": suggested_count,
+                "failed_batch_count": len(failed_batches),
+            },
+        )
+
+    if failed_batches and len(failed_batches) == batch_count:
+        raise RuntimeError("All AI term discovery batches failed")
+    await service.complete_task(
+        task_id,
+        result={
+            "analyzed_count": len(discovery_items),
+            "answer_count": len(answer_rows or []),
+            "suggested_count": suggested_count,
+            "failed_batches": failed_batches,
+        },
+    )
 
 
 async def _llm_select_candidate(rag, query: str, candidates: list[ResolveCandidate]) -> tuple[Optional[str], dict[str, Any]]:
@@ -2839,14 +3856,326 @@ async def _insert_answer_guidance(
     return created_guidance
 
 
+def _guidance_needs_llm_enrichment(guidance: list[AnswerGuidance]) -> bool:
+    positive_types = {
+        item.guidance_type
+        for item in guidance
+        if item.guidance_type not in {"note", "negative_keyword"}
+    }
+    return "question" not in positive_types or not (
+        positive_types & {"keyword", "synonym"}
+    )
+
+
+def _guidance_needs_coverage_enrichment(
+    answer: AnswerItem,
+    guidance: list[AnswerGuidance],
+) -> bool:
+    positive = [
+        item
+        for item in guidance
+        if item.guidance_type not in {"note", "negative_keyword"}
+    ]
+    question_count = sum(item.guidance_type == "question" for item in positive)
+    synonym_count = sum(item.guidance_type == "synonym" for item in positive)
+    source_text = " ".join(
+        [answer.title, *answer.tags, *(item.text for item in positive)]
+    )
+    has_latin_term = re.search(r"\b[A-Za-z][A-Za-z0-9.+-]{2,}\b", source_text) is not None
+    has_korean_synonym = any(
+        item.guidance_type == "synonym" and re.search(r"[가-힣]", item.text)
+        for item in positive
+    )
+    return (
+        len(positive) < 6
+        or question_count < 2
+        or synonym_count < 2
+        or (has_latin_term and not has_korean_synonym)
+    )
+
+
+def _parse_batch_guidance_suggestions(
+    raw: str,
+    allowed_answer_ids: set[str],
+    existing_texts: dict[str, set[str]],
+    max_suggestions: int,
+    task_id: str,
+) -> dict[str, list[SourceGuidanceCandidate]]:
+    parsed: dict[str, list[SourceGuidanceCandidate]] = {
+        answer_id: [] for answer_id in allowed_answer_ids
+    }
+    allowed_types = {"question", "keyword", "synonym"}
+    for item in _extract_json_array(raw):
+        if not isinstance(item, dict):
+            continue
+        answer_id = str(item.get("answer_id") or "").strip()
+        if answer_id not in allowed_answer_ids:
+            continue
+        suggestions = item.get("suggestions")
+        if not isinstance(suggestions, list):
+            continue
+        seen = existing_texts.setdefault(answer_id, set())
+        for suggestion in suggestions:
+            if not isinstance(suggestion, dict):
+                continue
+            guidance_type = str(
+                suggestion.get("guidance_type") or "keyword"
+            ).strip()
+            text = " ".join(str(suggestion.get("text") or "").split())
+            if guidance_type not in allowed_types or len(text) < 2:
+                continue
+            normalized = _normalise_text(text)
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            parsed[answer_id].append(
+                SourceGuidanceCandidate(
+                    guidance_type=guidance_type,
+                    text=text[:200],
+                    weight=_safe_float(
+                        suggestion.get("weight"),
+                        1.0,
+                        0.1,
+                        2.0,
+                    ),
+                    source="llm_batch",
+                    metadata={
+                        "suggested_by": "llm_batch",
+                        "task_id": task_id,
+                    },
+                )
+            )
+            if len(parsed[answer_id]) >= max_suggestions:
+                break
+    return parsed
+
+
+async def _enrich_answer_guidance_background(
+    *,
+    task_id: str,
+    workspace: str,
+    db,
+    rag,
+    answer_ids: list[str],
+    scope: GuidanceEnrichmentScope,
+    batch_size: int,
+    max_suggestions: int,
+) -> None:
+    from lightrag.api.task_manager import TaskStatus, get_task_service
+
+    service = get_task_service()
+    llm_func = getattr(rag, "llm_model_func", None)
+    if llm_func is None:
+        raise RuntimeError("LLM is not configured for this workspace")
+
+    answer_rows = await db.query(
+        """
+        SELECT workspace, answer_id, title, body, approved_summary, content_format,
+               display_policy, status, version, valid_from, valid_until, priority,
+               tags, metadata, publish_time, create_time, update_time
+        FROM LIGHTRAG_ANSWER_ITEMS
+        WHERE workspace = $1 AND answer_id = ANY($2::text[])
+        ORDER BY create_time ASC, answer_id ASC
+        """,
+        [workspace, answer_ids],
+        multirows=True,
+    )
+    guidance_rows = await db.query(
+        """
+        SELECT guidance_id, workspace, answer_id, guidance_type, text, weight,
+               metadata, create_time
+        FROM LIGHTRAG_ANSWER_GUIDANCE
+        WHERE workspace = $1 AND answer_id = ANY($2::text[])
+        ORDER BY create_time ASC
+        """,
+        [workspace, answer_ids],
+        multirows=True,
+    )
+    guidance_by_answer: dict[str, list[AnswerGuidance]] = {}
+    for row in guidance_rows or []:
+        guidance = _guidance_from_row(dict(row))
+        guidance_by_answer.setdefault(guidance.answer_id, []).append(guidance)
+
+    answers = [_answer_from_row(dict(row)) for row in answer_rows or []]
+    targets = [
+        answer
+        for answer in answers
+        if scope == "all"
+        or (
+            scope == "coverage"
+            and _guidance_needs_coverage_enrichment(
+                answer,
+                guidance_by_answer.get(answer.answer_id, []),
+            )
+        )
+        or _guidance_needs_llm_enrichment(
+            guidance_by_answer.get(answer.answer_id, [])
+        )
+    ]
+    skipped = len(answers) - len(targets)
+    if not targets:
+        vector_result = await _rebuild_answer_vectors_for_ids(
+            db=db,
+            workspace=workspace,
+            rag=rag,
+            answer_ids=answer_ids,
+            task_id=task_id,
+        )
+        await service.complete_task(
+            task_id,
+            result={
+                "answer_count": len(answers),
+                "target_count": 0,
+                "skipped_count": skipped,
+                "processed_count": 0,
+                "guidance_created": 0,
+                "failed_batches": [],
+                "vector_result": vector_result,
+            },
+        )
+        return
+
+    guidance_created = 0
+    processed_count = 0
+    failed_batches: list[dict[str, Any]] = []
+    batch_count = (len(targets) + batch_size - 1) // batch_size
+    for batch_index in range(batch_count):
+        task = service.get_task(task_id)
+        if task and task.status == TaskStatus.CANCELLED:
+            return
+        batch = targets[
+            batch_index * batch_size : (batch_index + 1) * batch_size
+        ]
+        existing_texts = {
+            answer.answer_id: {
+                _normalise_text(item.text)
+                for item in guidance_by_answer.get(answer.answer_id, [])
+            }
+            for answer in batch
+        }
+        prompt_items = [
+            {
+                "answer_id": answer.answer_id,
+                "title": answer.title,
+                "body": answer.body[:1200],
+                "tags": answer.tags[:10],
+                "existing_hints": [
+                    {
+                        "guidance_type": item.guidance_type,
+                        "text": item.text,
+                    }
+                    for item in guidance_by_answer.get(answer.answer_id, [])[:12]
+                ],
+            }
+            for answer in batch
+        ]
+        prompt = (
+            "Create short search hints for Korean users of each fixed FAQ answer below. "
+            "Return only a JSON array. Preserve each provided answer_id exactly. "
+            "For each answer return {\"answer_id\": string, \"suggestions\": "
+            "[{\"guidance_type\": \"question|keyword|synonym\", "
+            "\"text\": string, \"weight\": number}]}. "
+            f"Return at most {max_suggestions} useful, non-duplicate suggestions "
+            "per answer. Cover natural spoken questions, abbreviations, spacing or spelling "
+            "variants, and established Korean-English product aliases. When an English product "
+            "name appears, include its common Korean pronunciation or name when useful "
+            "(for example Teams and 팀즈). Do not generate answer content, negative terms, "
+            "or internal notes.\n\n"
+            f"FAQ answers:\n{json.dumps(prompt_items, ensure_ascii=False)}"
+        )
+        try:
+            raw = await llm_func(
+                prompt,
+                system_prompt=(
+                    "You improve FAQ retrieval quality by adding concise representative "
+                    "questions, keywords, colloquial expressions, and bilingual aliases for "
+                    "Korean search. Return strict JSON only."
+                ),
+            )
+            parsed = _parse_batch_guidance_suggestions(
+                str(raw),
+                {answer.answer_id for answer in batch},
+                existing_texts,
+                max_suggestions,
+                task_id,
+            )
+            for answer in batch:
+                created = await _insert_answer_guidance(
+                    db,
+                    workspace,
+                    answer.answer_id,
+                    parsed.get(answer.answer_id, []),
+                )
+                guidance_created += len(created)
+                guidance_by_answer.setdefault(answer.answer_id, []).extend(created)
+            processed_count += len(batch)
+        except Exception as exc:
+            logger.warning(
+                "[Answers] Batch LLM guidance enrichment failed task=%s batch=%s: %s",
+                task_id,
+                batch_index + 1,
+                exc,
+            )
+            failed_batches.append(
+                {
+                    "batch": batch_index + 1,
+                    "answer_ids": [answer.answer_id for answer in batch],
+                    "error": str(exc)[:500],
+                }
+            )
+
+        progress = ((batch_index + 1) / batch_count) * 95.0
+        await service.update_progress(
+            task_id,
+            progress,
+            (
+                f"FAQ hint enrichment batch {batch_index + 1}/{batch_count} "
+                f"completed ({guidance_created} hints added)"
+            ),
+            detail={
+                "processed_count": processed_count,
+                "target_count": len(targets),
+                "guidance_created": guidance_created,
+                "failed_batch_count": len(failed_batches),
+            },
+        )
+
+    if failed_batches and processed_count == 0:
+        raise RuntimeError(
+            f"All {len(failed_batches)} LLM guidance enrichment batches failed"
+        )
+    vector_result = await _rebuild_answer_vectors_for_ids(
+        db=db,
+        workspace=workspace,
+        rag=rag,
+        answer_ids=answer_ids,
+        task_id=task_id,
+        progress_start=95.0,
+        progress_span=4.0,
+    )
+    await service.complete_task(
+        task_id,
+        result={
+            "answer_count": len(answers),
+            "target_count": len(targets),
+            "skipped_count": skipped,
+            "processed_count": processed_count,
+            "guidance_created": guidance_created,
+            "failed_batches": failed_batches,
+            "vector_result": vector_result,
+        },
+    )
+
+
 def _score_candidate(
     answer: AnswerItem,
     guidance: list[AnswerGuidance],
     query: str,
     strategy: ResolveStrategy = "balanced",
+    alias_expansions: Optional[list[AnswerAliasExpansion]] = None,
 ) -> tuple[float, list[str], str, dict[str, float]]:
-    normalized_query = _normalise_text(query)
-    query_tokens = _tokens(query)
+    query_variants = _alias_query_variants(query, alias_expansions)
+    query_token_variants = [_tokens(variant) for variant in query_variants]
     details: dict[str, float] = {}
     matched_guidance: list[str] = []
 
@@ -2854,26 +4183,50 @@ def _score_candidate(
     body = _normalise_text(answer.body)
     tags = _normalise_text(" ".join(answer.tags))
 
-    if normalized_query and normalized_query in title:
+    if any(variant and variant in title for variant in query_variants):
         _add_score(details, "title_exact", 0.42)
-    if normalized_query and normalized_query in body:
+    if any(variant and variant in body for variant in query_variants):
         _add_score(details, "body_exact", 0.16)
-    if normalized_query and normalized_query in tags:
+    if any(variant and variant in tags for variant in query_variants):
         _add_score(details, "tag_exact", 0.2)
 
-    _add_score(details, "title_overlap", _partial_overlap(query_tokens, title) * 0.26)
-    _add_score(details, "body_overlap", _partial_overlap(query_tokens, body) * 0.1)
-    _add_score(details, "tag_overlap", _partial_overlap(query_tokens, tags) * 0.18)
+    _add_score(
+        details,
+        "title_overlap",
+        max((_partial_overlap(tokens, title) for tokens in query_token_variants), default=0.0)
+        * 0.26,
+    )
+    _add_score(
+        details,
+        "body_overlap",
+        max((_partial_overlap(tokens, body) for tokens in query_token_variants), default=0.0)
+        * 0.1,
+    )
+    _add_score(
+        details,
+        "tag_overlap",
+        max((_partial_overlap(tokens, tags) for tokens in query_token_variants), default=0.0)
+        * 0.18,
+    )
 
     for item in guidance:
         guidance_text = _normalise_text(item.text)
         multiplier = GUIDANCE_TYPE_MULTIPLIER.get(item.guidance_type, 1.0)
         exact_match = bool(
-            normalized_query
-            and guidance_text
-            and (normalized_query in guidance_text or guidance_text in normalized_query)
+            guidance_text
+            and any(
+                variant
+                and (variant in guidance_text or guidance_text in variant)
+                for variant in query_variants
+            )
         )
-        overlap = _partial_overlap(query_tokens, guidance_text)
+        overlap = max(
+            (
+                _partial_overlap(tokens, guidance_text)
+                for tokens in query_token_variants
+            ),
+            default=0.0,
+        )
         if not exact_match and overlap <= 0:
             continue
 
@@ -2892,11 +4245,49 @@ def _score_candidate(
         prefix = "!" if item.guidance_type == "negative_keyword" else ""
         matched_guidance.append(f"{prefix}{item.text}")
 
+    positive_guidance_text = " ".join(
+        item.text
+        for item in guidance
+        if item.guidance_type not in {"negative_keyword", "note"}
+    )
+    for expansion in alias_expansions or []:
+        matched_variant: Optional[str] = None
+        for variant in expansion.expanded_terms:
+            variant_text = _normalise_text(variant)
+            if not variant_text:
+                continue
+            if (
+                variant_text in title
+                or variant_text in _normalise_text(positive_guidance_text)
+                or variant_text in tags
+                or variant_text in body
+            ):
+                matched_variant = variant
+                break
+        if matched_variant:
+            matched_guidance.append(
+                f"{expansion.matched_term} ↔ {matched_variant}"
+                if _normalise_text(expansion.matched_term)
+                != _normalise_text(matched_variant)
+                else matched_variant
+            )
+
     if strategy == "balanced":
         metadata_text = _normalise_text(
             json.dumps(_compact_answer_metadata(answer.metadata), ensure_ascii=False)
         )
-        _add_score(details, "metadata_overlap", _partial_overlap(query_tokens, metadata_text) * 0.08)
+        _add_score(
+            details,
+            "metadata_overlap",
+            max(
+                (
+                    _partial_overlap(tokens, metadata_text)
+                    for tokens in query_token_variants
+                ),
+                default=0.0,
+            )
+            * 0.08,
+        )
 
     _add_score(details, "priority", min(0.07, max(answer.priority, 0) * 0.01))
 
@@ -2915,9 +4306,16 @@ async def _keyword_candidate_ids(
     query: str,
     status_filter: list[str],
     allowed_answer_ids: Optional[list[str]],
+    alias_expansions: Optional[list[AnswerAliasExpansion]] = None,
 ) -> tuple[list[str], bool]:
     normalized_query = _normalise_text(query)
     query_terms = _candidate_query_terms(query)
+    for expansion in alias_expansions or []:
+        for term in expansion.expanded_terms:
+            for candidate in _candidate_query_terms(term):
+                if candidate not in query_terms:
+                    query_terms.append(candidate)
+    query_terms = query_terms[:64]
     rows = await db.query(
         """
         WITH guidance_text AS (
@@ -3213,6 +4611,13 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                         "text": text.strip(),
                     },
                 )
+            asyncio.create_task(
+                _refresh_answer_vector_safely(
+                    db=db,
+                    workspace=workspace,
+                    answer_id=answer_id,
+                )
+            )
             return _answer_from_row(dict(row))
         except HTTPException:
             raise
@@ -3336,6 +4741,13 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 if guidance_row:
                     created_guidance.append(_guidance_from_row(dict(guidance_row)))
 
+            asyncio.create_task(
+                _refresh_answer_vector_safely(
+                    db=db,
+                    workspace=workspace,
+                    answer_id=answer_id,
+                )
+            )
             return AnswerSourceDraftResponse(
                 answer=_answer_from_row(dict(row)),
                 guidance=created_guidance,
@@ -3558,6 +4970,14 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
     )
     async def materialize_structured_source(request: Request, payload: StructuredMaterializeRequest):
         workspace, db = await db_for_request(request)
+        enrichment_rag = None
+        if payload.llm_guidance_enrichment.enabled:
+            enrichment_rag = await rag_for_workspace(workspace)
+            if getattr(enrichment_rag, "llm_model_func", None) is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="LLM guidance enrichment is enabled, but no LLM is configured for this workspace.",
+                )
         profile = _profile_structured_source(payload.source_type, payload.raw_content, sample_limit=20)
         rows, _, _ = _parse_structured_rows(payload.source_type, payload.raw_content)
         profile_dict = profile.model_dump() if hasattr(profile, "model_dump") else profile.dict()
@@ -3579,10 +4999,32 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 field.name
                 for field in profile.fields
                 if field.semantic_role in {"category", "title", "id"}
+                and field.name != mapping.get("id")
             ][:5]
 
+        if payload.conversion_purpose == "id_lookup" and payload.materialization_mode != "row_per_answer":
+            raise HTTPException(
+                status_code=400,
+                detail="ID lookup conversion requires row_per_answer materialization.",
+            )
+        validation = _validate_id_lookup_rows(
+            rows,
+            mapping,
+            guidance_columns,
+            payload.conversion_purpose,
+        )
+        if validation.enabled and not validation.ready:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "ID lookup mapping validation failed.",
+                    "validation": validation.model_dump(),
+                },
+            )
+
         tags: list[str] = []
-        for tag in [*payload.tags, "structured", payload.source_type]:
+        purpose_tag = "id-lookup" if payload.conversion_purpose == "id_lookup" else None
+        for tag in [*payload.tags, "structured", payload.source_type, purpose_tag]:
             text = str(tag or "").strip()
             if text and text not in tags:
                 tags.append(text)
@@ -3612,6 +5054,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 "mapping": mapping,
                 "guidance_columns": guidance_columns,
                 "materialization_mode": payload.materialization_mode,
+                "conversion_purpose": payload.conversion_purpose,
             }
         }
         source_metadata = {
@@ -3620,6 +5063,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             "source_type": "structured",
             "structured_source_type": payload.source_type,
             "materialization_mode": payload.materialization_mode,
+            "conversion_purpose": payload.conversion_purpose,
             "source_uri": payload.source_uri,
             "file_name": payload.file_name,
             "source_profile": source_profile,
@@ -3638,6 +5082,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 "created_from": "structured_materialize",
                 "structured_source_type": payload.source_type,
                 "materialization_mode": payload.materialization_mode,
+                "conversion_purpose": payload.conversion_purpose,
                 "tags": tags,
             },
             created_answer_ids=answer_ids,
@@ -3686,6 +5131,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                         "created_from": "structured_materialize",
                         "structured_source_type": payload.source_type,
                         "materialization_mode": payload.materialization_mode,
+                        "conversion_purpose": payload.conversion_purpose,
                         "mapping": mapping,
                         "guidance_columns": guidance_columns,
                     },
@@ -3695,7 +5141,12 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                         db,
                         workspace,
                         answer.answer_id,
-                        _guidance_from_structured_profile(rows, mapping, guidance_columns),
+                        _guidance_from_structured_profile(
+                            rows,
+                            mapping,
+                            guidance_columns,
+                            payload.conversion_purpose,
+                        ),
                     )
                 )
             else:
@@ -3704,8 +5155,12 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                     row_status = _status_for_structured_row(row_data, mapping, payload.status)
                     row_valid_from = _datetime_for_structured_row(row_data, mapping, "valid_from")
                     row_valid_until = _datetime_for_structured_row(row_data, mapping, "valid_until")
+                    source_id = _structured_row_text(row_data, mapping.get("id"))
                     row_metadata = {
                         **row_source_metadata,
+                        "source_id": source_id or None,
+                        "matched_id": source_id or None,
+                        "conversion_purpose": payload.conversion_purpose,
                         "source_row_index": row_index,
                         "source_row_hash": _content_hash(json.dumps(row_data, ensure_ascii=False, sort_keys=True)),
                         "source_row": row_data,
@@ -3720,8 +5175,17 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                         workspace,
                         answer_id=row_answer_id,
                         title=_title_for_structured_row(payload.title, row_data, mapping, row_index),
-                        body=_body_for_structured_row(row_data, mapping),
-                        approved_summary=_summary_for_structured_row(row_data, mapping, payload.approved_summary),
+                        body=_body_for_structured_row(
+                            row_data,
+                            mapping,
+                            payload.conversion_purpose,
+                        ),
+                        approved_summary=_summary_for_structured_row(
+                            row_data,
+                            mapping,
+                            payload.approved_summary,
+                            payload.conversion_purpose,
+                        ),
                         content_format="plain",
                         display_policy="both",
                         status=row_status,
@@ -3744,6 +5208,8 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                             "created_from": "structured_materialize",
                             "structured_source_type": payload.source_type,
                             "materialization_mode": payload.materialization_mode,
+                            "conversion_purpose": payload.conversion_purpose,
+                            "source_id": source_id or None,
                             "source_row_index": row_index,
                             "mapping": mapping,
                             "guidance_columns": guidance_columns,
@@ -3755,8 +5221,86 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                             db,
                             workspace,
                             answer.answer_id,
-                            _guidance_from_structured_profile([row_data], mapping, guidance_columns),
+                            _guidance_from_structured_profile(
+                                [row_data],
+                                mapping,
+                                guidance_columns,
+                                payload.conversion_purpose,
+                            ),
                         )
+                    )
+
+            guidance_enrichment_task_id: Optional[str] = None
+            guidance_enrichment_stream_url: Optional[str] = None
+            vector_rebuild_task_id: Optional[str] = None
+            vector_rebuild_stream_url: Optional[str] = None
+            if payload.llm_guidance_enrichment.enabled and enrichment_rag is not None:
+                from lightrag.api.task_manager import TaskType, get_task_service
+
+                service = get_task_service()
+                enrichment_task = service.create_task(
+                    task_type=TaskType.FAQ_GUIDANCE_ENRICHMENT,
+                    workspace=workspace,
+                    metadata={
+                        "answer_count": len(answer_ids),
+                        "scope": payload.llm_guidance_enrichment.scope,
+                        "batch_size": payload.llm_guidance_enrichment.batch_size,
+                        "max_suggestions": payload.llm_guidance_enrichment.max_suggestions,
+                        "source_snapshot_id": snapshot.snapshot_id,
+                    },
+                )
+                guidance_enrichment_task_id = enrichment_task.task_id
+                guidance_enrichment_stream_url = (
+                    f"/api/tasks/{enrichment_task.task_id}/stream"
+                )
+                service.run_in_background(
+                    enrichment_task.task_id,
+                    _enrich_answer_guidance_background,
+                    task_id=enrichment_task.task_id,
+                    workspace=workspace,
+                    db=db,
+                    rag=enrichment_rag,
+                    answer_ids=answer_ids,
+                    scope=payload.llm_guidance_enrichment.scope,
+                    batch_size=payload.llm_guidance_enrichment.batch_size,
+                    max_suggestions=payload.llm_guidance_enrichment.max_suggestions,
+                )
+            else:
+                try:
+                    vector_rag = await rag_for_workspace(workspace)
+                    if _embedding_func_from_rag(vector_rag) is not None:
+                        from lightrag.api.task_manager import (
+                            TaskType,
+                            get_task_service,
+                        )
+
+                        service = get_task_service()
+                        vector_task = service.create_task(
+                            task_type=TaskType.FAQ_VECTOR_REBUILD,
+                            workspace=workspace,
+                            metadata={
+                                "answer_count": len(answer_ids),
+                                "source_snapshot_id": snapshot.snapshot_id,
+                                "automatic": True,
+                            },
+                        )
+                        vector_rebuild_task_id = vector_task.task_id
+                        vector_rebuild_stream_url = (
+                            f"/api/tasks/{vector_task.task_id}/stream"
+                        )
+                        service.run_in_background(
+                            vector_task.task_id,
+                            _rebuild_answer_vectors_background,
+                            task_id=vector_task.task_id,
+                            workspace=workspace,
+                            db=db,
+                            rag=vector_rag,
+                            answer_ids=answer_ids,
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "[Answers] Automatic FAQ vector task could not start: %s",
+                        exc,
                     )
 
             response_item_limit = 20
@@ -3773,6 +5317,11 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 guidance_truncated=len(created_guidance) > response_item_limit,
                 snapshot=snapshot,
                 source_link=first_source_link,
+                validation=validation,
+                guidance_enrichment_task_id=guidance_enrichment_task_id,
+                guidance_enrichment_stream_url=guidance_enrichment_stream_url,
+                vector_rebuild_task_id=vector_rebuild_task_id,
+                vector_rebuild_stream_url=vector_rebuild_stream_url,
             )
         except HTTPException:
             raise
@@ -4103,13 +5652,25 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
         )
         profile = _profile_structured_source(sample.source_type, sample.raw_content, sample_limit=20)
         mapping = _mapping_from_profile(profile, payload.mapping)
+        guidance_columns = _guidance_columns_from_profile(
+            profile,
+            mapping,
+            payload.guidance_columns,
+        )
+        validation = _validate_id_lookup_rows(
+            sample.rows,
+            mapping,
+            guidance_columns,
+            payload.conversion_purpose,
+        )
         return SourceConnectorMappingPreviewResponse(
             connector=connector,
             sample=sample,
             profile=profile,
             mapping=mapping,
-            guidance_columns=_guidance_columns_from_profile(profile, mapping),
+            guidance_columns=guidance_columns,
             materialization_modes=["table_as_dataset", "row_per_answer"],
+            validation=validation,
         )
 
     @router.post(
@@ -4124,6 +5685,11 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
     ):
         workspace, db = await db_for_request(request)
         connector = _source_connector_from_row(await _get_connector_row(db, workspace, connector_id))
+        if payload.conversion_purpose == "id_lookup" and payload.materialization_mode != "row_per_answer":
+            raise HTTPException(
+                status_code=400,
+                detail="ID lookup conversion requires row_per_answer materialization.",
+            )
         sample = _connector_sample_response_from_raw(
             connector,
             *await _connector_raw_content_from_db(db, connector, 1000),
@@ -4160,6 +5726,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 mapping=mapping,
                 guidance_columns=guidance_columns,
                 materialization_mode=payload.materialization_mode,
+                conversion_purpose=payload.conversion_purpose,
                 metadata={
                     **payload.metadata,
                     "created_from": "source_connector",
@@ -4238,6 +5805,404 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             multirows=True,
         )
         return [_source_snapshot_from_row(dict(row)) for row in rows or []]
+
+    @router.get(
+        "/aliases",
+        response_model=list[AnswerAliasGroup],
+        dependencies=[Depends(combined_auth)],
+    )
+    async def list_answer_aliases(
+        request: Request,
+        search: Optional[str] = Query(default=None),
+    ):
+        workspace, db = await db_for_request(request)
+        groups = await _answer_alias_groups(db, workspace)
+        if not search or not search.strip():
+            return groups
+        needle = _normalise_text(search)
+        return [
+            group
+            for group in groups
+            if needle in _normalise_text(group.canonical_term)
+            or any(needle in _normalise_text(alias) for alias in group.aliases)
+        ]
+
+    @router.post(
+        "/aliases",
+        response_model=AnswerAliasGroup,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def create_answer_alias(
+        request: Request,
+        payload: AnswerAliasCreateRequest,
+    ):
+        workspace, db = await db_for_request(request)
+        canonical_term = " ".join(payload.canonical_term.split())
+        aliases: list[str] = []
+        seen = {_normalise_text(canonical_term)}
+        for alias in payload.aliases:
+            value = " ".join(str(alias or "").split())
+            key = _normalise_text(value)
+            if len(value) < 2 or key in seen:
+                continue
+            seen.add(key)
+            aliases.append(value[:200])
+        if not aliases:
+            raise HTTPException(
+                status_code=400,
+                detail="At least one distinct alias is required.",
+            )
+        try:
+            row = await db.query(
+                """
+                INSERT INTO LIGHTRAG_ANSWER_TERM_ALIASES
+                    (
+                        alias_id, workspace, canonical_term, aliases, enabled,
+                        source, metadata
+                    )
+                VALUES ($1, $2, $3, $4::jsonb, $5, 'workspace', $6::jsonb)
+                RETURNING alias_id, workspace, canonical_term, aliases, enabled,
+                          source, metadata, create_time, update_time
+                """,
+                [
+                    f"aalias-{uuid.uuid4().hex[:16]}",
+                    workspace,
+                    canonical_term,
+                    _json_list(aliases),
+                    payload.enabled,
+                    _json(payload.metadata),
+                ],
+            )
+        except Exception as exc:
+            message = str(exc)
+            if "duplicate" in message.lower() or "unique" in message.lower():
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Alias group '{canonical_term}' already exists.",
+                )
+            raise
+        if not row:
+            raise HTTPException(status_code=500, detail="Failed to create alias group.")
+        return _alias_group_from_row(dict(row))
+
+    @router.get(
+        "/aliases/candidates",
+        response_model=list[AnswerTermCandidate],
+        dependencies=[Depends(combined_auth)],
+    )
+    async def list_answer_term_candidates(
+        request: Request,
+        status: Optional[TermCandidateStatus] = Query(default="suggested"),
+        search: Optional[str] = Query(default=None),
+        limit: int = Query(default=200, ge=1, le=1000),
+    ):
+        workspace, db = await db_for_request(request)
+        params: list[Any] = [workspace]
+        where = ["workspace = $1"]
+        if status:
+            params.append(status)
+            where.append(f"status = ${len(params)}")
+        if search and search.strip():
+            params.append(f"%{search.strip()}%")
+            where.append(
+                f"(canonical_term ILIKE ${len(params)} "
+                f"OR aliases::text ILIKE ${len(params)})"
+            )
+        params.append(limit)
+        rows = await db.query(
+            f"""
+            SELECT candidate_id, workspace, canonical_term, aliases, term_type,
+                   status, confidence, rationale, evidence, source, metadata,
+                   create_time, update_time
+            FROM LIGHTRAG_ANSWER_TERM_CANDIDATES
+            WHERE {' AND '.join(where)}
+            ORDER BY confidence DESC, update_time DESC
+            LIMIT ${len(params)}
+            """,
+            params,
+            multirows=True,
+        )
+        return [_term_candidate_from_row(dict(row)) for row in rows or []]
+
+    @router.post(
+        "/aliases/candidates/analyze",
+        response_model=AnswerTermDiscoveryResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def analyze_answer_terms(
+        request: Request,
+        payload: AnswerTermDiscoveryRequest,
+    ):
+        from lightrag.api.task_manager import TaskType, get_task_service
+
+        workspace, db = await db_for_request(request)
+        workspace_rag = await rag_for_workspace(workspace)
+        if getattr(workspace_rag, "llm_model_func", None) is None:
+            raise HTTPException(
+                status_code=409,
+                detail="LLM is not configured for this workspace.",
+            )
+
+        service = get_task_service()
+        task = service.create_task(
+            task_type=TaskType.FAQ_TERM_DISCOVERY,
+            workspace=workspace,
+            metadata={
+                "include_drafts": payload.include_drafts,
+                "include_no_match_queries": payload.include_no_match_queries,
+                "answer_limit": payload.answer_limit,
+                "event_limit": payload.event_limit,
+                "batch_size": payload.batch_size,
+            },
+        )
+        service.run_in_background(
+            task.task_id,
+            _discover_answer_terms_background,
+            task_id=task.task_id,
+            workspace=workspace,
+            db=db,
+            rag=workspace_rag,
+            include_drafts=payload.include_drafts,
+            include_no_match_queries=payload.include_no_match_queries,
+            answer_limit=payload.answer_limit,
+            event_limit=payload.event_limit,
+            batch_size=payload.batch_size,
+        )
+        return AnswerTermDiscoveryResponse(
+            task_id=task.task_id,
+            stream_url=f"/api/tasks/{task.task_id}/stream",
+            message="AI term discovery started.",
+        )
+
+    @router.post(
+        "/aliases/candidates/{candidate_id}/approve",
+        response_model=AnswerTermCandidateActionResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def approve_answer_term_candidate(request: Request, candidate_id: str):
+        workspace, db = await db_for_request(request)
+        candidate_row = await db.query(
+            """
+            SELECT candidate_id, workspace, canonical_term, aliases, term_type,
+                   status, confidence, rationale, evidence, source, metadata,
+                   create_time, update_time
+            FROM LIGHTRAG_ANSWER_TERM_CANDIDATES
+            WHERE workspace = $1 AND candidate_id = $2
+            """,
+            [workspace, candidate_id],
+        )
+        if not candidate_row:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Term candidate '{candidate_id}' not found.",
+            )
+        candidate = _term_candidate_from_row(dict(candidate_row))
+
+        groups = await _answer_alias_groups(db, workspace)
+        member_to_group: dict[str, AnswerAliasGroup] = {}
+        for group in groups:
+            for member in [group.canonical_term, *group.aliases]:
+                member_to_group.setdefault(_normalise_text(member), group)
+
+        canonical_group = member_to_group.get(
+            _normalise_text(candidate.canonical_term)
+        )
+        canonical_term = (
+            canonical_group.canonical_term
+            if canonical_group is not None
+            else candidate.canonical_term
+        )
+        canonical_key = _normalise_text(canonical_term)
+        aliases: list[str] = []
+        seen = {canonical_key}
+        for alias in candidate.aliases:
+            alias_key = _normalise_text(alias)
+            if alias_key in seen:
+                continue
+            conflicting_group = member_to_group.get(alias_key)
+            if (
+                conflicting_group is not None
+                and _normalise_text(conflicting_group.canonical_term)
+                != canonical_key
+            ):
+                continue
+            seen.add(alias_key)
+            aliases.append(alias)
+
+        workspace_group_row = await db.query(
+            """
+            SELECT alias_id, workspace, canonical_term, aliases, enabled, source,
+                   metadata, create_time, update_time
+            FROM LIGHTRAG_ANSWER_TERM_ALIASES
+            WHERE workspace = $1 AND LOWER(canonical_term) = LOWER($2)
+            """,
+            [workspace, canonical_term],
+        )
+        alias_group: Optional[AnswerAliasGroup] = None
+        if workspace_group_row:
+            workspace_group = _alias_group_from_row(dict(workspace_group_row))
+            merged_aliases = list(workspace_group.aliases)
+            merged_keys = {
+                _normalise_text(value)
+                for value in [workspace_group.canonical_term, *merged_aliases]
+            }
+            for alias in aliases:
+                if _normalise_text(alias) not in merged_keys:
+                    merged_aliases.append(alias)
+                    merged_keys.add(_normalise_text(alias))
+            updated_group = await db.query(
+                """
+                UPDATE LIGHTRAG_ANSWER_TERM_ALIASES
+                SET aliases = $3::jsonb,
+                    enabled = TRUE,
+                    metadata = metadata || $4::jsonb,
+                    update_time = NOW()
+                WHERE workspace = $1 AND alias_id = $2
+                RETURNING alias_id, workspace, canonical_term, aliases, enabled,
+                          source, metadata, create_time, update_time
+                """,
+                [
+                    workspace,
+                    workspace_group.alias_id,
+                    _json_list(merged_aliases[:30]),
+                    _json(
+                        {
+                            "last_approved_candidate_id": candidate_id,
+                            "updated_from": "ai_term_candidate",
+                        }
+                    ),
+                ],
+            )
+            alias_group = _alias_group_from_row(dict(updated_group))
+        elif aliases:
+            created_group = await db.query(
+                """
+                INSERT INTO LIGHTRAG_ANSWER_TERM_ALIASES
+                    (
+                        alias_id, workspace, canonical_term, aliases, enabled,
+                        source, metadata
+                    )
+                VALUES ($1, $2, $3, $4::jsonb, TRUE, 'ai_approved', $5::jsonb)
+                RETURNING alias_id, workspace, canonical_term, aliases, enabled,
+                          source, metadata, create_time, update_time
+                """,
+                [
+                    f"aalias-{uuid.uuid4().hex[:16]}",
+                    workspace,
+                    canonical_term,
+                    _json_list(aliases[:30]),
+                    _json(
+                        {
+                            "approved_candidate_id": candidate_id,
+                            "created_from": "ai_term_candidate",
+                        }
+                    ),
+                ],
+            )
+            alias_group = _alias_group_from_row(dict(created_group))
+        elif canonical_group is not None:
+            alias_group = canonical_group
+        else:
+            raise HTTPException(
+                status_code=409,
+                detail="No new non-conflicting aliases remain to approve.",
+            )
+
+        approved_row = await db.query(
+            """
+            UPDATE LIGHTRAG_ANSWER_TERM_CANDIDATES
+            SET status = 'approved',
+                metadata = metadata || $3::jsonb,
+                update_time = NOW()
+            WHERE workspace = $1 AND candidate_id = $2
+            RETURNING candidate_id, workspace, canonical_term, aliases, term_type,
+                      status, confidence, rationale, evidence, source, metadata,
+                      create_time, update_time
+            """,
+            [
+                workspace,
+                candidate_id,
+                _json(
+                    {
+                        "approved_alias_id": alias_group.alias_id,
+                        "approved_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                ),
+            ],
+        )
+        return AnswerTermCandidateActionResponse(
+            candidate=_term_candidate_from_row(dict(approved_row)),
+            alias_group=alias_group,
+        )
+
+    @router.post(
+        "/aliases/candidates/{candidate_id}/reject",
+        response_model=AnswerTermCandidateActionResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def reject_answer_term_candidate(request: Request, candidate_id: str):
+        workspace, db = await db_for_request(request)
+        existing = await db.query(
+            """
+            SELECT status
+            FROM LIGHTRAG_ANSWER_TERM_CANDIDATES
+            WHERE workspace = $1 AND candidate_id = $2
+            """,
+            [workspace, candidate_id],
+        )
+        if not existing:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Term candidate '{candidate_id}' not found.",
+            )
+        if str(existing.get("status")) == "approved":
+            raise HTTPException(
+                status_code=409,
+                detail="Approved terms must be removed from the active term groups.",
+            )
+        rejected_row = await db.query(
+            """
+            UPDATE LIGHTRAG_ANSWER_TERM_CANDIDATES
+            SET status = 'rejected',
+                metadata = metadata || $3::jsonb,
+                update_time = NOW()
+            WHERE workspace = $1 AND candidate_id = $2
+            RETURNING candidate_id, workspace, canonical_term, aliases, term_type,
+                      status, confidence, rationale, evidence, source, metadata,
+                      create_time, update_time
+            """,
+            [
+                workspace,
+                candidate_id,
+                _json({"rejected_at": datetime.now(timezone.utc).isoformat()}),
+            ],
+        )
+        return AnswerTermCandidateActionResponse(
+            candidate=_term_candidate_from_row(dict(rejected_row)),
+        )
+
+    @router.delete(
+        "/aliases/{alias_id}",
+        dependencies=[Depends(combined_auth)],
+    )
+    async def delete_answer_alias(request: Request, alias_id: str):
+        workspace, db = await db_for_request(request)
+        if alias_id.startswith("builtin-"):
+            raise HTTPException(
+                status_code=409,
+                detail="Built-in alias groups cannot be deleted.",
+            )
+        row = await db.query(
+            """
+            DELETE FROM LIGHTRAG_ANSWER_TERM_ALIASES
+            WHERE workspace = $1 AND alias_id = $2
+            RETURNING alias_id
+            """,
+            [workspace, alias_id],
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Alias group '{alias_id}' not found.")
+        return {"message": "Alias group deleted", "alias_id": alias_id}
 
     @router.get("/{answer_id}", response_model=AnswerItem, dependencies=[Depends(combined_auth)])
     async def get_answer(request: Request, answer_id: str):
@@ -4400,6 +6365,13 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             raise HTTPException(status_code=404, detail=f"Answer '{answer_id}' not found")
         await _record_revision(db, dict(row))
         await _delete_answer_vectors(db, workspace, answer_id)
+        asyncio.create_task(
+            _refresh_answer_vector_safely(
+                db=db,
+                workspace=workspace,
+                answer_id=answer_id,
+            )
+        )
         return _answer_from_row(dict(row))
 
     @router.post("/{answer_id}/publish", response_model=AnswerItem, dependencies=[Depends(combined_auth)])
@@ -4511,6 +6483,13 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             raise HTTPException(status_code=404, detail=f"Answer '{answer_id}' not found")
         await _record_revision(db, dict(row))
         await _delete_answer_vectors(db, workspace, answer_id)
+        asyncio.create_task(
+            _refresh_answer_vector_safely(
+                db=db,
+                workspace=workspace,
+                answer_id=answer_id,
+            )
+        )
         return _answer_from_row(dict(row))
 
     @router.get("/{answer_id}/guidance", response_model=list[AnswerGuidance], dependencies=[Depends(combined_auth)])
@@ -4632,6 +6611,13 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
         if not row:
             raise HTTPException(status_code=500, detail="Failed to create guidance")
         await _delete_answer_vectors(db, workspace, answer_id)
+        asyncio.create_task(
+            _refresh_answer_vector_safely(
+                db=db,
+                workspace=workspace,
+                answer_id=answer_id,
+            )
+        )
         return _guidance_from_row(dict(row))
 
     @router.delete("/{answer_id}/guidance/{guidance_id}", dependencies=[Depends(combined_auth)])
@@ -4645,6 +6631,13 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             {"workspace": workspace, "answer_id": answer_id, "guidance_id": guidance_id},
         )
         await _delete_answer_vectors(db, workspace, answer_id)
+        asyncio.create_task(
+            _refresh_answer_vector_safely(
+                db=db,
+                workspace=workspace,
+                answer_id=answer_id,
+            )
+        )
         return {"message": "Guidance deleted", "guidance_id": guidance_id}
 
     @router.post("/{answer_id}/vectors/rebuild", dependencies=[Depends(combined_auth)])
@@ -4799,12 +6792,14 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             if payload.allowed_answer_ids is not None
             else None
         )
+        alias_expansions = await _expand_query_aliases(db, workspace, payload.query)
         keyword_candidate_ids, keyword_candidates_truncated = await _keyword_candidate_ids(
             db,
             workspace,
             payload.query,
             status_filter,
             allowed_answer_ids,
+            alias_expansions,
         )
         vector_scores: dict[str, float] = {}
         vector_status = "not_requested"
@@ -4864,6 +6859,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 guidance_by_answer.get(answer.answer_id, []),
                 payload.query,
                 payload.strategy,
+                alias_expansions,
             )
             keyword_scores[answer.answer_id] = (score, matched_guidance, reason, score_details)
 
@@ -4887,7 +6883,10 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             final_score = keyword_score
             detail_payload = dict(score_details)
             _add_score(detail_payload, "keyword_score", keyword_score)
-            if payload.retrieval_mode in {"hybrid", "llm_rerank"}:
+            if (
+                payload.retrieval_mode in {"hybrid", "llm_rerank"}
+                and vector_score > 0
+            ):
                 priority_boost = min(0.05, max(answer.priority, 0) * 0.005)
                 final_score = min(1.0, keyword_score * 0.6 + vector_score * 0.35 + priority_boost)
                 _add_score(detail_payload, "vector_score", vector_score)
@@ -4943,6 +6942,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
         candidates = candidates[: payload.top_k]
         selected = candidates[0] if candidates and candidates[0].score >= payload.min_score else None
         selected_by = selected.selected_by if selected else "none"
+        matched_id = _matched_business_id(selected.answer if selected else None)
         rationale = (
             f"Selected {selected.answer.answer_id} by {selected_by}: {selected.reason}."
             if selected
@@ -4964,22 +6964,29 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 "mode": payload.retrieval_mode,
                 "strategy": payload.strategy,
                 "selected_by": selected_by,
+                "matched_id": matched_id,
                 "vector_status": vector_status,
                 "keyword_candidate_count": len(keyword_candidate_ids),
                 "keyword_candidates_truncated": keyword_candidates_truncated,
                 "keyword_candidate_limit": MAX_KEYWORD_SEARCH_CANDIDATES,
+                "alias_expansions": [
+                    expansion.model_dump()
+                    for expansion in alias_expansions
+                ],
                 "llm_selection": llm_selection,
                 "score_details": {item.answer.answer_id: item.score_details for item in candidates},
             },
         )
         return ResolveResponse(
             selected_answer=selected.answer if selected else None,
+            matched_id=matched_id,
             confidence=selected.score if selected else 0.0,
             candidates=candidates,
             trace_id=trace_id,
             rationale=rationale,
             retrieval_mode=payload.retrieval_mode,
             selected_by=selected_by,
+            alias_expansions=alias_expansions,
         )
 
     @router.post("/resolve", response_model=ResolveResponse, dependencies=[Depends(combined_auth)])
@@ -5020,12 +7027,14 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 rationale=result.rationale,
                 retrieval_mode=result.retrieval_mode,
                 selected_by=result.selected_by,
+                alias_expansions=result.alias_expansions,
             )
 
         response_text, display_policy = _render_answer_response(answer, payload.response_policy)
         return AnswerSearchResponse(
             matched=True,
             answer_id=answer.answer_id,
+            matched_id=result.matched_id,
             title=answer.title,
             response=response_text,
             summary=answer.approved_summary,
@@ -5045,6 +7054,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             rationale=result.rationale,
             retrieval_mode=result.retrieval_mode,
             selected_by=result.selected_by,
+            alias_expansions=result.alias_expansions,
         )
 
     @router.get("/stats/events", response_model=AnswerEventStatsResponse, dependencies=[Depends(combined_auth)])

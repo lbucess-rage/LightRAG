@@ -23,6 +23,7 @@ import {
   AnswerSourceConnectorMappingPreview,
   AnswerSourceConnectorType,
   AnswerSourceSnapshot,
+  AnswerStructuredIdLookupValidation,
   createAnswerSourceConnector,
   createAnswerSourceDraft,
   listAnswerSourceConnectors,
@@ -49,11 +50,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/Dialog'
+import TaskProgressPanel from '@/components/documents/TaskProgressPanel'
 import { localizedErrorMessage } from '@/lib/utils'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 type SourceType = 'plain' | 'markdown' | 'html' | 'url' | 'file' | 'excel' | 'structured'
 type ConnectorMaterializationMode = 'table_as_dataset' | 'row_per_answer'
+type StructuredConversionPurpose = 'faq' | 'id_lookup'
+type BatchGuidanceScope = 'missing_or_weak' | 'coverage' | 'all'
 type StructuredMappingRole = 'id' | 'title' | 'question' | 'answer' | 'category' | 'status' | 'valid_from' | 'valid_until'
 type ReviewStep = 'details' | 'preview' | 'mapping' | 'hints' | 'confirm'
 
@@ -335,6 +339,94 @@ const buildCandidate = ({
   }
 }
 
+function analyzeIdLookupRows(
+  rawContent: string,
+  mapping: Partial<Record<StructuredMappingRole, string>>,
+  guidanceColumns: string[],
+  purpose: StructuredConversionPurpose,
+): AnswerStructuredIdLookupValidation {
+  if (purpose !== 'id_lookup') {
+    return {
+      enabled: false,
+      ready: true,
+      searchable_columns: [],
+      row_count: 0,
+      valid_id_count: 0,
+      blank_id_rows: [],
+      duplicate_ids: [],
+      ambiguous_detail_groups: [],
+      warnings: [],
+    }
+  }
+  let rows: Record<string, unknown>[] = []
+  try {
+    const parsed = JSON.parse(rawContent)
+    if (Array.isArray(parsed)) rows = parsed.filter((row) => row && typeof row === 'object')
+  } catch {
+    rows = []
+  }
+  const idColumn = mapping.id
+  const searchableColumns = unique([
+    mapping.question,
+    mapping.title,
+    mapping.category,
+    mapping.answer,
+    ...guidanceColumns,
+  ].filter((column): column is string => Boolean(column) && column !== idColumn))
+  const blankIdRows: number[] = []
+  const idCounts = new Map<string, number>()
+  const detailGroups = new Map<string, { values: Record<string, string>; ids: Set<string>; rows: number[] }>()
+  rows.forEach((row, index) => {
+    const sourceId = idColumn ? String(row[idColumn] ?? '').trim() : ''
+    if (!sourceId) {
+      blankIdRows.push(index + 1)
+      return
+    }
+    idCounts.set(sourceId, (idCounts.get(sourceId) || 0) + 1)
+    const values = Object.fromEntries(
+      searchableColumns.map((column) => [column, String(row[column] ?? '').trim()])
+    )
+    const fingerprint = searchableColumns.map((column) => values[column].toLocaleLowerCase()).join('\u001f')
+    if (!fingerprint.replaceAll('\u001f', '')) return
+    const group = detailGroups.get(fingerprint) || { values, ids: new Set<string>(), rows: [] }
+    group.ids.add(sourceId)
+    group.rows.push(index + 1)
+    detailGroups.set(fingerprint, group)
+  })
+  const duplicateIds = [...idCounts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([sourceId]) => sourceId)
+    .sort()
+  const ambiguousDetailGroups = [...detailGroups.values()]
+    .filter((group) => group.ids.size > 1)
+    .slice(0, 20)
+    .map((group) => ({
+      values: group.values,
+      ids: [...group.ids].sort(),
+      rows: group.rows.slice(0, 20),
+    }))
+  const warnings: string[] = []
+  if (!idColumn) warnings.push('반환할 업무 ID 컬럼을 선택해 주세요.')
+  if (searchableColumns.length === 0) warnings.push('검색에 사용할 상세정보 컬럼을 하나 이상 선택해 주세요.')
+  if (blankIdRows.length > 0) warnings.push(`업무 ID가 비어 있는 행이 ${blankIdRows.length.toLocaleString()}개 있습니다.`)
+  if (duplicateIds.length > 0) warnings.push(`같은 업무 ID가 여러 행에 있는 항목이 ${duplicateIds.length.toLocaleString()}개 있습니다.`)
+  if (ambiguousDetailGroups.length > 0) warnings.push(`동일한 상세정보가 서로 다른 ID를 가리키는 조합이 ${ambiguousDetailGroups.length.toLocaleString()}개 있습니다.`)
+  return {
+    enabled: true,
+    ready: Boolean(idColumn && searchableColumns.length > 0)
+      && blankIdRows.length === 0
+      && ambiguousDetailGroups.length === 0,
+    id_column: idColumn,
+    searchable_columns: searchableColumns,
+    row_count: rows.length,
+    valid_id_count: rows.length - blankIdRows.length,
+    blank_id_rows: blankIdRows.slice(0, 100),
+    duplicate_ids: duplicateIds.slice(0, 100),
+    ambiguous_detail_groups: ambiguousDetailGroups,
+    warnings,
+  }
+}
+
 export default function AnswerSources({ embedded = false }: { embedded?: boolean }) {
   const { t } = useTranslation()
   const currentWorkspaceId = useWorkspaceStore.use.currentWorkspaceId()
@@ -364,17 +456,26 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
   const [connectorAuthRef, setConnectorAuthRef] = useState('')
   const [connectorContent, setConnectorContent] = useState('')
   const [connectorMode, setConnectorMode] = useState<ConnectorMaterializationMode>('table_as_dataset')
+  const [connectorPurpose, setConnectorPurpose] = useState<StructuredConversionPurpose>('faq')
   const [connectorPreview, setConnectorPreview] = useState<AnswerSourceConnectorMappingPreview | null>(null)
+  const [connectorMapping, setConnectorMapping] = useState<Partial<Record<StructuredMappingRole, string>>>({})
+  const [connectorGuidanceColumns, setConnectorGuidanceColumns] = useState<string[]>([])
   const [isLoadingConnectors, setIsLoadingConnectors] = useState(false)
   const [isConnectorBusy, setIsConnectorBusy] = useState(false)
   const [excelFile, setExcelFile] = useState<File | null>(null)
   const [excelPreview, setExcelPreview] = useState<AnswerExcelPreviewResponse | null>(null)
+  const [isExcelAnalysisReady, setIsExcelAnalysisReady] = useState(false)
   const [excelSheetName, setExcelSheetName] = useState('')
   const [excelHeaderRow, setExcelHeaderRow] = useState('1')
   const [excelDataStartRow, setExcelDataStartRow] = useState('')
   const [structuredMode, setStructuredMode] = useState<ConnectorMaterializationMode>('row_per_answer')
+  const [structuredPurpose, setStructuredPurpose] = useState<StructuredConversionPurpose>('faq')
   const [structuredMapping, setStructuredMapping] = useState<Partial<Record<StructuredMappingRole, string>>>({})
   const [structuredGuidanceColumns, setStructuredGuidanceColumns] = useState<string[]>([])
+  const [llmGuidanceEnabled, setLlmGuidanceEnabled] = useState(false)
+  const [llmGuidanceScope, setLlmGuidanceScope] = useState<BatchGuidanceScope>('coverage')
+  const [guidanceEnrichmentTaskId, setGuidanceEnrichmentTaskId] = useState('')
+  const [vectorRebuildTaskId, setVectorRebuildTaskId] = useState('')
   const [isExcelBusy, setIsExcelBusy] = useState(false)
   const [activeReviewStep, setActiveReviewStep] = useState<ReviewStep>('details')
 
@@ -427,15 +528,25 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
     setConnectorUri('')
     setConnectorAuthRef('')
     setConnectorContent('')
+    setConnectorMode('table_as_dataset')
+    setConnectorPurpose('faq')
     setConnectorPreview(null)
+    setConnectorMapping({})
+    setConnectorGuidanceColumns([])
     setExcelFile(null)
     setExcelPreview(null)
+    setIsExcelAnalysisReady(false)
     setExcelSheetName('')
     setExcelHeaderRow('1')
     setExcelDataStartRow('')
     setStructuredMode('row_per_answer')
+    setStructuredPurpose('faq')
     setStructuredMapping({})
     setStructuredGuidanceColumns([])
+    setLlmGuidanceEnabled(false)
+    setLlmGuidanceScope('missing_or_weak')
+    setGuidanceEnrichmentTaskId('')
+    setVectorRebuildTaskId('')
     setContentFormat('plain')
     setActiveReviewStep('details')
   }, [currentWorkspaceId])
@@ -457,6 +568,15 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
     () => connectors.find((connector) => connector.connector_id === selectedConnectorId) || null,
     [connectors, selectedConnectorId]
   )
+  const connectorIdLookupValidation = useMemo(
+    () => analyzeIdLookupRows(
+      JSON.stringify(connectorPreview?.sample.rows || []),
+      connectorMapping,
+      connectorGuidanceColumns,
+      connectorPurpose,
+    ),
+    [connectorGuidanceColumns, connectorMapping, connectorPreview?.sample.rows, connectorPurpose],
+  )
 
   const reviewSteps = useMemo<ReviewStepItem[]>(() => {
     const steps: ReviewStepItem[] = [
@@ -471,7 +591,7 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
         id: 'mapping',
         label: t('answerCatalog.sources.reviewSteps.mapping', '2. Excel Mapping'),
         description: t('answerCatalog.sources.reviewSteps.mappingDesc', 'Choose which columns become the answer title, body, category, and matching hints.'),
-        disabled: !excelPreview,
+        disabled: !excelPreview || !isExcelAnalysisReady,
       })
     } else {
       steps.push({
@@ -497,17 +617,17 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
       },
     )
     return steps
-  }, [excelPreview, sourceType, t])
+  }, [excelPreview, isExcelAnalysisReady, sourceType, t])
 
   const activeStepIndex = reviewSteps.findIndex((step) => step.id === activeReviewStep)
   const activeStep = reviewSteps[activeStepIndex] || reviewSteps[0]
   const canGoPreviousStep = activeStepIndex > 0
   const canGoNextStep = activeStepIndex >= 0 && activeStepIndex < reviewSteps.length - 1
   const nextReviewStep = reviewSteps[activeStepIndex + 1]
-  const estimatedDraftCount = sourceType === 'excel' && excelPreview
+  const estimatedDraftCount = sourceType === 'excel' && excelPreview && isExcelAnalysisReady
     ? structuredMode === 'row_per_answer' ? excelPreview.row_count : 1
     : 1
-  const estimatedHintBasisCount = sourceType === 'excel' && excelPreview
+  const estimatedHintBasisCount = sourceType === 'excel' && excelPreview && isExcelAnalysisReady
     ? [
         structuredMapping.question,
         structuredMapping.title,
@@ -516,11 +636,29 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
         ...structuredGuidanceColumns,
       ].filter(Boolean).length
     : guidanceCandidates.length || candidate?.guidance.length || 0
-  const exceedsExcelRowLimit = sourceType === 'excel' && structuredMode === 'row_per_answer' && excelPreview
+  const exceedsExcelRowLimit = sourceType === 'excel' && isExcelAnalysisReady && structuredMode === 'row_per_answer' && excelPreview
     ? excelPreview.truncated || excelPreview.row_count > maxStructuredRowsPerAnswerBatch
     : false
+  const excelIdLookupValidation = useMemo(
+    () => analyzeIdLookupRows(
+      excelPreview?.raw_content || '[]',
+      structuredMapping,
+      structuredGuidanceColumns,
+      structuredPurpose,
+    ),
+    [excelPreview?.raw_content, structuredGuidanceColumns, structuredMapping, structuredPurpose],
+  )
   const canCreateDraft = !isSubmitting && !exceedsExcelRowLimit && (
-    sourceType === 'excel' ? Boolean(excelPreview && title.trim() && body.trim()) : Boolean(body.trim())
+    sourceType === 'excel'
+      ? Boolean(
+          excelPreview
+          && isExcelAnalysisReady
+          && !createdAnswer
+          && title.trim()
+          && body.trim()
+          && (structuredPurpose !== 'id_lookup' || excelIdLookupValidation.ready)
+        )
+      : Boolean(body.trim())
   )
 
   const goToRelativeReviewStep = (direction: 1 | -1) => {
@@ -550,12 +688,18 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
     setCandidate(null)
     setExcelFile(null)
     setExcelPreview(null)
+    setIsExcelAnalysisReady(false)
     setExcelSheetName('')
     setExcelHeaderRow('1')
     setExcelDataStartRow('')
     setStructuredMode('row_per_answer')
+    setStructuredPurpose('faq')
     setStructuredMapping({})
     setStructuredGuidanceColumns([])
+    setLlmGuidanceEnabled(false)
+    setLlmGuidanceScope('missing_or_weak')
+    setGuidanceEnrichmentTaskId('')
+    setVectorRebuildTaskId('')
     setContentFormat('plain')
     setActiveReviewStep('details')
   }
@@ -596,6 +740,7 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
       .slice(0, 5)
     const fallbackTitle = `${preview.file_name.replace(/\.[^.]+$/, '')} - ${preview.selected_sheet}`
     setExcelPreview(preview)
+    setIsExcelAnalysisReady(true)
     setExcelSheetName(preview.selected_sheet)
     setExcelHeaderRow(String(preview.header_row))
     setExcelDataStartRow(String(preview.data_start_row))
@@ -626,9 +771,38 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
     }))
   }
 
+  const invalidateExcelAnalysis = () => {
+    setIsExcelAnalysisReady(false)
+    setStructuredMapping({})
+    setStructuredGuidanceColumns([])
+    setCreatedAnswer(null)
+    setGuidanceEnrichmentTaskId('')
+    setVectorRebuildTaskId('')
+    setTitle('')
+    setSummary('')
+    setBody('')
+    setSourceUri('')
+    setCandidate(null)
+    setActiveReviewStep('details')
+  }
+
+  const applyExcelWorkbookInspection = (preview: AnswerExcelPreviewResponse) => {
+    setExcelPreview(preview)
+    setExcelSheetName(preview.selected_sheet)
+    setExcelHeaderRow(String(preview.header_row))
+    setExcelDataStartRow(String(preview.data_start_row))
+    setFileName(preview.file_name)
+    invalidateExcelAnalysis()
+  }
+
   const handleExcelPreview = async (
     file: File,
-    options: { sheetName?: string; headerRow?: number; dataStartRow?: number } = {}
+    options: {
+      sheetName?: string
+      headerRow?: number
+      dataStartRow?: number
+      startWizard?: boolean
+    } = {}
   ) => {
     if (file.size > maxExcelUploadBytes) {
       toast.error(t('answerCatalog.sources.excelTooLarge', 'Excel files can be uploaded up to 200MB.'))
@@ -645,8 +819,19 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
         max_rows: 1000,
       })
       if (workspaceId !== useWorkspaceStore.getState().currentWorkspaceId) return
-      applyExcelPreview(preview)
-      toast.success(t('answerCatalog.sources.excelPreviewReady', 'Excel preview is ready.'))
+      if (options.startWizard === false) {
+        applyExcelWorkbookInspection(preview)
+        toast.success(t(
+          'answerCatalog.sources.excelWorkbookReady',
+          'The workbook is ready. Select a sheet and start FAQ setup.'
+        ))
+      } else {
+        applyExcelPreview(preview)
+        toast.success(t(
+          'answerCatalog.sources.excelAnalysisReady',
+          'The selected sheet was analyzed and FAQ setup has started.'
+        ))
+      }
     } catch (err) {
       toast.error(localizedErrorMessage(err, t))
     } finally {
@@ -659,11 +844,24 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
     if (!file) return
     setExcelFile(file)
     setExcelPreview(null)
+    setIsExcelAnalysisReady(false)
     setExcelSheetName('')
     setExcelHeaderRow('1')
     setExcelDataStartRow('')
+    setFileName(file.name)
+    setTitle('')
+    setSummary('')
+    setBody('')
+    setSourceUri('')
+    setStructuredMapping({})
+    setStructuredGuidanceColumns([])
+    setCreatedAnswer(null)
+    setGuidanceEnrichmentTaskId('')
+    setVectorRebuildTaskId('')
+    setCandidate(null)
+    setActiveReviewStep('details')
     setSourceType('excel')
-    await handleExcelPreview(file, { headerRow: 1 })
+    await handleExcelPreview(file, { headerRow: 1, startWizard: false })
   }
 
   const updateStructuredMapping = (role: StructuredMappingRole, column: string) => {
@@ -685,6 +883,30 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
 
   const toggleStructuredGuidanceColumn = (column: string, checked: boolean) => {
     setStructuredGuidanceColumns((current) => {
+      if (checked) return current.includes(column) ? current : [...current, column]
+      return current.filter((item) => item !== column)
+    })
+  }
+
+  const updateConnectorMapping = (role: StructuredMappingRole, column: string) => {
+    setConnectorMapping((current) => {
+      const next = { ...current }
+      if (!column || column === 'none') {
+        delete next[role]
+      } else {
+        Object.entries(next).forEach(([mappedRole, mappedColumn]) => {
+          if (mappedRole !== role && mappedColumn === column) {
+            delete next[mappedRole as StructuredMappingRole]
+          }
+        })
+        next[role] = column
+      }
+      return next
+    })
+  }
+
+  const toggleConnectorGuidanceColumn = (column: string, checked: boolean) => {
+    setConnectorGuidanceColumns((current) => {
       if (checked) return current.includes(column) ? current : [...current, column]
       return current.filter((item) => item !== column)
     })
@@ -799,10 +1021,17 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
     try {
       const workspaceId = currentWorkspaceId
       const preview = await previewAnswerSourceConnectorMapping(selectedConnectorId, {
+        mapping: Object.fromEntries(
+          Object.entries(connectorMapping).filter(([, column]) => Boolean(column))
+        ),
+        guidance_columns: connectorGuidanceColumns,
         materialization_mode: connectorMode,
+        conversion_purpose: connectorPurpose,
       })
       if (workspaceId !== useWorkspaceStore.getState().currentWorkspaceId) return
       setConnectorPreview(preview)
+      setConnectorMapping(preview.mapping)
+      setConnectorGuidanceColumns(preview.guidance_columns)
       toast.success(t('answerCatalog.sources.mappingPreviewReady', 'Connector mapping preview is ready.'))
     } catch (err) {
       toast.error(localizedErrorMessage(err, t))
@@ -821,9 +1050,12 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
       const workspaceId = currentWorkspaceId
       const result = await materializeAnswerSourceConnector(selectedConnectorId, {
         title: selectedConnector?.name || connectorName || undefined,
-        mapping: connectorPreview?.mapping,
-        guidance_columns: connectorPreview?.guidance_columns,
+        mapping: Object.fromEntries(
+          Object.entries(connectorMapping).filter(([, column]) => Boolean(column))
+        ),
+        guidance_columns: connectorGuidanceColumns,
         materialization_mode: connectorMode,
+        conversion_purpose: connectorPurpose,
         status: 'draft',
         tags: [selectedConnector?.connector_type || connectorType, 'connector'],
         metadata: {
@@ -852,6 +1084,13 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
     }
     if (sourceType === 'excel' && !excelPreview) {
       toast.error(t('answerCatalog.sources.excelPreviewRequired', 'Preview the Excel file before creating answer candidates.'))
+      return
+    }
+    if (sourceType === 'excel' && structuredPurpose === 'id_lookup' && !excelIdLookupValidation.ready) {
+      toast.error(excelIdLookupValidation.warnings[0] || t(
+        'answerCatalog.sources.idLookupValidationFailed',
+        'Check the return ID and searchable detail columns before creating candidates.'
+      ))
       return
     }
     if (
@@ -886,7 +1125,14 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
           ),
           guidance_columns: structuredGuidanceColumns,
           materialization_mode: structuredMode,
+          conversion_purpose: structuredPurpose,
           source_truncated: excelPreview.truncated,
+          llm_guidance_enrichment: {
+            enabled: llmGuidanceEnabled,
+            scope: llmGuidanceScope,
+            batch_size: 10,
+            max_suggestions: 5,
+          },
           metadata: {
             created_from: 'answer_excel_source_ui',
             original_source_type: 'excel',
@@ -899,12 +1145,13 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
         })
         if (workspaceId !== useWorkspaceStore.getState().currentWorkspaceId) return
         setCreatedAnswer(result.answers[0] || result.answer)
+        setGuidanceEnrichmentTaskId(result.guidance_enrichment_task_id || '')
+        setVectorRebuildTaskId(result.vector_rebuild_task_id || '')
         toast.success(t('answerCatalog.sources.excelCreated', {
           defaultValue: 'Created {{count}} answer candidate(s) from Excel.',
           count: result.answer_count || 1,
         }))
         fetchSnapshots()
-        resetForm()
         return
       }
       const draftCandidate = candidate || handleAnalyzeSource({ showToast: false })
@@ -959,7 +1206,7 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
   }
 
   return (
-    <div className={`flex h-full flex-col gap-4 ${embedded ? 'p-0' : 'p-4'}`}>
+    <div className={`flex h-full min-h-0 flex-col gap-4 overflow-x-hidden overflow-y-auto ${embedded ? 'p-0 pr-1' : 'p-4'}`}>
       {!embedded && (
       <div className="flex items-start gap-3">
         <div className="rounded-md border bg-muted/40 p-2">
@@ -1115,12 +1362,14 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
           </div>
 
           <div className="grid gap-3 rounded-md border bg-muted/10 p-3">
-            <div className="grid gap-2 lg:grid-cols-[1fr_190px]">
+            <div className="grid gap-2 lg:grid-cols-[1fr_190px_230px]">
               <div className="grid gap-2">
                 <Label>{t('answerCatalog.sources.selectConnector', 'Registered Connector')}</Label>
                 <Select value={selectedConnectorId || 'none'} onValueChange={(value) => {
                   setSelectedConnectorId(value === 'none' || value === 'empty' ? '' : value)
                   setConnectorPreview(null)
+                  setConnectorMapping({})
+                  setConnectorGuidanceColumns([])
                 }}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -1136,6 +1385,21 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
                 </Select>
               </div>
               <div className="grid gap-2">
+                <Label>{t('answerCatalog.sources.conversionPurpose', 'Conversion Purpose')}</Label>
+                <Select value={connectorPurpose} onValueChange={(value) => {
+                  const purpose = value as StructuredConversionPurpose
+                  setConnectorPurpose(purpose)
+                  if (purpose === 'id_lookup') setConnectorMode('row_per_answer')
+                  setConnectorPreview(null)
+                }}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="faq">{t('answerCatalog.sources.purposeFaq', 'General FAQ')}</SelectItem>
+                    <SelectItem value="id_lookup">{t('answerCatalog.sources.purposeIdLookup', 'Find an ID from details')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
                 <Label>{t('answerCatalog.sources.connectorMode', 'Creation Mode')}</Label>
                 <Select value={connectorMode} onValueChange={(value) => {
                   setConnectorMode(value as ConnectorMaterializationMode)
@@ -1143,7 +1407,9 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
                 }}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="table_as_dataset">{t('answerCatalog.sources.connectorModeDataset', 'Whole table as one dataset answer candidate')}</SelectItem>
+                    {connectorPurpose !== 'id_lookup' && (
+                      <SelectItem value="table_as_dataset">{t('answerCatalog.sources.connectorModeDataset', 'Whole table as one dataset answer candidate')}</SelectItem>
+                    )}
                     <SelectItem value="row_per_answer">{t('answerCatalog.sources.connectorModeRows', 'One answer candidate per row')}</SelectItem>
                   </SelectContent>
                 </Select>
@@ -1191,7 +1457,14 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
                 {isConnectorBusy ? <Loader2Icon className="h-4 w-4 animate-spin" /> : <EyeIcon className="h-4 w-4" />}
                 {t('answerCatalog.sources.mappingPreview', 'Preview Mapping')}
               </Button>
-              <Button onClick={handleMaterializeConnector} disabled={isConnectorBusy || !selectedConnectorId}>
+              <Button
+                onClick={handleMaterializeConnector}
+                disabled={
+                  isConnectorBusy
+                  || !selectedConnectorId
+                  || (connectorPurpose === 'id_lookup' && (!connectorPreview || !connectorIdLookupValidation.ready))
+                }
+              >
                 {isConnectorBusy ? <Loader2Icon className="h-4 w-4 animate-spin" /> : <SparklesIcon className="h-4 w-4" />}
                 {t('answerCatalog.sources.materializeConnector', 'Create Answer Candidates')}
               </Button>
@@ -1220,12 +1493,62 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
                 <div className="grid gap-2 md:grid-cols-2">
                   <PreviewList
                     title={t('answerCatalog.sources.mappingFields', 'Mapped Fields')}
-                    items={Object.entries(connectorPreview.mapping).map(([target, source]) => `${target}: ${source}`)}
+                    items={Object.entries(connectorMapping).map(([target, source]) => `${target}: ${source}`)}
                   />
                   <PreviewList
                     title={t('answerCatalog.sources.guidanceColumns', 'Finding Hint Columns')}
-                    items={connectorPreview.guidance_columns}
+                    items={connectorGuidanceColumns}
                   />
+                </div>
+                <div className="grid gap-3 rounded-md border bg-muted/10 p-3">
+                  <div>
+                    <div className="text-sm font-semibold">
+                      {connectorPurpose === 'id_lookup'
+                        ? t('answerCatalog.sources.idLookupMapping', 'ID Lookup Mapping')
+                        : t('answerCatalog.sources.rowAnswerFields', 'Row Answer Fields')}
+                    </div>
+                    <div className="text-xs leading-5 text-muted-foreground">
+                      {connectorPurpose === 'id_lookup'
+                        ? t('answerCatalog.sources.idLookupMappingDesc', 'Select the business ID to return and the detail fields that help users find it.')
+                        : t('answerCatalog.sources.rowAnswerFieldsDesc', 'These mappings are applied row by row. One row becomes one answer candidate when row-per-answer mode is selected.')}
+                    </div>
+                  </div>
+                  <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
+                    {structuredAnswerMappingRoles.map((role) => (
+                      <StructuredMappingSelect
+                        key={role}
+                        role={role}
+                        columns={connectorPreview.sample.columns}
+                        value={connectorMapping[role] || 'none'}
+                        purpose={connectorPurpose}
+                        onChange={(value) => updateConnectorMapping(role, value)}
+                      />
+                    ))}
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>{t('answerCatalog.sources.guidanceColumns', 'Finding Hint Columns')}</Label>
+                    <div className="flex flex-wrap gap-2">
+                      {connectorPreview.sample.columns.map((column) => {
+                        const isMapped = Object.values(connectorMapping).includes(column)
+                        return (
+                          <label key={column} className="flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-xs">
+                            <Checkbox
+                              checked={connectorGuidanceColumns.includes(column)}
+                              disabled={isMapped}
+                              onCheckedChange={(checked) => toggleConnectorGuidanceColumn(column, checked === true)}
+                            />
+                            <span className={isMapped ? 'text-muted-foreground' : ''}>{column}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </div>
+                  {connectorPurpose === 'id_lookup' && (
+                    <IdLookupValidationPanel validation={connectorIdLookupValidation} sampleOnly />
+                  )}
+                  <div className="text-xs text-muted-foreground">
+                    {t('answerCatalog.sources.repreviewAfterMapping', 'Run mapping preview again after changing fields to refresh validation.')}
+                  </div>
                 </div>
                 {connectorPreview.sample.warnings.length > 0 && (
                   <PreviewList title={t('common.warnings', 'Warnings')} items={connectorPreview.sample.warnings} />
@@ -1272,6 +1595,7 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
                   if (nextType !== 'excel') {
                     setExcelFile(null)
                     setExcelPreview(null)
+                    setIsExcelAnalysisReady(false)
                     setExcelSheetName('')
                   }
                 }}
@@ -1318,7 +1642,7 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
                     {t('answerCatalog.sources.excelLimitHelp', 'Supported formats: .xlsx, .xlsm, .xltx, .xltm. Maximum upload size: 200MB.')}
                   </div>
                   {fileName && <div className="text-xs text-muted-foreground">{fileName}</div>}
-                  {excelPreview?.truncated && (
+                  {isExcelAnalysisReady && excelPreview?.truncated && (
                     <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs leading-5 text-amber-950 dark:border-amber-800 dark:bg-amber-950/20 dark:text-amber-100">
                       {t('answerCatalog.sources.excelTruncated', {
                         defaultValue: 'This sheet contains more than {{limit}} data rows. Row-per-answer creation is disabled to prevent silent data loss. Split the sheet or create one dataset answer candidate.',
@@ -1335,7 +1659,7 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
                         value={excelSheetName}
                         onValueChange={(value) => {
                           setExcelSheetName(value)
-                          setCandidate(null)
+                          invalidateExcelAnalysis()
                         }}
                       >
                         <SelectTrigger><SelectValue /></SelectTrigger>
@@ -1351,23 +1675,51 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
                     <div className="grid gap-2 sm:grid-cols-2">
                       <div className="grid gap-2">
                         <Label>{t('answerCatalog.sources.headerRow', 'Header Row')}</Label>
-                        <Input type="number" min={1} value={excelHeaderRow} onChange={(event) => setExcelHeaderRow(event.target.value)} />
+                        <Input
+                          type="number"
+                          min={1}
+                          value={excelHeaderRow}
+                          onChange={(event) => {
+                            setExcelHeaderRow(event.target.value)
+                            invalidateExcelAnalysis()
+                          }}
+                        />
                       </div>
                       <div className="grid gap-2">
                         <Label>{t('answerCatalog.sources.dataStartRow', 'Data Start Row')}</Label>
-                        <Input type="number" min={2} value={excelDataStartRow} onChange={(event) => setExcelDataStartRow(event.target.value)} />
+                        <Input
+                          type="number"
+                          min={2}
+                          value={excelDataStartRow}
+                          onChange={(event) => {
+                            setExcelDataStartRow(event.target.value)
+                            invalidateExcelAnalysis()
+                          }}
+                        />
                       </div>
                     </div>
                   </>
                 )}
                 <Button
-                  variant="outline"
-                  onClick={() => excelFile && handleExcelPreview(excelFile, { sheetName: excelSheetName })}
-                  disabled={isExcelBusy || !excelFile}
+                  onClick={() => excelFile && handleExcelPreview(excelFile, {
+                    sheetName: excelSheetName,
+                    headerRow: Number(excelHeaderRow) || 1,
+                    dataStartRow: Number(excelDataStartRow) || undefined,
+                    startWizard: true,
+                  })}
+                  disabled={isExcelBusy || !excelFile || !excelPreview}
                 >
-                  {isExcelBusy ? <Loader2Icon className="h-4 w-4 animate-spin" /> : <EyeIcon className="h-4 w-4" />}
-                  {t('answerCatalog.sources.previewExcel', 'Preview Excel')}
+                  {isExcelBusy ? <Loader2Icon className="h-4 w-4 animate-spin" /> : <SparklesIcon className="h-4 w-4" />}
+                  {isExcelAnalysisReady
+                    ? t('answerCatalog.sources.reanalyzeExcelSheet', 'Analyze Again')
+                    : t('answerCatalog.sources.startExcelSetup', 'Analyze Sheet and Start FAQ Setup')}
                 </Button>
+                <div className="text-xs leading-5 text-muted-foreground">
+                  {t(
+                    'answerCatalog.sources.startExcelSetupHelp',
+                    'The selected sheet and row settings are analyzed first. The FAQ setup wizard opens only after analysis, and no FAQ is created at this stage.'
+                  )}
+                </div>
               </div>
             )}
 
@@ -1406,13 +1758,52 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
           <div className="mb-4">
             <div className="flex items-center gap-2">
               <SparklesIcon className="h-4 w-4" />
-              <div className="font-semibold">{t('answerCatalog.sources.materialize', 'Review Mapping and Create Answer Candidates')}</div>
+              <div className="font-semibold">
+                {sourceType === 'excel' && !isExcelAnalysisReady
+                  ? t('answerCatalog.sources.excelSetupWaitingTitle', 'Prepare Excel Data')
+                  : t('answerCatalog.sources.materialize', 'Review Mapping and Create Answer Candidates')}
+              </div>
             </div>
             <p className="mt-1 text-xs leading-5 text-muted-foreground">
-              {t('answerCatalog.sources.draftReviewPanelDesc', 'Review common settings, row mapping, and finding hints before creating unpublished answer candidates. Excel row-per-answer creation can create many candidates at once.')}
+              {sourceType === 'excel' && !isExcelAnalysisReady
+                ? t(
+                    'answerCatalog.sources.excelSetupWaitingDesc',
+                    'Select the workbook, sheet, header row, and data start row first. The FAQ setup wizard starts after the selected sheet is analyzed.'
+                  )
+                : t('answerCatalog.sources.draftReviewPanelDesc', 'Review common settings, row mapping, and finding hints before creating unpublished answer candidates. Excel row-per-answer creation can create many candidates at once.')}
             </p>
           </div>
           <div className="grid gap-4">
+            {sourceType === 'excel' && !isExcelAnalysisReady ? (
+              <div className="grid min-h-80 place-items-center rounded-md border border-dashed bg-muted/10 p-6 text-center">
+                <div className="max-w-lg">
+                  <FileTextIcon className="mx-auto h-8 w-8 text-muted-foreground" />
+                  <div className="mt-3 font-semibold">
+                    {excelPreview
+                      ? t('answerCatalog.sources.excelSheetSettingsPending', 'Confirm the Sheet Settings')
+                      : t('answerCatalog.sources.excelFilePending', 'Select an Excel File')}
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                    {excelPreview
+                      ? t(
+                          'answerCatalog.sources.excelSheetSettingsPendingDesc',
+                          'The workbook has been loaded, but FAQ mapping has not started. Confirm the sheet and row settings on the left, then analyze the sheet to generate fresh batch information and automatic column mappings.'
+                        )
+                      : t(
+                          'answerCatalog.sources.excelFilePendingDesc',
+                          'Choose an Excel workbook on the left. After its sheet list is loaded, select the data location to analyze.'
+                        )}
+                  </p>
+                  {excelPreview && (
+                    <div className="mt-4 inline-flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm">
+                      <span className="text-muted-foreground">{t('answerCatalog.sources.selectedSheet', 'Selected sheet')}</span>
+                      <span className="font-medium">{excelSheetName}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <>
             <ReviewStepNav
               steps={reviewSteps}
               activeStep={activeReviewStep}
@@ -1535,6 +1926,40 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
                   </div>
                   <Badge variant="outline">{excelPreview.row_count.toLocaleString()} {t('answerCatalog.sources.rows', 'Rows')}</Badge>
                 </div>
+                <div className="grid gap-2 rounded-md border bg-background p-3">
+                  <Label>{t('answerCatalog.sources.conversionPurpose', 'Conversion Purpose')}</Label>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <Button
+                      type="button"
+                      variant={structuredPurpose === 'faq' ? 'default' : 'outline'}
+                      className="h-auto justify-start py-3 text-left"
+                      onClick={() => setStructuredPurpose('faq')}
+                    >
+                      <span>
+                        <span className="block font-medium">{t('answerCatalog.sources.purposeFaq', 'General FAQ')}</span>
+                        <span className="mt-1 block text-xs font-normal opacity-80">
+                          {t('answerCatalog.sources.purposeFaqDesc', 'Return the mapped answer text for a user question.')}
+                        </span>
+                      </span>
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={structuredPurpose === 'id_lookup' ? 'default' : 'outline'}
+                      className="h-auto justify-start py-3 text-left"
+                      onClick={() => {
+                        setStructuredPurpose('id_lookup')
+                        setStructuredMode('row_per_answer')
+                      }}
+                    >
+                      <span>
+                        <span className="block font-medium">{t('answerCatalog.sources.purposeIdLookup', 'Find an ID from details')}</span>
+                        <span className="mt-1 block text-xs font-normal opacity-80">
+                          {t('answerCatalog.sources.purposeIdLookupDesc', 'Search descriptive fields and return the business ID stored in the selected ID column.')}
+                        </span>
+                      </span>
+                    </Button>
+                  </div>
+                </div>
                 <div className="grid gap-3 md:grid-cols-3">
                   <Metric label={t('answerCatalog.sources.previewRowsLoaded', 'Rows loaded')} value={excelPreview.row_count} />
                   <Metric label={t('answerCatalog.sources.previewColumnsDetected', 'Columns detected')} value={excelPreview.columns.length} />
@@ -1548,13 +1973,14 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
                       {t('answerCatalog.sources.rowAnswerFieldsDesc', 'These mappings are applied row by row. One row becomes one answer candidate when row-per-answer mode is selected.')}
                     </div>
                   </div>
-                  <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
+                  <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
                     {structuredAnswerMappingRoles.map((role) => (
                       <StructuredMappingSelect
                         key={role}
                         role={role}
                         columns={excelPreview.columns}
                         value={structuredMapping[role] || 'none'}
+                        purpose={structuredPurpose}
                         onChange={(value) => updateStructuredMapping(role, value)}
                       />
                     ))}
@@ -1584,6 +2010,7 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
                   mapping={structuredMapping}
                   guidanceColumns={structuredGuidanceColumns}
                   baseTitle={title}
+                  purpose={structuredPurpose}
                 />
                 <div className="grid gap-2">
                   <Label>{t('answerCatalog.sources.guidanceColumns', 'Finding Hint Columns')}</Label>
@@ -1606,13 +2033,18 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
                     {t('answerCatalog.sources.guidanceColumnsHelp', 'Finding hint columns are added to each row as keyword hints. Columns already used as answer fields or policy fields are disabled.')}
                   </div>
                 </div>
+                {structuredPurpose === 'id_lookup' && (
+                  <IdLookupValidationPanel validation={excelIdLookupValidation} />
+                )}
                 <div className="grid gap-2">
                   <Label>{t('answerCatalog.sources.creationMode', 'Creation Mode')}</Label>
                   <Select value={structuredMode} onValueChange={(value) => setStructuredMode(value as ConnectorMaterializationMode)}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="row_per_answer">{t('answerCatalog.sources.connectorModeRows', 'One answer candidate per row')}</SelectItem>
-                      <SelectItem value="table_as_dataset">{t('answerCatalog.sources.connectorModeDataset', 'Whole table as one dataset answer candidate')}</SelectItem>
+                      {structuredPurpose !== 'id_lookup' && (
+                        <SelectItem value="table_as_dataset">{t('answerCatalog.sources.connectorModeDataset', 'Whole table as one dataset answer candidate')}</SelectItem>
+                      )}
                     </SelectContent>
                   </Select>
                   <div className="rounded-md border bg-background p-2 text-xs leading-5 text-muted-foreground">
@@ -1635,11 +2067,22 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
               </div>
             )}
             {activeReviewStep === 'hints' && sourceType === 'excel' && excelPreview ? (
-              <ExcelFindingHintSummary
-                mapping={structuredMapping}
-                guidanceColumns={structuredGuidanceColumns}
-                rowCount={excelPreview.row_count}
-              />
+              <div className="grid gap-4">
+                <ExcelFindingHintSummary
+                  mapping={structuredMapping}
+                  guidanceColumns={structuredGuidanceColumns}
+                  rowCount={excelPreview.row_count}
+                />
+                {structuredMode === 'row_per_answer' && (
+                  <BatchLlmGuidancePanel
+                    enabled={llmGuidanceEnabled}
+                    scope={llmGuidanceScope}
+                    rowCount={excelPreview.row_count}
+                    onEnabledChange={setLlmGuidanceEnabled}
+                    onScopeChange={setLlmGuidanceScope}
+                  />
+                )}
+              </div>
             ) : activeReviewStep === 'hints' ? (
               <div className="grid gap-4">
                 <div className="grid gap-2">
@@ -1754,6 +2197,38 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
                     </div>
                   )}
                 </div>
+                {guidanceEnrichmentTaskId && (
+                  <div className="grid gap-3 rounded-md border bg-background p-4">
+                    <div>
+                      <div className="text-sm font-semibold">
+                        {t('answerCatalog.sources.batchLlmTaskTitle', 'LLM Finding Hint Enrichment')}
+                      </div>
+                      <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                        {t(
+                          'answerCatalog.sources.batchLlmTaskDesc',
+                          'Answer candidates have been created. Finding hints are now being enriched in the background.'
+                        )}
+                      </div>
+                    </div>
+                    <TaskProgressPanel taskId={guidanceEnrichmentTaskId} compact />
+                  </div>
+                )}
+                {vectorRebuildTaskId && (
+                  <div className="grid gap-3 rounded-md border bg-background p-4">
+                    <div>
+                      <div className="text-sm font-semibold">
+                        {t('answerCatalog.sources.vectorTaskTitle', 'Preparing semantic search')}
+                      </div>
+                      <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                        {t(
+                          'answerCatalog.sources.vectorTaskDesc',
+                          'FAQ candidates have been created. Semantic search vectors are being prepared automatically in the background.'
+                        )}
+                      </div>
+                    </div>
+                    <TaskProgressPanel taskId={vectorRebuildTaskId} compact />
+                  </div>
+                )}
               </div>
             )}
 
@@ -1779,6 +2254,8 @@ export default function AnswerSources({ embedded = false }: { embedded?: boolean
                 </Button>
               )}
             </div>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -2086,23 +2563,90 @@ function SnapshotPillList({
   )
 }
 
+function IdLookupValidationPanel({
+  validation,
+  sampleOnly = false,
+}: {
+  validation: AnswerStructuredIdLookupValidation
+  sampleOnly?: boolean
+}) {
+  const { t } = useTranslation()
+  return (
+    <div className={`rounded-md border p-3 ${validation.ready ? 'border-emerald-200 bg-emerald-50/50 dark:border-emerald-900 dark:bg-emerald-950/10' : 'border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/20'}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-sm font-semibold">
+          {t('answerCatalog.sources.idLookupValidation', 'ID Lookup Validation')}
+        </div>
+        <Badge variant="outline">
+          {validation.ready
+            ? t('answerCatalog.sources.mappingReady', 'Ready')
+            : t('answerCatalog.sources.mappingNeedsReview', 'Needs review')}
+        </Badge>
+      </div>
+      <div className="mt-2 grid gap-2 text-xs sm:grid-cols-3">
+        <div>
+          <span className="text-muted-foreground">{t('answerCatalog.sources.returnIdColumn', 'Return ID')}: </span>
+          <span className="font-medium">{validation.id_column || '-'}</span>
+        </div>
+        <div>
+          <span className="text-muted-foreground">{t('answerCatalog.sources.searchableColumns', 'Searchable details')}: </span>
+          <span className="font-medium">{validation.searchable_columns.length.toLocaleString()}</span>
+        </div>
+        <div>
+          <span className="text-muted-foreground">{t('answerCatalog.sources.validIdRows', 'Valid ID rows')}: </span>
+          <span className="font-medium">{validation.valid_id_count.toLocaleString()} / {validation.row_count.toLocaleString()}</span>
+        </div>
+      </div>
+      {validation.searchable_columns.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {validation.searchable_columns.map((column) => (
+            <Badge key={column} variant="outline">{column}</Badge>
+          ))}
+        </div>
+      )}
+      {validation.warnings.length > 0 && (
+        <ul className="mt-2 space-y-1 text-xs leading-5">
+          {validation.warnings.map((warning) => <li key={warning}>• {warning}</li>)}
+        </ul>
+      )}
+      {sampleOnly && (
+        <div className="mt-2 text-xs text-muted-foreground">
+          {t('answerCatalog.sources.sampleValidationOnly', 'This check uses the preview sample. All rows are validated again when candidates are created.')}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function StructuredMappingSelect({
   role,
   columns,
   value,
+  purpose = 'faq',
   onChange,
 }: {
   role: StructuredMappingRole
   columns: string[]
   value: string
+  purpose?: StructuredConversionPurpose
   onChange: (value: string) => void
 }) {
   const { t } = useTranslation()
+  const label = purpose === 'id_lookup' && role === 'id'
+    ? t('answerCatalog.sources.returnIdColumn', 'Return ID')
+    : purpose === 'id_lookup' && role === 'answer'
+      ? t('answerCatalog.sources.additionalDetailColumn', 'Additional Detail')
+      : t(`answerCatalog.sources.mappingRoles.${role}`, role)
   return (
-    <div className="grid gap-1">
-      <Label>{t(`answerCatalog.sources.mappingRoles.${role}`, role)}</Label>
+    <div className="grid min-w-0 gap-1">
+      <Label>{label}</Label>
       <Select value={value} onValueChange={onChange}>
-        <SelectTrigger><SelectValue /></SelectTrigger>
+        <SelectTrigger
+          className="min-w-0 [&>span]:min-w-0 [&>span]:truncate"
+          title={value !== 'none' ? value : undefined}
+        >
+          <SelectValue />
+        </SelectTrigger>
         <SelectContent>
           <SelectItem value="none">{t('common.none', 'None')}</SelectItem>
           {columns.map((column) => (
@@ -2122,11 +2666,13 @@ function ExcelAnswerMappingPreview({
   mapping,
   guidanceColumns,
   baseTitle,
+  purpose,
 }: {
   preview: AnswerExcelPreviewResponse
   mapping: Partial<Record<StructuredMappingRole, string>>
   guidanceColumns: string[]
   baseTitle: string
+  purpose: StructuredConversionPurpose
 }) {
   const { t } = useTranslation()
   const sampleRows = preview.profile.sample_rows.slice(0, 3)
@@ -2171,7 +2717,11 @@ function ExcelAnswerMappingPreview({
               <th className="whitespace-nowrap px-3 py-2 text-left font-medium">{t('answerCatalog.sources.sourceRow', 'Source Row')}</th>
               <th className="min-w-48 px-3 py-2 text-left font-medium">{t('answerCatalog.sources.mappingRoles.title', 'Title')}</th>
               <th className="min-w-48 px-3 py-2 text-left font-medium">{t('answerCatalog.sources.mappingRoles.question', 'Representative Question')}</th>
-              <th className="min-w-64 px-3 py-2 text-left font-medium">{t('answerCatalog.sources.mappingRoles.answer', 'Answer Body')}</th>
+              <th className="min-w-64 px-3 py-2 text-left font-medium">
+                {purpose === 'id_lookup'
+                  ? t('answerCatalog.sources.returnIdColumn', 'Return ID')
+                  : t('answerCatalog.sources.mappingRoles.answer', 'Answer Body')}
+              </th>
               <th className="whitespace-nowrap px-3 py-2 text-left font-medium">{t('answerCatalog.sources.mappingRoles.category', 'Category')}</th>
               <th className="whitespace-nowrap px-3 py-2 text-left font-medium">{t('answerCatalog.sources.mappingRoles.status', 'Status')}</th>
               <th className="whitespace-nowrap px-3 py-2 text-left font-medium">{t('answerCatalog.sources.validity', 'Validity')}</th>
@@ -2204,8 +2754,8 @@ function ExcelAnswerMappingPreview({
                     <td className="max-w-72 truncate px-3 py-2 align-top" title={valueForRole(row, 'question')}>
                       {formatValue(valueForRole(row, 'question'))}
                     </td>
-                    <td className="max-w-96 truncate px-3 py-2 align-top" title={valueForRole(row, 'answer')}>
-                      {formatValue(valueForRole(row, 'answer'))}
+                    <td className="max-w-96 truncate px-3 py-2 align-top" title={valueForRole(row, purpose === 'id_lookup' ? 'id' : 'answer')}>
+                      {formatValue(valueForRole(row, purpose === 'id_lookup' ? 'id' : 'answer'))}
                     </td>
                     <td className="max-w-40 truncate px-3 py-2 align-top" title={valueForRole(row, 'category')}>
                       {formatValue(valueForRole(row, 'category'))}
@@ -2293,6 +2843,110 @@ function ExcelFindingHintSummary({
       <div className="rounded-md border bg-background p-3 text-xs leading-5 text-muted-foreground">
         {t('answerCatalog.sources.excelHintsReviewHelp', 'After candidates are created, each candidate can still be edited in the Answers menu. Add answer-specific synonyms or exclusions there when needed.')}
       </div>
+    </div>
+  )
+}
+
+function BatchLlmGuidancePanel({
+  enabled,
+  scope,
+  rowCount,
+  onEnabledChange,
+  onScopeChange,
+}: {
+  enabled: boolean
+  scope: BatchGuidanceScope
+  rowCount: number
+  onEnabledChange: (enabled: boolean) => void
+  onScopeChange: (scope: BatchGuidanceScope) => void
+}) {
+  const { t } = useTranslation()
+  const maximumRequestCount = Math.ceil(rowCount / 10)
+
+  return (
+    <div className="grid gap-3 rounded-md border bg-background p-4">
+      <div className="flex items-start gap-3">
+        <Checkbox
+          id="batch-llm-guidance"
+          checked={enabled}
+          onCheckedChange={(checked) => onEnabledChange(checked === true)}
+        />
+        <div className="min-w-0">
+          <Label htmlFor="batch-llm-guidance" className="cursor-pointer text-sm font-semibold">
+            {t('answerCatalog.sources.batchLlmEnable', 'Enrich row-level finding hints with LLM')}
+          </Label>
+          <div className="mt-1 text-xs leading-5 text-muted-foreground">
+            {t(
+              'answerCatalog.sources.batchLlmEnableHelp',
+              'After unpublished FAQ candidates are created, the LLM adds only representative questions, keywords, and synonyms. It does not generate or change answer content.'
+            )}
+          </div>
+        </div>
+      </div>
+
+      {enabled && (
+        <>
+          <div className="grid gap-2 md:grid-cols-2">
+            <Button
+              type="button"
+              variant="outline"
+              aria-pressed={scope === 'coverage'}
+              className={`h-auto justify-start whitespace-normal p-3 text-left ${
+                scope === 'coverage' ? 'border-emerald-500 bg-emerald-50/60 dark:bg-emerald-950/20' : ''
+              }`}
+              onClick={() => onScopeChange('coverage')}
+            >
+              <span>
+                <span className="block font-medium">
+                  {t('answerCatalog.sources.batchLlmCoverage', 'Improve search-expression coverage (Recommended)')}
+                </span>
+                <span className="mt-1 block text-xs font-normal leading-5 text-muted-foreground">
+                  {t(
+                    'answerCatalog.sources.batchLlmCoverageDesc',
+                    'Checks spoken questions, synonyms, and Korean-English product aliases, and enriches FAQs whose search coverage is insufficient.'
+                  )}
+                </span>
+              </span>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              aria-pressed={scope === 'all'}
+              className={`h-auto justify-start whitespace-normal p-3 text-left ${
+                scope === 'all' ? 'border-emerald-500 bg-emerald-50/60 dark:bg-emerald-950/20' : ''
+              }`}
+              onClick={() => onScopeChange('all')}
+            >
+              <span>
+                <span className="block font-medium">
+                  {t('answerCatalog.sources.batchLlmAll', 'All generated FAQs')}
+                </span>
+                <span className="mt-1 block text-xs font-normal leading-5 text-muted-foreground">
+                  {t(
+                    'answerCatalog.sources.batchLlmAllDesc',
+                    'Review and enrich every row. This gives wider coverage but uses more LLM calls.'
+                  )}
+                </span>
+              </span>
+            </Button>
+          </div>
+          <div className="rounded-md border bg-muted/10 px-3 py-2 text-xs leading-5 text-muted-foreground">
+            {t('answerCatalog.sources.batchLlmEstimate', {
+              defaultValue: '{{rows}} FAQs, up to {{calls}} LLM requests, and up to 5 additional hints per FAQ.',
+              rows: rowCount.toLocaleString(),
+              calls: maximumRequestCount.toLocaleString(),
+            })}
+            {scope === 'coverage' && (
+              <span className="ml-1">
+                {t(
+                  'answerCatalog.sources.batchLlmEstimateCoverage',
+                  'The actual request count can be lower because FAQs with sufficient question, synonym, and bilingual coverage are skipped.'
+                )}
+              </span>
+            )}
+          </div>
+        </>
+      )}
     </div>
   )
 }

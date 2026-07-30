@@ -96,7 +96,7 @@ export default function WorkspaceDialog({ mode, open, onOpenChange }: WorkspaceD
             ...(workspaceMode !== 'kms'
               ? {
                 answer_catalog: {
-                  default_lookup_mode: 'hybrid_fast',
+                  default_lookup_mode: 'hybrid',
                   structured_lookup_enabled: workspaceMode !== 'kms',
                   default_display_policy: 'both',
                 },
@@ -121,7 +121,7 @@ export default function WorkspaceDialog({ mode, open, onOpenChange }: WorkspaceD
         if (workspaceMode !== 'kms') {
           nextMetadata.answer_catalog = {
             ...(selectedWorkspace?.metadata?.answer_catalog || {}),
-            default_lookup_mode: selectedWorkspace?.metadata?.answer_catalog?.default_lookup_mode || 'hybrid_fast',
+            default_lookup_mode: selectedWorkspace?.metadata?.answer_catalog?.default_lookup_mode || 'hybrid',
             structured_lookup_enabled: selectedWorkspace?.metadata?.answer_catalog?.structured_lookup_enabled ?? true,
             default_display_policy: selectedWorkspace?.metadata?.answer_catalog?.default_display_policy || 'both',
           }

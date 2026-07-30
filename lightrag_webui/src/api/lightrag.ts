@@ -2106,8 +2106,32 @@ export type AnswerStructuredMaterializeRequest = {
   mapping?: Record<string, string>
   guidance_columns?: string[]
   materialization_mode?: 'table_as_dataset' | 'row_per_answer'
+  conversion_purpose?: 'faq' | 'id_lookup'
   source_truncated?: boolean
+  llm_guidance_enrichment?: {
+    enabled: boolean
+    scope?: 'missing_or_weak' | 'coverage' | 'all'
+    batch_size?: number
+    max_suggestions?: number
+  }
   metadata?: Record<string, any>
+}
+
+export type AnswerStructuredIdLookupValidation = {
+  enabled: boolean
+  ready: boolean
+  id_column?: string | null
+  searchable_columns: string[]
+  row_count: number
+  valid_id_count: number
+  blank_id_rows: number[]
+  duplicate_ids: string[]
+  ambiguous_detail_groups: Array<{
+    values: Record<string, string>
+    ids: string[]
+    rows: number[]
+  }>
+  warnings: string[]
 }
 
 export type AnswerStructuredMaterializeResponse = {
@@ -2123,6 +2147,11 @@ export type AnswerStructuredMaterializeResponse = {
   guidance_truncated: boolean
   snapshot?: AnswerSourceSnapshot | null
   source_link?: AnswerSourceLink | null
+  validation: AnswerStructuredIdLookupValidation
+  guidance_enrichment_task_id?: string | null
+  guidance_enrichment_stream_url?: string | null
+  vector_rebuild_task_id?: string | null
+  vector_rebuild_stream_url?: string | null
 }
 
 export type AnswerStructuredLookupLog = {
@@ -2190,6 +2219,7 @@ export type AnswerSourceConnectorMappingPreview = {
   mapping: Record<string, string>
   guidance_columns: string[]
   materialization_modes: Array<'table_as_dataset' | 'row_per_answer'>
+  validation: AnswerStructuredIdLookupValidation
 }
 
 export type AnswerSourceConnectorMaterializeRequest = {
@@ -2197,6 +2227,7 @@ export type AnswerSourceConnectorMaterializeRequest = {
   mapping?: Record<string, string>
   guidance_columns?: string[]
   materialization_mode?: 'table_as_dataset' | 'row_per_answer'
+  conversion_purpose?: 'faq' | 'id_lookup'
   status?: AnswerStatus
   tags?: string[]
   metadata?: Record<string, any>
@@ -2253,14 +2284,79 @@ export type AnswerResolveCandidate = {
   selected_by?: string
 }
 
+export type AnswerAliasGroup = {
+  alias_id: string
+  workspace: string
+  canonical_term: string
+  aliases: string[]
+  enabled: boolean
+  source: 'builtin' | 'workspace' | string
+  metadata: Record<string, any>
+  create_time?: string | null
+  update_time?: string | null
+}
+
+export type AnswerTermCandidateType = 'synonym' | 'abbreviation' | 'neologism'
+export type AnswerTermCandidateStatus = 'suggested' | 'approved' | 'rejected'
+
+export type AnswerTermCandidate = {
+  candidate_id: string
+  workspace: string
+  canonical_term: string
+  aliases: string[]
+  term_type: AnswerTermCandidateType
+  status: AnswerTermCandidateStatus
+  confidence: number
+  rationale?: string | null
+  evidence: Array<{
+    ref: string
+    kind: 'faq' | 'unmatched_query' | string
+    label?: string
+    answer_id?: string
+    create_time?: string | null
+  }>
+  source: string
+  metadata: Record<string, any>
+  create_time?: string | null
+  update_time?: string | null
+}
+
+export type AnswerTermDiscoveryRequest = {
+  include_drafts?: boolean
+  include_no_match_queries?: boolean
+  answer_limit?: number
+  event_limit?: number
+  batch_size?: number
+}
+
+export type AnswerTermDiscoveryResponse = {
+  task_id: string
+  stream_url: string
+  message: string
+}
+
+export type AnswerTermCandidateActionResponse = {
+  candidate: AnswerTermCandidate
+  alias_group?: AnswerAliasGroup | null
+}
+
+export type AnswerAliasExpansion = {
+  canonical_term: string
+  matched_term: string
+  expanded_terms: string[]
+  source: string
+}
+
 export type AnswerResolveResponse = {
   selected_answer?: AnswerItem | null
+  matched_id?: string | null
   confidence: number
   candidates: AnswerResolveCandidate[]
   trace_id: string
   rationale: string
   retrieval_mode?: 'keyword' | 'hybrid' | 'llm_rerank'
   selected_by?: string
+  alias_expansions?: AnswerAliasExpansion[]
 }
 
 export type AnswerSearchRequest = AnswerResolveRequest & {
@@ -2271,6 +2367,7 @@ export type AnswerSearchRequest = AnswerResolveRequest & {
 export type AnswerSearchResponse = {
   matched: boolean
   answer_id?: string | null
+  matched_id?: string | null
   title?: string | null
   response?: string | null
   summary?: string | null
@@ -2290,6 +2387,7 @@ export type AnswerSearchResponse = {
   rationale: string
   retrieval_mode?: 'keyword' | 'hybrid' | 'llm_rerank'
   selected_by?: string
+  alias_expansions?: AnswerAliasExpansion[]
 }
 
 export type AnswerGuidanceSuggestionRequest = {
@@ -2437,6 +2535,64 @@ export const suggestAnswerGuidance = async (
   request: AnswerGuidanceSuggestionRequest
 ): Promise<AnswerGuidanceSuggestionResponse> => {
   const response = await axiosInstance.post(`/api/answers/${encodeURIComponent(answerId)}/guidance/suggest`, request)
+  return response.data
+}
+
+export const listAnswerAliases = async (search?: string): Promise<AnswerAliasGroup[]> => {
+  const response = await axiosInstance.get('/api/answers/aliases', {
+    params: search?.trim() ? { search: search.trim() } : undefined,
+  })
+  return response.data
+}
+
+export const createAnswerAlias = async (request: {
+  canonical_term: string
+  aliases: string[]
+  enabled?: boolean
+  metadata?: Record<string, any>
+}): Promise<AnswerAliasGroup> => {
+  const response = await axiosInstance.post('/api/answers/aliases', request)
+  return response.data
+}
+
+export const deleteAnswerAlias = async (
+  aliasId: string
+): Promise<{ message: string; alias_id: string }> => {
+  const response = await axiosInstance.delete(`/api/answers/aliases/${encodeURIComponent(aliasId)}`)
+  return response.data
+}
+
+export const listAnswerTermCandidates = async (params?: {
+  status?: AnswerTermCandidateStatus
+  search?: string
+  limit?: number
+}): Promise<AnswerTermCandidate[]> => {
+  const response = await axiosInstance.get('/api/answers/aliases/candidates', { params })
+  return response.data
+}
+
+export const analyzeAnswerTerms = async (
+  request: AnswerTermDiscoveryRequest = {}
+): Promise<AnswerTermDiscoveryResponse> => {
+  const response = await axiosInstance.post('/api/answers/aliases/candidates/analyze', request)
+  return response.data
+}
+
+export const approveAnswerTermCandidate = async (
+  candidateId: string
+): Promise<AnswerTermCandidateActionResponse> => {
+  const response = await axiosInstance.post(
+    `/api/answers/aliases/candidates/${encodeURIComponent(candidateId)}/approve`
+  )
+  return response.data
+}
+
+export const rejectAnswerTermCandidate = async (
+  candidateId: string
+): Promise<AnswerTermCandidateActionResponse> => {
+  const response = await axiosInstance.post(
+    `/api/answers/aliases/candidates/${encodeURIComponent(candidateId)}/reject`
+  )
   return response.data
 }
 
@@ -2637,7 +2793,12 @@ export const profileAnswerSourceConnector = async (
 
 export const previewAnswerSourceConnectorMapping = async (
   connectorId: string,
-  request: { mapping?: Record<string, string>; materialization_mode?: 'table_as_dataset' | 'row_per_answer' } = {}
+  request: {
+    mapping?: Record<string, string>
+    guidance_columns?: string[]
+    materialization_mode?: 'table_as_dataset' | 'row_per_answer'
+    conversion_purpose?: 'faq' | 'id_lookup'
+  } = {}
 ): Promise<AnswerSourceConnectorMappingPreview> => {
   const response = await axiosInstance.post(`/api/answers/connectors/${encodeURIComponent(connectorId)}/mapping/preview`, request)
   return response.data
