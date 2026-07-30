@@ -15,8 +15,10 @@ try:
         _compact_connector_materialization_sample,
         _embedding_to_pgvector,
         _extract_excel_rows,
+        _body_for_structured_row,
         _guidance_from_structured_profile,
         _parse_db_table_ref,
+        _validate_id_lookup_rows,
         SourceConnectorSampleResponse,
         StructuredProfileResponse,
     )
@@ -161,6 +163,68 @@ def test_structured_exclusion_column_becomes_negative_guidance():
         "negative_keyword",
     ]
     assert [item.text for item in exclusions] == ["퇴사자", "외부 고객"]
+
+
+def test_id_lookup_returns_business_id_and_combines_detail_guidance():
+    row = {
+        "product_id": "PRD-1042",
+        "manufacturer": "삼성",
+        "model_name": "AX100",
+        "symptom": "전원이 켜지지 않음",
+    }
+    mapping = {
+        "id": "product_id",
+        "title": "model_name",
+        "question": "symptom",
+    }
+
+    assert _body_for_structured_row(row, mapping, "id_lookup") == "PRD-1042"
+    guidance = _guidance_from_structured_profile(
+        [row],
+        mapping,
+        ["manufacturer"],
+        "id_lookup",
+    )
+
+    combined = [item for item in guidance if item.source == "id_lookup_details"]
+    assert len(combined) == 1
+    assert combined[0].guidance_type == "question"
+    assert "전원이 켜지지 않음" in combined[0].text
+    assert "삼성" in combined[0].text
+
+
+def test_id_lookup_validation_rejects_blank_ids_and_ambiguous_details():
+    validation = _validate_id_lookup_rows(
+        [
+            {"product_id": "PRD-1", "model": "AX100", "symptom": "전원 불량"},
+            {"product_id": "PRD-2", "model": "AX100", "symptom": "전원 불량"},
+            {"product_id": "", "model": "BX200", "symptom": "소음"},
+        ],
+        {"id": "product_id", "title": "model"},
+        ["symptom"],
+        "id_lookup",
+    )
+
+    assert validation.enabled is True
+    assert validation.ready is False
+    assert validation.blank_id_rows == [3]
+    assert validation.ambiguous_detail_groups[0]["ids"] == ["PRD-1", "PRD-2"]
+
+
+def test_id_lookup_validation_allows_repeated_id_with_different_details():
+    validation = _validate_id_lookup_rows(
+        [
+            {"product_id": "PRD-1", "symptom": "전원 불량"},
+            {"product_id": "PRD-1", "symptom": "화면 깜빡임"},
+        ],
+        {"id": "product_id", "question": "symptom"},
+        [],
+        "id_lookup",
+    )
+
+    assert validation.ready is True
+    assert validation.duplicate_ids == ["PRD-1"]
+    assert validation.ambiguous_detail_groups == []
 
 
 def test_candidate_terms_include_korean_particle_and_ending_variants():

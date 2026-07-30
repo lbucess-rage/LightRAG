@@ -21,7 +21,7 @@ export default function AnswerTestConsole({ embedded = false }: { embedded?: boo
   const [topK, setTopK] = useState('5')
   const [minScore, setMinScore] = useState('0.18')
   const [strategy, setStrategy] = useState<'fast' | 'balanced'>('balanced')
-  const [retrievalMode, setRetrievalMode] = useState<'keyword' | 'hybrid' | 'llm_rerank'>('keyword')
+  const [retrievalMode, setRetrievalMode] = useState<'keyword' | 'hybrid' | 'llm_rerank'>('hybrid')
   const [includeDrafts, setIncludeDrafts] = useState(false)
   const [result, setResult] = useState<AnswerResolveResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -159,6 +159,11 @@ export default function AnswerTestConsole({ embedded = false }: { embedded?: boo
                 <div>
                   <div className="text-sm font-medium">{result.selected_answer.title}</div>
                   <div className="mt-1 font-mono text-xs text-muted-foreground">{result.selected_answer.answer_id}</div>
+                  {result.matched_id && (
+                    <div className="mt-2 inline-flex rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 font-mono text-xs font-semibold text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/20 dark:text-emerald-100">
+                      {t('answerCatalog.test.matchedId', 'Business ID')}: {result.matched_id}
+                    </div>
+                  )}
                 </div>
                 {result.selected_answer.approved_summary && (
                   <div className="rounded-md bg-muted/40 p-3 text-sm">
@@ -175,6 +180,20 @@ export default function AnswerTestConsole({ embedded = false }: { embedded?: boo
             <div className="mt-4 text-xs text-muted-foreground">
               {t('answerCatalog.test.trace', 'Trace ID')}: {result.trace_id}
             </div>
+            {result.alias_expansions.length > 0 && (
+              <div className="mt-3 rounded-md border bg-muted/20 p-3">
+                <div className="text-xs font-medium text-muted-foreground">
+                  {t('answerCatalog.matching.appliedAliasExpansion', 'Applied term expansion')}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {result.alias_expansions.map((expansion) => (
+                    <Badge key={`${expansion.canonical_term}-${expansion.matched_term}`} variant="outline">
+                      {expansion.matched_term} → {expansion.expanded_terms.join(', ')}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="min-h-0 overflow-auto rounded-md border">
