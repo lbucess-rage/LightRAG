@@ -64,6 +64,11 @@ export const helpTopicSummaries: Record<string, { title: string; summary: string
     title: '검색 후보 적용 내역 이해하기',
     summary: '유효기간이나 사용 여부 때문에 제외된 지식이 있는지 확인합니다.'
   },
+  'HELP-SEARCH-005': {
+    menu: '통합 검색',
+    title: 'FAQ 하이브리드 검색과 공통 용어 이해하기',
+    summary: '키워드, 벡터 의미 유사도와 승인된 공통 용어가 함께 적용되는 방식을 확인합니다.'
+  },
   'HELP-KNOWLEDGE-001': {
     menu: '지식 관리',
     title: '지식 관리 화면 이해하기',
@@ -138,6 +143,16 @@ export const helpTopicSummaries: Record<string, { title: string; summary: string
     menu: '지식 관리',
     title: '지식 목록과 페이징 사용하기',
     summary: '지식 목록을 필터링하고 페이지 단위로 탐색합니다.'
+  },
+  'HELP-KNOWLEDGE-016': {
+    menu: '지식 관리',
+    title: 'Excel과 DB 표에서 FAQ 일괄 생성하기',
+    summary: '표의 각 행을 FAQ로 바꾸고 열 연결, ID 조회형 FAQ와 AI 힌트 보완을 설정합니다.'
+  },
+  'HELP-KNOWLEDGE-017': {
+    menu: '지식 관리',
+    title: 'FAQ 공통 용어와 AI 후보 관리하기',
+    summary: '동의어를 직접 등록하거나 AI가 찾은 후보를 승인해 여러 FAQ 검색에 함께 적용합니다.'
   },
   'HELP-CATEGORY-001': {
     menu: '카테고리',

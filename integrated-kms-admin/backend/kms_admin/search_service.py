@@ -285,6 +285,7 @@ async def integrated_search(
 
     generative_answer = None
     faq_results: list[dict[str, Any]] = []
+    faq_metadata: dict[str, Any] = {}
     generative_trace_id = None
     faq_trace_id = None
     errors: list[dict[str, Any]] = []
@@ -326,6 +327,20 @@ async def integrated_search(
                 json_body=faq_payload,
             )
             faq_trace_id = faq_response.get("trace_id")
+            faq_metadata = {
+                key: faq_response.get(key)
+                for key in (
+                    "matched",
+                    "matched_id",
+                    "confidence",
+                    "trace_id",
+                    "rationale",
+                    "retrieval_mode",
+                    "selected_by",
+                    "alias_expansions",
+                )
+                if faq_response.get(key) is not None
+            }
             faq_results = [faq_response] if faq_response.get("matched") else faq_response.get("candidates", [])
         except httpx.HTTPStatusError as exc:
             errors.append(
@@ -346,6 +361,7 @@ async def integrated_search(
         "search_id": search_id,
         "generative_answer": generative_answer,
         "faq_results": faq_results,
+        "faq_metadata": faq_metadata,
         "keywords": keywords,
         "references": (generative_answer or {}).get("references", []),
         "latency_ms": latency_ms,
@@ -386,6 +402,7 @@ async def integrated_search(
             {
                 "keyword_count": len(keywords),
                 "faq_count": len(faq_results),
+                "faq_metadata": faq_metadata,
                 "has_generative_answer": generative_answer is not None,
                 "eligibility": candidate_scope.eligibility,
             }
@@ -453,6 +470,7 @@ async def integrated_search_stream(
             }
 
     faq_results: list[dict[str, Any]] = []
+    faq_metadata: dict[str, Any] = {}
     if payload.get("include_faq", True) and allowed_answer_ids != []:
         faq_payload = {
             "query": query,
@@ -468,8 +486,27 @@ async def integrated_search_stream(
                 workspace=scope.faq_workspace,
                 json_body=faq_payload,
             )
+            faq_metadata = {
+                key: faq_response.get(key)
+                for key in (
+                    "matched",
+                    "matched_id",
+                    "confidence",
+                    "trace_id",
+                    "rationale",
+                    "retrieval_mode",
+                    "selected_by",
+                    "alias_expansions",
+                )
+                if faq_response.get(key) is not None
+            }
             faq_results = [faq_response] if faq_response.get("matched") else faq_response.get("candidates", [])
-            yield {"event": "faq_results", "search_id": search_id, "results": faq_results}
+            yield {
+                "event": "faq_results",
+                "search_id": search_id,
+                "results": faq_results,
+                "metadata": faq_metadata,
+            }
         except httpx.HTTPStatusError as exc:
             yield {
                 "event": "error",
@@ -502,6 +539,7 @@ async def integrated_search_stream(
         json.dumps(
             {
                 "faq_count": len(faq_results),
+                "faq_metadata": faq_metadata,
                 "references_count": len(references),
                 "eligibility": candidate_scope.eligibility,
             }
@@ -518,5 +556,6 @@ async def integrated_search_stream(
         "latency_ms": latency_ms,
         "keywords": extract_keywords(query, accumulated),
         "references": references,
+        "faq_metadata": faq_metadata,
         "eligibility": candidate_scope.eligibility,
     }

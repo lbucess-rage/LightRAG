@@ -1021,6 +1021,9 @@ class SourceConnectorMaterializeRequest(BaseModel):
     conversion_purpose: StructuredConversionPurpose = "faq"
     status: AnswerStatus = "draft"
     tags: list[str] = Field(default_factory=list)
+    llm_guidance_enrichment: BatchGuidanceEnrichmentConfig = Field(
+        default_factory=BatchGuidanceEnrichmentConfig
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -5727,6 +5730,8 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 guidance_columns=guidance_columns,
                 materialization_mode=payload.materialization_mode,
                 conversion_purpose=payload.conversion_purpose,
+                source_truncated=sample.truncated,
+                llm_guidance_enrichment=payload.llm_guidance_enrichment,
                 metadata={
                     **payload.metadata,
                     "created_from": "source_connector",

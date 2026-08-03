@@ -4,7 +4,7 @@ from kms_admin.help_seed import load_help_seed_topics, nav_key_for_help_id
 def test_help_seed_loads_content_and_visibility():
     topics = load_help_seed_topics()
 
-    assert len(topics) == 26
+    assert len(topics) == 29
     search = next(topic for topic in topics if topic.help_id == "HELP-SEARCH-001")
     assert search.nav_key == "search"
     assert search.menu_label == "통합 검색"

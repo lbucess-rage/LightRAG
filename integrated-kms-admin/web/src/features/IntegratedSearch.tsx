@@ -11,6 +11,7 @@ import {
   FileTextIcon,
   ImageIcon,
   InfoIcon,
+  LanguagesIcon,
   RotateCcwIcon,
   SearchIcon,
   SlidersHorizontalIcon,
@@ -48,6 +49,15 @@ type KmsSearchOptions = {
   enable_rerank: boolean
 }
 
+type FaqRetrievalMode = 'keyword' | 'vector' | 'hybrid' | 'llm_rerank'
+
+type FaqSearchOptions = {
+  retrieval_mode: FaqRetrievalMode
+  top_k: number
+  min_score: number
+  include_candidates: boolean
+}
+
 type ReferencePreviewState = {
   kind: 'document' | 'board'
   title: string
@@ -67,6 +77,13 @@ const DEFAULT_KMS_OPTIONS: KmsSearchOptions = {
   include_chunk_content: true,
   highlight_entities: true,
   enable_rerank: true
+}
+
+const DEFAULT_FAQ_OPTIONS: FaqSearchOptions = {
+  retrieval_mode: 'hybrid',
+  top_k: 5,
+  min_score: 0.18,
+  include_candidates: true
 }
 
 const queryModeOptions: Array<{ value: QueryMode; label: string }> = [
@@ -1190,6 +1207,7 @@ export default function IntegratedSearch() {
   const [showCategoryPicker, setShowCategoryPicker] = useState(false)
   const [categorySearch, setCategorySearch] = useState('')
   const [kmsOptions, setKmsOptions] = useState<KmsSearchOptions>(DEFAULT_KMS_OPTIONS)
+  const [faqOptions, setFaqOptions] = useState<FaqSearchOptions>(DEFAULT_FAQ_OPTIONS)
   const [result, setResult] = useState<any>(null)
   const [loading, setLoading] = useState(false)
   const canChooseWorkspaceForUser = canChooseWorkspace(user?.role)
@@ -1257,6 +1275,11 @@ export default function IntegratedSearch() {
           ...kmsOptions,
           top_k: Number(kmsOptions.top_k) || DEFAULT_KMS_OPTIONS.top_k,
           chunk_top_k: Number(kmsOptions.chunk_top_k) || DEFAULT_KMS_OPTIONS.chunk_top_k
+        },
+        faq_options: {
+          ...faqOptions,
+          top_k: Number(faqOptions.top_k) || DEFAULT_FAQ_OPTIONS.top_k,
+          min_score: Number(faqOptions.min_score)
         }
       })
       setResult(response.data)
@@ -1266,6 +1289,8 @@ export default function IntegratedSearch() {
   }
 
   const faqResults = result?.faq_results || []
+  const faqMetadata = result?.faq_metadata || {}
+  const aliasExpansions = Array.isArray(faqMetadata.alias_expansions) ? faqMetadata.alias_expansions : []
   const hasResult = Boolean(result)
   const elapsedSeconds = result ? (Number(result.latency_ms || 0) / 1000).toFixed(2) : '0.00'
   const eligibilityNotice = <EligibilityNotice result={result} />
@@ -1276,7 +1301,28 @@ export default function IntegratedSearch() {
         <BookOpenIcon className="size-4" style={{ color: 'var(--fg-secondary)' }} />
         <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-primary)' }}>FAQ 답변</span>
         <span className="badge gray">{faqResults.length}건</span>
+        {faqMetadata.retrieval_mode && <span className="badge outline">{faqMetadata.retrieval_mode}</span>}
       </div>
+      {aliasExpansions.length > 0 && (
+        <div
+          className="row wrap"
+          style={{
+            gap: 7,
+            padding: '10px 12px',
+            border: '1px solid var(--accent)',
+            borderRadius: 'var(--radius-md)',
+            background: 'var(--accent-soft)'
+          }}
+        >
+          <LanguagesIcon className="size-4" style={{ color: 'var(--accent)' }} />
+          <strong style={{ fontSize: 12 }}>적용된 공통 용어</strong>
+          {aliasExpansions.map((expansion: any, index: number) => (
+            <span key={`${expansion.matched_term}-${index}`} className="badge blue">
+              {expansion.matched_term} → {expansion.canonical_term}
+            </span>
+          ))}
+        </div>
+      )}
       {faqResults.length ? (
         faqResults.map((item: any, index: number) => (
           <FaqResult key={item.answer_id || item.id || index} item={item} rank={index + 1} />
@@ -1460,7 +1506,15 @@ export default function IntegratedSearch() {
           <p>질문 하나로 생성형 AI 답변과 FAQ 답변을 함께 조회합니다.</p>
         </div>
         <div className="sp" />
-        <RelatedHelp topicIds={['HELP-SEARCH-001', 'HELP-SEARCH-002', 'HELP-SEARCH-003', 'HELP-SEARCH-004']} />
+        <RelatedHelp
+          topicIds={[
+            'HELP-SEARCH-001',
+            'HELP-SEARCH-002',
+            'HELP-SEARCH-003',
+            'HELP-SEARCH-004',
+            'HELP-SEARCH-005'
+          ]}
+        />
         <div className="seg">
           {[
             ['rail', '출처 패널'],
@@ -1615,6 +1669,11 @@ export default function IntegratedSearch() {
           <span className={kmsOptions.enable_rerank ? 'badge green' : 'badge gray'}>
             <span className="d" /> 리랭크
           </span>
+          {includeFaq && (
+            <span className="badge blue">
+              FAQ {faqOptions.retrieval_mode === 'hybrid' ? '하이브리드' : faqOptions.retrieval_mode}
+            </span>
+          )}
         </div>
 
         {showSearchSettings && (
@@ -1674,6 +1733,54 @@ export default function IntegratedSearch() {
                 onChange={(event) => updateKmsOption('chunk_top_k', Number(event.target.value))}
               />
             </label>
+            <label className="field">
+              <span>FAQ 조회 방식</span>
+              <select
+                className="select"
+                value={faqOptions.retrieval_mode}
+                onChange={(event) => setFaqOptions((current) => ({
+                  ...current,
+                  retrieval_mode: event.target.value as FaqRetrievalMode
+                }))}
+                disabled={!includeFaq}
+              >
+                <option value="hybrid">하이브리드 · 권장</option>
+                <option value="keyword">키워드</option>
+                <option value="vector">벡터</option>
+                <option value="llm_rerank">LLM 최종 선택</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>FAQ 후보 수</span>
+              <input
+                className="input"
+                type="number"
+                min={1}
+                max={20}
+                value={faqOptions.top_k}
+                onChange={(event) => setFaqOptions((current) => ({
+                  ...current,
+                  top_k: Number(event.target.value)
+                }))}
+                disabled={!includeFaq}
+              />
+            </label>
+            <label className="field">
+              <span>FAQ 최소 점수</span>
+              <input
+                className="input"
+                type="number"
+                min={0}
+                max={1}
+                step={0.01}
+                value={faqOptions.min_score}
+                onChange={(event) => setFaqOptions((current) => ({
+                  ...current,
+                  min_score: Number(event.target.value)
+                }))}
+                disabled={!includeFaq}
+              />
+            </label>
             <label className="check" style={{ minHeight: 38 }}>
               <input
                 type="checkbox"
@@ -1709,7 +1816,10 @@ export default function IntegratedSearch() {
                 리랭크 활성화
               </label>
               <div className="grow" />
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setKmsOptions(DEFAULT_KMS_OPTIONS)}>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => {
+                setKmsOptions(DEFAULT_KMS_OPTIONS)
+                setFaqOptions(DEFAULT_FAQ_OPTIONS)
+              }}>
                 <RotateCcwIcon className="size-4" /> 기본값
               </button>
             </div>
