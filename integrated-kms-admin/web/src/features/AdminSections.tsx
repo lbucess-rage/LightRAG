@@ -111,6 +111,8 @@ type Tenant = {
   name: string
   kms_workspace: string
   faq_workspace: string
+  kms_workspace_exists?: boolean | null
+  faq_workspace_exists?: boolean | null
   is_active: boolean
   create_time?: string | null
   update_time?: string | null
@@ -6874,8 +6876,18 @@ export function Tenants() {
                     <div className="ttl">{tenant.name}</div>
                     <div className="mono muted" style={{ fontSize: 11 }}>{tenant.tenant_id}</div>
                   </td>
-                  <td className="mono">{tenant.kms_workspace}</td>
-                  <td className="mono">{tenant.faq_workspace}</td>
+                  <td className="mono">
+                    {tenant.kms_workspace}
+                    {tenant.kms_workspace_exists === false && (
+                      <span className="badge" title="LightRAG에 이 워크스페이스가 없습니다. 수정에서 다른 워크스페이스로 다시 연결하거나 고객센터를 정리하세요." style={{ marginLeft: 6, background: '#fee2e2', color: '#b91c1c' }}>없음</span>
+                    )}
+                  </td>
+                  <td className="mono">
+                    {tenant.faq_workspace}
+                    {tenant.faq_workspace_exists === false && (
+                      <span className="badge" title="LightRAG에 이 워크스페이스가 없습니다. 수정에서 다른 워크스페이스로 다시 연결하거나 고객센터를 정리하세요." style={{ marginLeft: 6, background: '#fee2e2', color: '#b91c1c' }}>없음</span>
+                    )}
+                  </td>
                   <td>
                     {tenant.is_active ? (
                       <span className="badge green"><span className="d" />사용</span>

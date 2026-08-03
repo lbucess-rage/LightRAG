@@ -113,7 +113,28 @@ async def list_tenants(user: dict = Depends(get_current_user)) -> dict:
             """,
             user.get("tenant_id"),
         )
-    return {"tenants": rows}
+    tenants = [dict(row) for row in rows]
+    # 워크스페이스 실존 여부 확인 (삭제된 워크스페이스를 가리키는 고객센터 감지)
+    try:
+        existing: set[str] = set()
+        page = 1
+        while page <= 10:
+            data = await lightrag_client.request_json(
+                "GET", "/workspaces", params={"page": page, "page_size": 100}
+            )
+            items = data.get("workspaces") or []
+            existing.update(str(w.get("workspace_id")) for w in items)
+            if len(items) < 100:
+                break
+            page += 1
+        for tenant in tenants:
+            tenant["kms_workspace_exists"] = tenant.get("kms_workspace") in existing
+            tenant["faq_workspace_exists"] = tenant.get("faq_workspace") in existing
+    except Exception:
+        for tenant in tenants:
+            tenant["kms_workspace_exists"] = None
+            tenant["faq_workspace_exists"] = None
+    return {"tenants": tenants}
 
 
 @router.post("")
