@@ -137,6 +137,147 @@ async def list_tenants(user: dict = Depends(get_current_user)) -> dict:
     return {"tenants": tenants}
 
 
+async def _cnt(query: str, *args) -> int:
+    row = await db.fetchrow("SELECT count(*) AS n FROM " + query, *args)
+    return int(row["n"]) if row else 0
+
+
+@router.get("/{tenant_id}/diagnosis")
+async def diagnose_tenant(tenant_id: str, user: dict = Depends(get_current_user)) -> dict:
+    """고객센터 온보딩 상태 종합 진단 (6개 항목 + 종합점수)"""
+    if user.get("role") != "admin" and user.get("tenant_id") != tenant_id:
+        raise HTTPException(status_code=403, detail="권한이 없습니다")
+    tenant = await db.fetchrow(
+        "SELECT tenant_id, name, kms_workspace, faq_workspace FROM KMS_ADMIN_TENANTS WHERE tenant_id = $1",
+        tenant_id,
+    )
+    if not tenant:
+        raise HTTPException(status_code=404, detail="고객센터를 찾을 수 없습니다")
+    kms_ws, faq_ws = tenant["kms_workspace"], tenant["faq_workspace"]
+    checks: list[dict] = []
+
+    # ① 워크스페이스 연결
+    try:
+        existing: set[str] = set()
+        page = 1
+        while page <= 10:
+            data = await lightrag_client.request_json(
+                "GET", "/workspaces", params={"page": page, "page_size": 100}
+            )
+            items = data.get("workspaces") or []
+            existing.update(str(w.get("workspace_id")) for w in items)
+            if len(items) < 100:
+                break
+            page += 1
+        missing = [w for w in (kms_ws, faq_ws) if w not in existing]
+        checks.append({
+            "key": "workspace", "title": "워크스페이스 연결",
+            "status": "fail" if missing else "ok",
+            "summary": ("누락: " + ", ".join(missing)) if missing else f"{kms_ws} / {faq_ws} 정상",
+            "advice": "수정에서 실존하는 워크스페이스로 다시 연결하세요." if missing else None,
+        })
+    except Exception:
+        checks.append({"key": "workspace", "title": "워크스페이스 연결", "status": "warn",
+                       "summary": "LightRAG 조회 실패 — 확인 불가", "advice": "LightRAG 서버 상태를 확인하세요."})
+
+    # ② 지식 보유량
+    doc_proc = await _cnt("LIGHTRAG_DOC_STATUS WHERE workspace=$1 AND status='processed'", kms_ws)
+    doc_fail = await _cnt("LIGHTRAG_DOC_STATUS WHERE workspace=$1 AND status='failed'", kms_ws)
+    doc_wait = await _cnt("LIGHTRAG_DOC_STATUS WHERE workspace=$1 AND status NOT IN ('processed','failed')", kms_ws)
+    faq_pub = await _cnt("LIGHTRAG_ANSWER_ITEMS WHERE workspace=$1 AND status='published'", faq_ws)
+    faq_draft = await _cnt("LIGHTRAG_ANSWER_ITEMS WHERE workspace=$1 AND status<>'published'", faq_ws)
+    ents = await _cnt("LIGHTRAG_VDB_ENTITY WHERE workspace=$1", kms_ws)
+    vol_bad = doc_proc == 0 and faq_pub == 0
+    checks.append({
+        "key": "volume", "title": "지식 보유량",
+        "status": "warn" if (vol_bad or doc_fail) else "ok",
+        "summary": f"문서 {doc_proc}건(실패 {doc_fail}·대기 {doc_wait}) · FAQ 게시 {faq_pub}(초안 {faq_draft}) · 엔티티 {ents}",
+        "advice": ("지식 관리 또는 LightRAG에서 문서·FAQ를 등록하세요." if vol_bad
+                   else ("실패 문서를 재지식화하세요." if doc_fail else None)),
+    })
+
+    # ③ 장부 편입율 (admin 검색 대상 여부)
+    linked_docs = await _cnt("KMS_ADMIN_KNOWLEDGE_REFS WHERE workspace=$1", kms_ws)
+    linked_faqs = await _cnt("KMS_ADMIN_KNOWLEDGE_REFS WHERE workspace=$1", faq_ws)
+    miss_docs = max(0, doc_proc - linked_docs)
+    miss_faqs = max(0, faq_pub - linked_faqs)
+    checks.append({
+        "key": "ledger", "title": "장부 편입율(검색 대상)",
+        "status": "warn" if (miss_docs or miss_faqs) else ("ok" if (linked_docs or linked_faqs or not (doc_proc or faq_pub)) else "warn"),
+        "summary": f"문서 {linked_docs}/{doc_proc} · FAQ {linked_faqs}/{faq_pub} 편입",
+        "advice": "지식 관리의 [기존 지식 연결]로 미편입 지식을 검색 대상에 편입하세요." if (miss_docs or miss_faqs) else None,
+    })
+
+    # ④ FAQ 검색 준비도
+    no_hint = await _cnt(
+        """LIGHTRAG_ANSWER_ITEMS a WHERE a.workspace=$1 AND a.status='published'
+           AND NOT EXISTS (SELECT 1 FROM LIGHTRAG_ANSWER_GUIDANCE g
+                           WHERE g.workspace=a.workspace AND g.answer_id=a.answer_id)""", faq_ws)
+    no_vec = await _cnt(
+        """LIGHTRAG_ANSWER_ITEMS a WHERE a.workspace=$1 AND a.status='published'
+           AND NOT EXISTS (SELECT 1 FROM LIGHTRAG_ANSWER_VECTORS v
+                           WHERE v.workspace=a.workspace AND v.answer_id=a.answer_id)""", faq_ws)
+    aliases = await _cnt("LIGHTRAG_ANSWER_TERM_ALIASES WHERE workspace=$1 AND enabled", faq_ws)
+    checks.append({
+        "key": "faq_ready", "title": "FAQ 검색 준비도",
+        "status": "warn" if (faq_pub and (no_hint or no_vec)) else ("ok" if faq_pub else "skip"),
+        "summary": (f"힌트 없음 {no_hint}건 · 벡터 미갱신 {no_vec}건 · 동의어 {aliases}그룹" if faq_pub else "게시된 FAQ 없음"),
+        "advice": ("FAQ에 대표질문·키워드를 추가하고 벡터를 갱신하세요. (품질 관리 화면 또는 LLM 일괄 보완)"
+                   if (faq_pub and (no_hint or no_vec)) else None),
+    })
+
+    # ⑤ 검색 스모크 (대표질문 실질의)
+    q_rows = await db.fetch(
+        """SELECT g.text, g.answer_id FROM LIGHTRAG_ANSWER_GUIDANCE g
+           JOIN LIGHTRAG_ANSWER_ITEMS a ON a.workspace=g.workspace AND a.answer_id=g.answer_id
+           WHERE g.workspace=$1 AND g.guidance_type='question' AND a.status='published'
+           ORDER BY g.create_time DESC LIMIT 3""", faq_ws)
+    if q_rows:
+        hit = 0
+        for row in q_rows:
+            try:
+                res = await lightrag_client.request_json(
+                    "POST", "/api/answers/resolve", workspace=faq_ws,
+                    json_body={"query": row["text"], "retrieval_mode": "hybrid"}, timeout=30)
+                sel = (res or {}).get("selected_answer") or {}
+                if sel.get("answer_id") == row["answer_id"]:
+                    hit += 1
+            except Exception:
+                pass
+        checks.append({
+            "key": "smoke", "title": "검색 스모크 테스트",
+            "status": "ok" if hit == len(q_rows) else ("warn" if hit else "fail"),
+            "summary": f"대표질문 {len(q_rows)}건 질의 → {hit}건 정답",
+            "advice": None if hit == len(q_rows) else "오답 FAQ의 힌트·동의어를 보강하고 벡터를 갱신하세요.",
+        })
+    else:
+        checks.append({"key": "smoke", "title": "검색 스모크 테스트", "status": "skip",
+                       "summary": "대표질문이 없어 실행 불가",
+                       "advice": "FAQ에 대표질문을 등록하면 자동 검증이 가능해집니다."})
+
+    # ⑥ 연동 상태
+    users_n = await _cnt("KMS_ADMIN_USER_TENANTS WHERE tenant_id=$1", tenant_id)
+    api_n = await _cnt("KMS_ADMIN_API_CLIENTS WHERE tenant_id=$1", tenant_id)
+    checks.append({
+        "key": "links", "title": "연동 상태",
+        "status": "warn" if (users_n == 0 and api_n == 0) else "ok",
+        "summary": f"사용자 {users_n}명 · API 클라이언트 {api_n}개",
+        "advice": "운영 사용이라면 사용자 계정 또는 상담AP용 API 클라이언트를 연결하세요." if (users_n == 0 and api_n == 0) else None,
+    })
+
+    # 종합 점수 (skip 제외 가중 평균)
+    weights = {"workspace": 25, "volume": 15, "ledger": 20, "faq_ready": 15, "smoke": 20, "links": 5}
+    earn = mult = 0
+    for c in checks:
+        if c["status"] == "skip":
+            continue
+        w = weights[c["key"]]
+        mult += w
+        earn += w if c["status"] == "ok" else (w // 2 if c["status"] == "warn" else 0)
+    score = round(100 * earn / mult) if mult else 0
+    return {"tenant_id": tenant_id, "name": tenant["name"], "score": score, "checks": checks}
+
+
 @router.post("")
 async def create_tenant(
     payload: TenantCreateRequest,

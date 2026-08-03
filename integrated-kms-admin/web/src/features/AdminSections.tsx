@@ -6699,6 +6699,9 @@ export function Tenants() {
   const [deleteConfirmText, setDeleteConfirmText] = useState('')
   const [deleteWithWorkspaces, setDeleteWithWorkspaces] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [diagTarget, setDiagTarget] = useState<Tenant | null>(null)
+  const [diagData, setDiagData] = useState<any>(null)
+  const [diagLoading, setDiagLoading] = useState(false)
 
   const loadTenants = async () => {
     setLoading(true)
@@ -6836,6 +6839,20 @@ export function Tenants() {
     }
   }
 
+  const runDiagnosis = async (tenant: Tenant) => {
+    setDiagTarget(tenant)
+    setDiagData(null)
+    setDiagLoading(true)
+    try {
+      const response = await api.get(`/api/tenants/${tenant.tenant_id}/diagnosis`)
+      setDiagData(response.data)
+    } catch (event: any) {
+      setDiagData({ error: event?.response?.data?.detail || '진단에 실패했습니다.' })
+    } finally {
+      setDiagLoading(false)
+    }
+  }
+
   const deleteSharedWs = deleteTarget
     ? tenants.some(
         (tenant) =>
@@ -6936,6 +6953,9 @@ export function Tenants() {
                   <td className="num muted" style={{ fontSize: 12 }}>{shortDate(tenant.create_time)}</td>
                   <td>
                     <div className="row wrap" style={{ gap: 6 }}>
+                      <Button type="button" size="sm" variant="outline" onClick={() => runDiagnosis(tenant)}>
+                        <ShieldIcon className="size-4" /> 진단
+                      </Button>
                       <Button type="button" size="sm" variant="outline" onClick={() => startEdit(tenant)}>
                         <EditIcon className="size-4" /> 수정
                       </Button>
@@ -7129,6 +7149,57 @@ export function Tenants() {
               </select>
             </label>
           </div>
+        </Modal>
+      )}
+      {diagTarget && (
+        <Modal
+          title={`고객센터 진단 — ${diagTarget.name}`}
+          icon={ShieldIcon}
+          onClose={() => setDiagTarget(null)}
+          footer={
+            <>
+              <Button type="button" variant="outline" onClick={() => runDiagnosis(diagTarget)} disabled={diagLoading}>
+                <RefreshCwIcon className="size-4" /> 다시 진단
+              </Button>
+              <Button type="button" onClick={() => setDiagTarget(null)}>닫기</Button>
+            </>
+          }
+        >
+          {diagLoading && <p className="muted" style={{ margin: 0 }}>진단 중... (검색 테스트 포함, 수 초 소요)</p>}
+          {!diagLoading && diagData?.error && (
+            <p style={{ margin: 0, color: '#b91c1c' }}>{diagData.error}</p>
+          )}
+          {!diagLoading && diagData && !diagData.error && (
+            <div className="grid" style={{ gap: 12 }}>
+              <div className="row" style={{ alignItems: 'baseline', gap: 10 }}>
+                <span style={{ fontSize: 30, fontWeight: 700, color: diagData.score >= 90 ? '#15803d' : diagData.score >= 60 ? '#b45309' : '#b91c1c' }}>
+                  {diagData.score}점
+                </span>
+                <span className="muted" style={{ fontSize: 12.5 }}>
+                  {diagData.score >= 90 ? '온보딩 완료 상태입니다.' : diagData.score >= 60 ? '조치가 필요한 항목이 있습니다.' : '검색이 정상 동작하지 않을 수 있습니다.'}
+                </span>
+              </div>
+              <div className="grid" style={{ gap: 8 }}>
+                {(diagData.checks || []).map((check: any) => (
+                  <div key={check.key} style={{ border: '1px solid var(--border, #e5e7eb)', borderRadius: 8, padding: '8px 12px' }}>
+                    <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                      <span className="badge" style={{
+                        background: check.status === 'ok' ? '#dcfce7' : check.status === 'warn' ? '#fef3c7' : check.status === 'fail' ? '#fee2e2' : '#f3f4f6',
+                        color: check.status === 'ok' ? '#15803d' : check.status === 'warn' ? '#b45309' : check.status === 'fail' ? '#b91c1c' : '#6b7280'
+                      }}>
+                        {check.status === 'ok' ? '정상' : check.status === 'warn' ? '주의' : check.status === 'fail' ? '문제' : '해당없음'}
+                      </span>
+                      <b style={{ fontSize: 13.5 }}>{check.title}</b>
+                    </div>
+                    <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>{check.summary}</div>
+                    {check.advice && (
+                      <div style={{ fontSize: 12.5, marginTop: 4, color: '#b45309' }}>→ {check.advice}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </Modal>
       )}
       {deleteTarget && (
