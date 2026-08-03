@@ -6694,6 +6694,7 @@ export function Tenants() {
   const [form, setForm] = useState(emptyTenantForm)
   const [autoProvision, setAutoProvision] = useState(false)
   const [provisionWsId, setProvisionWsId] = useState('')
+  const [provisionDone, setProvisionDone] = useState<{ name: string; kms: string; faq: string } | null>(null)
 
   const loadTenants = async () => {
     setLoading(true)
@@ -6741,12 +6742,17 @@ export function Tenants() {
     try {
       if (autoProvision) {
         const wsId = provisionWsId.trim()
-        await api.post('/api/tenants/provision', {
+        const res = await api.post('/api/tenants/provision', {
           name: form.name.trim(),
           kms_workspace: wsId || undefined,
           faq_workspace: wsId ? `${wsId}_faq` : undefined,
           is_active: form.is_active,
           copy_categories_from_tenant_id: form.copy_categories_from_tenant_id || undefined
+        })
+        setProvisionDone({
+          name: form.name.trim(),
+          kms: res?.data?.kms_workspace || wsId || '(자동)',
+          faq: res?.data?.faq_workspace || (wsId ? `${wsId}_faq` : '(자동)')
         })
       } else {
         await api.post('/api/tenants', {
@@ -7076,6 +7082,29 @@ export function Tenants() {
                 ))}
               </select>
             </label>
+          </div>
+        </Modal>
+      )}
+      {provisionDone && (
+        <Modal
+          title="고객센터 생성 완료 — 온보딩 다음 단계"
+          icon={PlusIcon}
+          onClose={() => setProvisionDone(null)}
+          footer={<Button type="button" onClick={() => setProvisionDone(null)}>확인</Button>}
+        >
+          <div className="grid" style={{ gap: 10 }}>
+            <p style={{ margin: 0 }}>
+              <b>{provisionDone.name}</b> 고객센터와 워크스페이스가 생성되었습니다.
+            </p>
+            <p className="mono muted" style={{ margin: 0, fontSize: 12 }}>
+              KMS: {provisionDone.kms} &nbsp;·&nbsp; FAQ: {provisionDone.faq}
+            </p>
+            <ol style={{ margin: '6px 0 0', paddingLeft: 18, lineHeight: 1.9 }}>
+              <li><b>지식 등록</b> — 지식 관리에서 문서·FAQ를 등록합니다. (LightRAG에서 직접 등록해도 됩니다)</li>
+              <li><b>기존 지식 연결</b> — 지식 관리 상단 [기존 지식 연결] 버튼으로 검색 대상에 편입합니다.</li>
+              <li><b>공통 용어·힌트</b> — [공통 용어]에서 동의어를 등록하고, 엑셀 일괄 생성 시 LLM 힌트 보완을 켭니다.</li>
+              <li><b>검색 확인</b> — 통합 검색에서 테스트 질문으로 결과를 확인합니다.</li>
+            </ol>
           </div>
         </Modal>
       )}
