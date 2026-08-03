@@ -6695,6 +6695,10 @@ export function Tenants() {
   const [autoProvision, setAutoProvision] = useState(false)
   const [provisionWsId, setProvisionWsId] = useState('')
   const [provisionDone, setProvisionDone] = useState<{ name: string; kms: string; faq: string } | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<Tenant | null>(null)
+  const [deleteConfirmText, setDeleteConfirmText] = useState('')
+  const [deleteWithWorkspaces, setDeleteWithWorkspaces] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   const loadTenants = async () => {
     setLoading(true)
@@ -6813,6 +6817,34 @@ export function Tenants() {
   }
 
   const activeTenants = tenants.filter((tenant) => tenant.is_active)
+  const deleteTenant = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
+    setError('')
+    try {
+      await api.delete(`/api/tenants/${deleteTarget.tenant_id}`, {
+        params: { delete_workspaces: deleteWithWorkspaces }
+      })
+      setDeleteTarget(null)
+      setDeleteConfirmText('')
+      setDeleteWithWorkspaces(false)
+      await loadTenants()
+    } catch (event: any) {
+      setError(event?.response?.data?.detail || '고객센터를 삭제하지 못했습니다.')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const deleteSharedWs = deleteTarget
+    ? tenants.some(
+        (tenant) =>
+          tenant.tenant_id !== deleteTarget.tenant_id &&
+          (tenant.kms_workspace === deleteTarget.kms_workspace ||
+            tenant.faq_workspace === deleteTarget.faq_workspace)
+      )
+    : false
+
   const uniquePairs = new Set(tenants.map((tenant) => `${tenant.kms_workspace}|${tenant.faq_workspace}`)).size
   const copySourceOptions = tenants.filter((tenant) => tenant.tenant_id !== copyTarget?.tenant_id)
   const formDisabled = !form.name.trim() || !form.kms_workspace || !form.faq_workspace || saving
@@ -6918,6 +6950,20 @@ export function Tenants() {
                         }}
                       >
                         <FolderIcon className="size-4" /> 카테고리 복사
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        style={{ color: '#b91c1c' }}
+                        onClick={() => {
+                          setDeleteTarget(tenant)
+                          setDeleteConfirmText('')
+                          setDeleteWithWorkspaces(false)
+                          setError('')
+                        }}
+                      >
+                        <Trash2Icon className="size-4" /> 삭제
                       </Button>
                     </div>
                   </td>
@@ -7082,6 +7128,63 @@ export function Tenants() {
                 ))}
               </select>
             </label>
+          </div>
+        </Modal>
+      )}
+      {deleteTarget && (
+        <Modal
+          title="고객센터 삭제"
+          icon={Trash2Icon}
+          onClose={() => setDeleteTarget(null)}
+          footer={
+            <>
+              <Button type="button" variant="outline" onClick={() => setDeleteTarget(null)}>취소</Button>
+              <Button
+                type="button"
+                disabled={deleteConfirmText !== deleteTarget.name || deleting}
+                onClick={deleteTenant}
+                style={{ background: '#b91c1c', color: '#fff' }}
+              >
+                {deleting ? '삭제 중...' : '영구 삭제'}
+              </Button>
+            </>
+          }
+        >
+          <div className="grid" style={{ gap: 12 }}>
+            <p style={{ margin: 0 }}>
+              <b>{deleteTarget.name}</b> 고객센터를 삭제합니다. 이 작업은 되돌릴 수 없습니다.
+            </p>
+            <p className="mono muted" style={{ margin: 0, fontSize: 12 }}>
+              KMS: {deleteTarget.kms_workspace} &nbsp;·&nbsp; FAQ: {deleteTarget.faq_workspace}
+            </p>
+            <label className="check" style={deleteSharedWs ? { opacity: 0.5 } : undefined}>
+              <input
+                type="checkbox"
+                checked={deleteWithWorkspaces}
+                disabled={deleteSharedWs}
+                onChange={(event) => setDeleteWithWorkspaces(event.target.checked)}
+              />
+              워크스페이스와 지식 데이터(문서·FAQ·그래프)까지 함께 삭제
+            </label>
+            {deleteSharedWs && (
+              <p style={{ margin: 0, fontSize: 12.5, color: '#92400e' }}>
+                다른 고객센터가 같은 워크스페이스를 사용 중이라 데이터 삭제는 차단됩니다. 고객센터 연결만 삭제됩니다.
+              </p>
+            )}
+            {deleteWithWorkspaces && !deleteSharedWs && (
+              <p style={{ margin: 0, fontSize: 12.5, color: '#b91c1c' }}>
+                두 워크스페이스의 모든 문서·FAQ·지식그래프가 영구 삭제됩니다.
+              </p>
+            )}
+            <label className="field">
+              <span>확인을 위해 고객센터 이름(<b>{deleteTarget.name}</b>)을 그대로 입력하세요</span>
+              <Input
+                value={deleteConfirmText}
+                onChange={(event) => setDeleteConfirmText(event.target.value)}
+                placeholder={deleteTarget.name}
+              />
+            </label>
+            {error && <p style={{ margin: 0, color: '#b91c1c', fontSize: 12.5 }}>{error}</p>}
           </div>
         </Modal>
       )}
