@@ -393,5 +393,10 @@ async def delete_tenant(
         target_type="tenant", target_id=tenant_id,
         detail={"name": tenant["name"], "deleted_workspaces": deleted_ws},
     )
+    # tenant를 RESTRICT로 참조하는 admin 데이터 선정리 (장부→refs CASCADE, jobs→events CASCADE)
+    await db.execute("DELETE FROM KMS_ADMIN_KNOWLEDGE_ITEMS WHERE tenant_id = $1", tenant_id)
+    await db.execute("DELETE FROM KMS_ADMIN_JOBS WHERE tenant_id = $1", tenant_id)
+    await db.execute("DELETE FROM KMS_ADMIN_USER_TENANTS WHERE tenant_id = $1", tenant_id)
+    await db.execute("DELETE FROM KMS_ADMIN_API_CLIENTS WHERE tenant_id = $1", tenant_id)
     await db.execute("DELETE FROM KMS_ADMIN_TENANTS WHERE tenant_id = $1", tenant_id)
     return {"message": "deleted", "tenant_id": tenant_id, "deleted_workspaces": deleted_ws}
