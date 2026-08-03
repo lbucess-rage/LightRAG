@@ -41,6 +41,7 @@ import {
   suggestAnswerGuidance,
 } from '@/api/lightrag'
 import AnswerContentPreview from '@/components/answers/AnswerContentPreview'
+import AnswerAssetGallery from '@/components/answers/AnswerAssetGallery'
 import AnswerHelpButton from '@/components/answers/AnswerHelpButton'
 import TaskProgressPanel from '@/components/documents/TaskProgressPanel'
 import Badge from '@/components/ui/Badge'
@@ -123,7 +124,8 @@ export default function AnswerMatching({ embedded = false }: { embedded?: boolea
   const [query, setQuery] = useState('')
   const [includeDrafts, setIncludeDrafts] = useState(true)
   const [minScore, setMinScore] = useState('0.18')
-  const [retrievalMode, setRetrievalMode] = useState<'keyword' | 'hybrid' | 'llm_rerank'>('hybrid')
+  const [retrievalMode, setRetrievalMode] = useState<'keyword' | 'hybrid' | 'graph_hybrid' | 'llm_rerank'>('hybrid')
+  const [selectionPolicy, setSelectionPolicy] = useState<'workspace' | 'coverage' | 'precision'>('workspace')
   const [result, setResult] = useState<AnswerResolveResponse | null>(null)
   const [isTestResultOpen, setIsTestResultOpen] = useState(false)
   const [showSelectedAnswerContent, setShowSelectedAnswerContent] = useState(false)
@@ -501,6 +503,7 @@ export default function AnswerMatching({ embedded = false }: { embedded?: boolea
         vector_top_k: 8,
         llm_candidate_count: 5,
         include_drafts: includeDrafts,
+        selection_policy: selectionPolicy,
       })
       if (requestId !== resolveRequestIdRef.current) return
       setResult(response)
@@ -1220,6 +1223,9 @@ export default function AnswerMatching({ embedded = false }: { embedded?: boolea
                       {Math.round(result.confidence * 100)}%
                     </Badge>
                     <Badge variant="outline" className="bg-background">{result.selected_by || retrievalMode}</Badge>
+                    <Badge variant="outline" className="bg-background">
+                      {result.selection_policy || selectionPolicy}
+                    </Badge>
                   </div>
                   <div className="mt-1 text-xs text-muted-foreground">
                     {t('answerCatalog.matching.testResultDescription', 'This panel shows how the current finding hints select an answer for the test question.')}
@@ -1259,8 +1265,20 @@ export default function AnswerMatching({ embedded = false }: { embedded?: boolea
                         {result.selected_answer ? result.selected_answer.title : t('answerCatalog.matching.noSelectedAnswer', 'No answer selected')}
                       </div>
                       <div className="mt-1 text-sm text-muted-foreground">
-                        {result.selected_answer ? result.selected_answer.answer_id : result.rationale}
+                        {result.selected_answer
+                          ? result.selected_answer.answer_id
+                          : result.abstention_reason
+                            ? t(
+                                `answerCatalog.test.abstention.${result.abstention_reason}`,
+                                result.rationale
+                              )
+                            : result.rationale}
                       </div>
+                      {!result.selected_answer && result.clarification_question && (
+                        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-950 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-100">
+                          {t('answerCatalog.test.clarification', 'Follow-up question')}: {result.clarification_question}
+                        </div>
+                      )}
                       {result.matched_id && (
                         <div className="mt-2 inline-flex rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 font-mono text-xs font-semibold text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/20 dark:text-emerald-100">
                           {t('answerCatalog.test.matchedId', 'Business ID')}: {result.matched_id}
@@ -1303,6 +1321,14 @@ export default function AnswerMatching({ embedded = false }: { embedded?: boolea
                           className="mt-1"
                         />
                       </div>
+                      {result.selected_answer.assets.length > 0 && (
+                        <div>
+                          <div className="mb-2 text-xs font-medium text-muted-foreground">
+                            {t('answerCatalog.assets.section', 'Attachments')}
+                          </div>
+                          <AnswerAssetGallery assets={result.selected_answer.assets} />
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1341,7 +1367,7 @@ export default function AnswerMatching({ embedded = false }: { embedded?: boolea
             </div>
           )}
 
-          <div className="grid gap-3 p-3 xl:grid-cols-[220px_minmax(280px,1fr)_110px_170px_170px_auto_auto] xl:items-end">
+          <div className="grid gap-3 p-3 xl:grid-cols-[180px_minmax(240px,1fr)_100px_150px_150px_170px_auto_auto] xl:items-end">
             <div className="hidden xl:block">
               <div className="flex items-center gap-2 font-semibold">
                 <SearchIcon className="h-4 w-4 text-emerald-600" />
@@ -1372,14 +1398,39 @@ export default function AnswerMatching({ embedded = false }: { embedded?: boolea
             </label>
             <div className="grid gap-2">
               <Label>{t('answerCatalog.test.retrievalMode', 'Retrieval Mode')}</Label>
-              <Select value={retrievalMode} onValueChange={(value) => setRetrievalMode(value as 'keyword' | 'hybrid' | 'llm_rerank')}>
+              <Select value={retrievalMode} onValueChange={(value) => setRetrievalMode(value as 'keyword' | 'hybrid' | 'graph_hybrid' | 'llm_rerank')}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="keyword">{t('answerCatalog.test.modeKeyword', 'Keyword')}</SelectItem>
                   <SelectItem value="hybrid">{t('answerCatalog.test.modeHybrid', 'Keyword + Vector')}</SelectItem>
+                  <SelectItem value="graph_hybrid">{t('answerCatalog.test.modeGraphHybrid', 'Keyword + Vector + Graph')}</SelectItem>
                   <SelectItem value="llm_rerank">{t('answerCatalog.test.modeLlm', 'LLM ID Select')}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label>{t('answerCatalog.test.selectionPolicy', 'Answer Policy')}</Label>
+              <Select
+                value={selectionPolicy}
+                onValueChange={(value) =>
+                  setSelectionPolicy(value as 'workspace' | 'coverage' | 'precision')
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="workspace">
+                    {t('answerCatalog.test.policyWorkspace', 'Workspace setting')}
+                  </SelectItem>
+                  <SelectItem value="precision">
+                    {t('answerCatalog.test.policyPrecision', 'Answer only when certain')}
+                  </SelectItem>
+                  <SelectItem value="coverage">
+                    {t('answerCatalog.test.policyCoverage', 'Prefer an answer')}
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>

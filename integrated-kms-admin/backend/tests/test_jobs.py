@@ -156,6 +156,12 @@ def test_link_existing_ref_creates_ready_item_ref_and_completed_job(monkeypatch)
 
     class FakeDb:
         async def fetchrow(self, query, *params):
+            if "FROM KMS_ADMIN_TENANTS" in query:
+                return {
+                    "tenant_id": "default",
+                    "kms_workspace": "kevcs",
+                    "faq_workspace": "faq",
+                }
             if "SELECT tenant_id FROM KMS_ADMIN_KNOWLEDGE_ITEMS" in query:
                 return {"tenant_id": "default"}
             return None

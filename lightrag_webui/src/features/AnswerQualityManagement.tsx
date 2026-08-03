@@ -3,6 +3,7 @@ import {
   BarChart3Icon,
   FlaskConicalIcon,
   GaugeIcon,
+  NetworkIcon,
   SparklesIcon,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -11,10 +12,11 @@ import AnswerHelpButton from '@/components/answers/AnswerHelpButton'
 import Button from '@/components/ui/Button'
 import AnswerAnalytics from '@/features/AnswerAnalytics'
 import AnswerDetailedAnalytics from '@/features/AnswerDetailedAnalytics'
+import AnswerGraphManagement from '@/features/AnswerGraphManagement'
 import AnswerMatching from '@/features/AnswerMatching'
 import AnswerTestConsole from '@/features/AnswerTestConsole'
 
-type QualityView = 'test' | 'improve' | 'analytics'
+type QualityView = 'test' | 'improve' | 'graph' | 'analytics'
 type AnalyticsView = 'overview' | 'detail'
 
 export default function AnswerQualityManagement() {
@@ -45,6 +47,14 @@ export default function AnswerQualityManagement() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2 border-b pb-3">
+        <Button
+          type="button"
+          variant={view === 'graph' ? 'default' : 'ghost'}
+          onClick={() => setView('graph')}
+        >
+          <NetworkIcon className="h-4 w-4" />
+          {t('answerCatalog.quality.graphTab', 'FAQ graph')}
+        </Button>
         <Button
           type="button"
           variant={view === 'test' ? 'default' : 'ghost'}
@@ -95,6 +105,7 @@ export default function AnswerQualityManagement() {
       <div className="min-h-0 flex-1 overflow-hidden">
         {view === 'test' && <AnswerTestConsole embedded />}
         {view === 'improve' && <AnswerMatching embedded />}
+        {view === 'graph' && <AnswerGraphManagement />}
         {view === 'analytics' && analyticsView === 'overview' && <AnswerAnalytics embedded />}
         {view === 'analytics' && analyticsView === 'detail' && <AnswerDetailedAnalytics embedded />}
       </div>

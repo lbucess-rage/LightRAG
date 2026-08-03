@@ -3,6 +3,7 @@ from dataclasses import replace
 import pytest
 
 from kms_admin.config import DEV_JWT_SECRET, Settings
+from kms_admin.routers.lightrag import _filter_workspace_response
 from kms_admin.routers.system import _period_days
 
 
@@ -44,3 +45,32 @@ def test_production_settings_accept_required_secrets():
     )
 
     settings.validate_for_startup()
+
+
+def test_non_admin_workspace_list_is_limited_to_account_pair():
+    response = {
+        "workspaces": [
+            {"workspace_id": "kms-a"},
+            {"workspace_id": "faq-a"},
+            {"workspace_id": "kms-b"},
+        ],
+        "total": 3,
+    }
+
+    filtered = _filter_workspace_response(
+        response,
+        {
+            "role": "manager",
+            "kms_workspace": "kms-a",
+            "faq_workspace": "faq-a",
+        },
+    )
+
+    assert [item["workspace_id"] for item in filtered["workspaces"]] == ["kms-a", "faq-a"]
+    assert filtered["total"] == 2
+
+
+def test_admin_workspace_list_is_not_filtered():
+    response = {"workspaces": [{"workspace_id": "kms-a"}, {"workspace_id": "kms-b"}], "total": 2}
+
+    assert _filter_workspace_response(response, {"role": "admin"}) is response

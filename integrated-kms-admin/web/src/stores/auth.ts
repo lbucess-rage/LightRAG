@@ -22,6 +22,8 @@ type AuthState = {
 
 function syncWorkspaceScope(user: User) {
   useWorkspaceScopeStore.getState().setWorkspaceScope({
+    tenantId: user.tenant_id,
+    tenantName: user.tenant_name,
     kmsWorkspace: user.kms_workspace,
     faqWorkspace: user.faq_workspace
   })

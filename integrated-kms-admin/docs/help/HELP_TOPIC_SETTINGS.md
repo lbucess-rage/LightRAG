@@ -46,6 +46,7 @@
 | HELP-KNOWLEDGE-015 | 지식 관리 | 지식 목록과 페이징 사용하기 | published | N | Y | Y | `/help/screenshots/knowledge/knowledge-list.png` | 목록 필터와 페이징 |
 | HELP-KNOWLEDGE-016 | 지식 관리 | Excel과 DB 표에서 FAQ 일괄 생성하기 | published | N | Y | Y | `/help/screenshots/knowledge/knowledge-faq-bulk-create.png` | 시트 분석, 행별 매핑, ID 조회형 FAQ 설명 |
 | HELP-KNOWLEDGE-017 | 지식 관리 | FAQ 공통 용어와 AI 후보 관리하기 | published | N | Y | Y | `/help/screenshots/knowledge/knowledge-faq-terminology.png` | 동의어 직접 등록과 AI 승인 흐름 |
+| HELP-KNOWLEDGE-018 | 지식 관리 | FAQ 그래프 구성과 그래프 결합 검색 사용하기 | published | N | Y | Y | `/help/screenshots/knowledge/knowledge-faq-graph.png` | 스키마, 미리보기, 재구축과 검색 근거 설명 |
 | HELP-CATEGORY-001 | 카테고리 | 카테고리와 하위 카테고리 관리하기 | published | N | Y | Y | `/help/screenshots/categories/category-tree.png` | 고객센터 기준 카테고리 |
 | HELP-JOBS-001 | 작업 이력 | 작업 이력 확인하기 | published | N | Y | Y | `/help/screenshots/jobs/jobs-history.png` | 실패/롤백 확인 |
 | HELP-STATS-001 | 현황 · 통계 | 현황과 통계 확인하기 | published | N | Y | Y | `/help/screenshots/stats/stats-dashboard.png` | 통계 새로고침 포함 |

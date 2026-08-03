@@ -6181,7 +6181,8 @@ SQL_TEMPLATES = {
                      """,
     "entities": """
                 SELECT e.entity_name,
-                       EXTRACT(EPOCH FROM e.create_time)::BIGINT AS created_at
+                       EXTRACT(EPOCH FROM e.create_time)::BIGINT AS created_at,
+                       (1 - (e.content_vector <=> '[{embedding_string}]'::vector)) AS similarity
                 FROM LIGHTRAG_VDB_ENTITY e
                 WHERE e.workspace = $1
                   AND e.content_vector <=> '[{embedding_string}]'::vector < $2

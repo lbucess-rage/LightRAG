@@ -6,6 +6,7 @@ from kms_admin.routers import knowledge
 from kms_admin.routers.knowledge import (
     BoardViewProxyRequest,
     FaqCandidateSearchRequest,
+    FaqGraphPreviewRequest,
     FaqStructuredMaterializeRequest,
     FaqAnswerUpdateRequest,
     _create_completed_faq_job,
@@ -105,6 +106,69 @@ def test_faq_candidate_search_defaults_to_hybrid():
     payload = FaqCandidateSearchRequest(query="팀즈 연결이 안 돼요")
 
     assert payload.retrieval_mode == "hybrid"
+    assert payload.selection_policy == "workspace"
+
+
+def test_faq_candidate_search_accepts_graph_hybrid():
+    payload = FaqCandidateSearchRequest(
+        query="팀즈 연결이 안 돼요",
+        retrieval_mode="graph_hybrid",
+    )
+
+    assert payload.retrieval_mode == "graph_hybrid"
+
+
+def test_faq_candidate_search_accepts_precision_policy():
+    payload = FaqCandidateSearchRequest(
+        query="팀즈 연결이 안 돼요",
+        selection_policy="precision",
+    )
+
+    assert payload.selection_policy == "precision"
+
+
+def test_faq_graph_preview_proxy_uses_effective_workspace(monkeypatch):
+    calls = []
+
+    class FakeLightRagClient:
+        async def request_json(
+            self,
+            method,
+            path,
+            *,
+            workspace=None,
+            json_body=None,
+            **kwargs,
+        ):
+            calls.append((method, path, workspace, json_body))
+            return {
+                "answer_id": json_body["answer_id"],
+                "nodes": [],
+                "relations": [],
+            }
+
+    monkeypatch.setattr(knowledge, "lightrag_client", FakeLightRagClient())
+
+    response = asyncio.run(
+        knowledge.preview_faq_graph(
+            FaqGraphPreviewRequest(answer_id="ANS-TEAMS", use_llm=False),
+            user={
+                "role": "manager",
+                "faq_workspace": "faq-account-workspace",
+            },
+            faq_workspace="ignored-workspace",
+        )
+    )
+
+    assert response["answer_id"] == "ANS-TEAMS"
+    assert calls == [
+        (
+            "POST",
+            "/api/answers/graph/preview",
+            "faq-account-workspace",
+            {"answer_id": "ANS-TEAMS", "use_llm": False},
+        )
+    ]
 
 
 def test_materialized_answer_ids_prefers_complete_snapshot():

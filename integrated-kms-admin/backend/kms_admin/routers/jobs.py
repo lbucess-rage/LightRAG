@@ -652,25 +652,34 @@ async def _rollback_refs(job: dict[str, Any]) -> dict[str, Any]:
 
 
 @router.get("")
-async def list_jobs(user: dict = Depends(get_current_user)) -> dict:
+async def list_jobs(
+    tenant_id: str | None = Query(default=None),
+    user: dict = Depends(get_current_user),
+) -> dict:
+    effective_tenant_id = tenant_id if user.get("role") == "admin" else user.get("tenant_id")
     rows = await db.fetch(
         """
         SELECT j.*, i.title AS knowledge_title, i.knowledge_type
         FROM KMS_ADMIN_JOBS j
         LEFT JOIN KMS_ADMIN_KNOWLEDGE_ITEMS i ON i.item_id = j.item_id
-        WHERE $2 = 'admin'
+        WHERE ($2 = 'admin' AND $1::text IS NULL)
            OR COALESCE(j.tenant_id, i.tenant_id) = $1
         ORDER BY j.update_time DESC
         LIMIT 500
         """,
-        user.get("tenant_id"),
+        effective_tenant_id,
         user.get("role"),
     )
     return {"jobs": [_normalize_job_row(row) for row in rows]}
 
 
 @router.post("/sync-running")
-async def sync_running_jobs(request: Request, user: dict = Depends(get_current_user)) -> dict:
+async def sync_running_jobs(
+    request: Request,
+    tenant_id: str | None = Query(default=None),
+    user: dict = Depends(get_current_user),
+) -> dict:
+    effective_tenant_id = tenant_id if user.get("role") == "admin" else user.get("tenant_id")
     rows = await db.fetch(
         """
         SELECT j.*, i.title AS knowledge_title, i.knowledge_type, i.kms_workspace, i.faq_workspace
@@ -678,13 +687,13 @@ async def sync_running_jobs(request: Request, user: dict = Depends(get_current_u
         LEFT JOIN KMS_ADMIN_KNOWLEDGE_ITEMS i ON i.item_id = j.item_id
         WHERE j.status IN ('pending', 'running')
           AND (
-            $2 = 'admin'
+            ($2 = 'admin' AND $1::text IS NULL)
             OR COALESCE(j.tenant_id, i.tenant_id) = $1
           )
         ORDER BY j.update_time DESC
         LIMIT 100
         """,
-        user.get("tenant_id"),
+        effective_tenant_id,
         user.get("role"),
     )
     synced = [await _sync_job(row) for row in rows]
@@ -693,6 +702,7 @@ async def sync_running_jobs(request: Request, user: dict = Depends(get_current_u
         actor_type="user",
         actor_id=user["user_id"],
         action="sync_running_jobs",
+        tenant_id=effective_tenant_id,
         target_type="job",
         detail={"count": len(synced)},
     )

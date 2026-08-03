@@ -121,8 +121,8 @@ export const helpTopicSummaries: Record<string, { title: string; summary: string
   },
   'HELP-KNOWLEDGE-011': {
     menu: '지식 관리',
-    title: 'FAQ 답변 등록하기',
-    summary: '정해진 질문과 답변을 FAQ 후보로 등록합니다.'
+    title: 'FAQ 답변과 첨부 자료 등록하기',
+    summary: '정해진 질문과 답변을 등록하고 이미지, 영상, 음성, 표 또는 파일을 함께 제공합니다.'
   },
   'HELP-KNOWLEDGE-012': {
     menu: '지식 관리',
@@ -153,6 +153,11 @@ export const helpTopicSummaries: Record<string, { title: string; summary: string
     menu: '지식 관리',
     title: 'FAQ 공통 용어와 AI 후보 관리하기',
     summary: '동의어를 직접 등록하거나 AI가 찾은 후보를 승인해 여러 FAQ 검색에 함께 적용합니다.'
+  },
+  'HELP-KNOWLEDGE-018': {
+    menu: '지식 관리',
+    title: 'FAQ 그래프 구성과 그래프 결합 검색 사용하기',
+    summary: 'FAQ 연결 근거를 구성하고, 확실한 경우만 답변하도록 점수·근거·후보 차이 기준을 관리합니다.'
   },
   'HELP-CATEGORY-001': {
     menu: '카테고리',
