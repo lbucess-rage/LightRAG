@@ -66,8 +66,8 @@ export const helpTopicSummaries: Record<string, { title: string; summary: string
   },
   'HELP-SEARCH-005': {
     menu: '통합 검색',
-    title: 'FAQ 하이브리드 검색과 공통 용어 이해하기',
-    summary: '키워드, 벡터 의미 유사도와 승인된 공통 용어가 함께 적용되는 방식을 확인합니다.'
+    title: 'FAQ 그래프 결합 검색과 공통 용어 이해하기',
+    summary: '기본 통합 검색에서 키워드, 벡터, FAQ 그래프와 승인된 공통 용어가 함께 적용되고 폴백 상태가 표시되는 방식을 확인합니다.'
   },
   'HELP-KNOWLEDGE-001': {
     menu: '지식 관리',

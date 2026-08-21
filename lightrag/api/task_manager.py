@@ -231,6 +231,8 @@ class TaskService:
         task = self._registry.get_task(task_id)
         if not task:
             return
+        if task.status in (TaskStatus.FAILED, TaskStatus.CANCELLED):
+            return
 
         task.status = TaskStatus.COMPLETED
         task.progress = 100.0

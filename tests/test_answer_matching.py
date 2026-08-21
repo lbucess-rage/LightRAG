@@ -19,6 +19,7 @@ try:
         _answer_vector_content,
         _clarification_question,
         _deterministic_answer_graph_projection,
+        _effective_answer_retrieval,
         _enrich_answer_guidance_background,
         _expand_query_aliases,
         _guidance_needs_coverage_enrichment,
@@ -31,6 +32,7 @@ try:
         _parse_answer_graph_llm_result,
         _parse_term_discovery_candidates,
         _precision_abstention_reason,
+        _rebuild_answer_graph_for_ids,
         _score_candidate,
     )
 finally:
@@ -587,6 +589,87 @@ def test_llm_faq_graph_result_is_bounded_by_workspace_schema():
     ]
     assert len(relations) == 1
     assert relations[0].relation_type == "APPLIES_TO"
+
+
+def test_faq_graph_batch_stops_before_next_answer_after_cancellation(monkeypatch):
+    from lightrag.api.task_manager import TaskService, TaskStatus, TaskType
+
+    service = TaskService()
+    task = service.create_task(TaskType.FAQ_GRAPH_REBUILD, workspace="faq-test")
+    built_ids = []
+
+    async def fake_config(_db, workspace):
+        return AnswerGraphConfig(workspace=workspace, enabled=True)
+
+    async def fake_rows(_db, _workspace, _answer_ids):
+        return [
+            _answer(answer_id="ANS-1"),
+            _answer(answer_id="ANS-2"),
+            _answer(answer_id="ANS-3"),
+        ], {}
+
+    async def fake_preview(_db, _workspace, _rag, answer, _guidance, _config, *, use_llm):
+        built_ids.append(answer.answer_id)
+        await service.cancel_task(task.task_id)
+        return answer
+
+    async def fake_persist(**_kwargs):
+        return None
+
+    monkeypatch.setattr("lightrag.api.task_manager.get_task_service", lambda: service)
+    monkeypatch.setattr(
+        "lightrag.api.routers.answer_routes._get_answer_graph_config",
+        fake_config,
+    )
+    monkeypatch.setattr(
+        "lightrag.api.routers.answer_routes._answer_rows_and_guidance",
+        fake_rows,
+    )
+    monkeypatch.setattr(
+        "lightrag.api.routers.answer_routes._build_answer_graph_preview",
+        fake_preview,
+    )
+    monkeypatch.setattr(
+        "lightrag.api.routers.answer_routes._persist_answer_graph_projection",
+        fake_persist,
+    )
+
+    result = asyncio.run(
+        _rebuild_answer_graph_for_ids(
+            db=object(),
+            workspace="faq-test",
+            rag=object(),
+            answer_ids=["ANS-1", "ANS-2", "ANS-3"],
+            use_llm=False,
+            task_id=task.task_id,
+        )
+    )
+
+    assert built_ids == ["ANS-1"]
+    assert result["processed"] == 1
+    assert result["total"] == 3
+    assert result["cancelled"] is True
+    assert service.get_task(task.task_id).status == TaskStatus.CANCELLED
+
+
+def test_graph_hybrid_reports_hybrid_fallback_when_graph_is_not_ready():
+    effective_mode, reason = _effective_answer_retrieval(
+        "graph_hybrid",
+        "graph_stale",
+    )
+
+    assert effective_mode == "hybrid"
+    assert reason == "graph_stale"
+
+
+def test_graph_hybrid_reports_graph_mode_when_graph_is_ready():
+    effective_mode, reason = _effective_answer_retrieval(
+        "graph_hybrid",
+        "graph_ready",
+    )
+
+    assert effective_mode == "graph_hybrid"
+    assert reason is None
 
 
 def test_answer_body_still_contributes_to_keyword_score():

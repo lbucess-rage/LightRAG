@@ -17,8 +17,10 @@ import {
   AnswerGraphProjection,
   AnswerGraphStatus,
   AnswerItem,
+  TaskStatusResponse,
   getAnswerGraphConfig,
   getAnswerGraphStatus,
+  listTasks,
   listAnswers,
   previewAnswerGraph,
   rebuildAnswerGraph,
@@ -43,6 +45,23 @@ const splitTypes = (value: string) =>
     .map((item) => item.trim())
     .filter(Boolean)
 
+const GRAPH_TASK_TYPE = 'faq_graph_rebuild'
+const RECENT_GRAPH_TASK_SECONDS = 60 * 60
+const ACTIVE_TASK_STATUSES = new Set(['pending', 'running'])
+
+const selectVisibleGraphTask = (tasks: TaskStatusResponse[]) => {
+  const graphTasks = tasks
+    .filter((task) => task.task_type === GRAPH_TASK_TYPE)
+    .sort((left, right) => right.updated_at - left.updated_at)
+  const activeTask = graphTasks.find((task) => ACTIVE_TASK_STATUSES.has(task.status))
+  if (activeTask) return activeTask
+  const latestTask = graphTasks[0]
+  if (latestTask && Date.now() / 1000 - latestTask.updated_at <= RECENT_GRAPH_TASK_SECONDS) {
+    return latestTask
+  }
+  return null
+}
+
 export default function AnswerGraphManagement() {
   const { t } = useTranslation()
   const currentWorkspaceId = useWorkspaceStore.use.currentWorkspaceId()
@@ -56,11 +75,32 @@ export default function AnswerGraphManagement() {
   const [useLlm, setUseLlm] = useState(false)
   const [preview, setPreview] = useState<AnswerGraphProjection | null>(null)
   const [previewMode, setPreviewMode] = useState<'graph' | 'list'>('graph')
-  const [taskId, setTaskId] = useState('')
+  const [graphTask, setGraphTask] = useState<TaskStatusResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [isPreviewing, setIsPreviewing] = useState(false)
   const [isRebuilding, setIsRebuilding] = useState(false)
+
+  const loadGraphTask = useCallback(async () => {
+    try {
+      const tasks = await listTasks()
+      if (currentWorkspaceId !== useWorkspaceStore.getState().currentWorkspaceId) return
+      const nextTask = selectVisibleGraphTask(tasks)
+      setGraphTask((currentTask) => {
+        if (
+          currentTask?.task_id === nextTask?.task_id
+          && currentTask?.status === nextTask?.status
+          && currentTask?.progress === nextTask?.progress
+          && currentTask?.updated_at === nextTask?.updated_at
+        ) {
+          return currentTask
+        }
+        return nextTask
+      })
+    } catch (error) {
+      toast.error(localizedErrorMessage(error, t))
+    }
+  }, [currentWorkspaceId, t])
 
   const load = useCallback(async () => {
     setIsLoading(true)
@@ -87,9 +127,31 @@ export default function AnswerGraphManagement() {
 
   useEffect(() => {
     setPreview(null)
-    setTaskId('')
+    setGraphTask(null)
     void load()
-  }, [load])
+    void loadGraphTask()
+  }, [load, loadGraphTask])
+
+  const isGraphTaskActive = Boolean(
+    graphTask && ACTIVE_TASK_STATUSES.has(graphTask.status)
+  )
+
+  const handleGraphTaskSettled = useCallback(() => {
+    void loadGraphTask()
+    void load()
+  }, [load, loadGraphTask])
+
+  const handleGraphTaskStreamError = useCallback(() => {
+    void loadGraphTask()
+  }, [loadGraphTask])
+
+  useEffect(() => {
+    if (!isGraphTaskActive) return
+    const intervalId = window.setInterval(() => {
+      void loadGraphTask()
+    }, 2500)
+    return () => window.clearInterval(intervalId)
+  }, [isGraphTaskActive, loadGraphTask])
 
   const selectedAnswer = useMemo(
     () => answers.find((answer) => answer.answer_id === selectedAnswerId),
@@ -156,12 +218,25 @@ export default function AnswerGraphManagement() {
         use_llm: useLlm,
         limit: 1000,
       })
-      setTaskId(response.task_id)
+      setGraphTask({
+        task_id: response.task_id,
+        task_type: GRAPH_TASK_TYPE,
+        workspace: currentWorkspaceId || '',
+        status: 'pending',
+        progress: 0,
+        message: response.message,
+        created_at: Date.now() / 1000,
+        updated_at: Date.now() / 1000,
+        metadata: { answer_count: response.answer_count },
+      })
       toast.success(
-        t('answerCatalog.graph.rebuildStarted', '{{count}} FAQ graph jobs started.', {
-          count: response.answer_count,
-        })
+        response.reused
+          ? t('answerCatalog.graph.rebuildResumed', 'Reconnected to the FAQ graph build already in progress.')
+          : t('answerCatalog.graph.rebuildStarted', '{{count}} FAQ graph jobs started.', {
+            count: response.answer_count,
+          })
       )
+      void loadGraphTask()
     } catch (error) {
       toast.error(localizedErrorMessage(error, t))
     } finally {
@@ -470,23 +545,57 @@ export default function AnswerGraphManagement() {
             </Button>
           </div>
           <div className="flex items-end">
-            <Button onClick={runRebuild} disabled={isRebuilding || !config?.enabled}>
-              {isRebuilding ? <Loader2Icon className="h-4 w-4 animate-spin" /> : <DatabaseZapIcon className="h-4 w-4" />}
-              {t('answerCatalog.graph.rebuild', 'Build missing and changed FAQ')}
+            <Button onClick={runRebuild} disabled={isRebuilding || isGraphTaskActive || !config?.enabled}>
+              {isRebuilding || isGraphTaskActive
+                ? <Loader2Icon className="h-4 w-4 animate-spin" />
+                : <DatabaseZapIcon className="h-4 w-4" />}
+              {isGraphTaskActive
+                ? t('answerCatalog.graph.rebuildRunning', 'Building FAQ graphs ({{progress}}%)', {
+                  progress: Math.round(graphTask?.progress || 0),
+                })
+                : t('answerCatalog.graph.rebuild', 'Build missing and changed FAQ')}
             </Button>
           </div>
         </div>
 
-        {taskId && (
+        {graphTask && (
           <div className="border-b p-4">
-            <TaskProgressPanel
-              taskId={taskId}
-              compact
-              onComplete={() => {
-                setTaskId('')
-                void load()
-              }}
-            />
+            <div className="rounded-md border bg-muted/20 p-3">
+              <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <div className="font-medium">
+                    {t('answerCatalog.graph.rebuildStatusTitle', 'FAQ graph build status')}
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {isGraphTaskActive
+                      ? t(
+                        'answerCatalog.graph.rebuildBackgroundHint',
+                        'The build continues on the server after you leave this screen. Progress is restored when you return.'
+                      )
+                      : graphTask.status === 'completed'
+                        ? t('answerCatalog.graph.rebuildCompleted', 'The latest FAQ graph build completed.')
+                        : graphTask.status === 'cancelled'
+                          ? t('answerCatalog.graph.rebuildCancelled', 'The FAQ graph build was cancelled.')
+                          : t('answerCatalog.graph.rebuildFailed', 'The FAQ graph build failed. Review the message below.')}
+                  </p>
+                </div>
+                <div className="text-right text-xs text-muted-foreground">
+                  <div>
+                    {t('answerCatalog.graph.rebuildAnswerCount', 'Target {{count}} FAQ', {
+                      count: Number(graphTask.metadata?.answer_count || 0),
+                    })}
+                  </div>
+                  <div className="font-mono">{graphTask.task_id}</div>
+                </div>
+              </div>
+              <TaskProgressPanel
+                taskId={graphTask.task_id}
+                compact
+                onComplete={handleGraphTaskSettled}
+                onError={handleGraphTaskStreamError}
+                onCancel={handleGraphTaskSettled}
+              />
+            </div>
           </div>
         )}
 

@@ -44,6 +44,22 @@ DEFAULT_KMS_QUERY_OPTIONS: dict[str, Any] = {
     "enable_rerank": True,
 }
 
+DEFAULT_FAQ_RETRIEVAL_MODE = "graph_hybrid"
+
+
+def build_faq_search_payload(
+    query: str,
+    options: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    request_payload = {
+        "query": query,
+        "include_candidates": True,
+        **(options or {}),
+    }
+    if not request_payload.get("retrieval_mode"):
+        request_payload["retrieval_mode"] = DEFAULT_FAQ_RETRIEVAL_MODE
+    return request_payload
+
 
 def build_kms_query_payload(
     query: str,
@@ -312,11 +328,7 @@ async def integrated_search(
             )
 
     if include_faq and allowed_answer_ids != []:
-        faq_payload = {
-            "query": query,
-            "include_candidates": True,
-            **(payload.get("faq_options") or {}),
-        }
+        faq_payload = build_faq_search_payload(query, payload.get("faq_options"))
         if allowed_answer_ids is not None:
             faq_payload["allowed_answer_ids"] = allowed_answer_ids
         try:
@@ -336,6 +348,10 @@ async def integrated_search(
                     "trace_id",
                     "rationale",
                     "retrieval_mode",
+                    "requested_retrieval_mode",
+                    "effective_retrieval_mode",
+                    "graph_status",
+                    "retrieval_fallback_reason",
                     "selected_by",
                     "selection_policy",
                     "abstention_reason",
@@ -475,11 +491,7 @@ async def integrated_search_stream(
     faq_results: list[dict[str, Any]] = []
     faq_metadata: dict[str, Any] = {}
     if payload.get("include_faq", True) and allowed_answer_ids != []:
-        faq_payload = {
-            "query": query,
-            "include_candidates": True,
-            **(payload.get("faq_options") or {}),
-        }
+        faq_payload = build_faq_search_payload(query, payload.get("faq_options"))
         if allowed_answer_ids is not None:
             faq_payload["allowed_answer_ids"] = allowed_answer_ids
         try:
@@ -498,6 +510,10 @@ async def integrated_search_stream(
                     "trace_id",
                     "rationale",
                     "retrieval_mode",
+                    "requested_retrieval_mode",
+                    "effective_retrieval_mode",
+                    "graph_status",
+                    "retrieval_fallback_reason",
                     "selected_by",
                     "selection_policy",
                     "abstention_reason",

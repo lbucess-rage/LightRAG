@@ -82,7 +82,7 @@ const DEFAULT_KMS_OPTIONS: KmsSearchOptions = {
 }
 
 const DEFAULT_FAQ_OPTIONS: FaqSearchOptions = {
-  retrieval_mode: 'hybrid',
+  retrieval_mode: 'graph_hybrid',
   selection_policy: 'workspace',
   top_k: 5,
   min_score: 0.18,
@@ -109,6 +109,30 @@ const responseFormatOptions = [
 
 function responseFormatLabel(value: string) {
   return responseFormatOptions.find((option) => option.value === value)?.label || value
+}
+
+function faqRetrievalModeLabel(value: string) {
+  const labels: Record<string, string> = {
+    keyword: '키워드',
+    vector: '벡터',
+    hybrid: '키워드+벡터',
+    graph_hybrid: '그래프 결합',
+    llm_rerank: 'LLM ID 선택'
+  }
+  return labels[value] || value
+}
+
+function faqFallbackReasonLabel(value: string) {
+  const labels: Record<string, string> = {
+    graph_disabled: '워크스페이스에서 그래프를 사용하지 않음',
+    graph_unavailable: '그래프 저장소를 사용할 수 없음',
+    graph_query_failed: '그래프 조회 실패',
+    graph_no_nodes: '질문과 관련된 그래프 노드를 찾지 못함',
+    graph_below_similarity: '그래프 유사도가 기준에 미달함',
+    graph_no_answers: '그래프 경로에서 연결된 FAQ를 찾지 못함',
+    graph_stale: '그래프가 현재 FAQ 버전과 일치하지 않음'
+  }
+  return labels[value] || value
 }
 
 function categoryLabel(category: Category) {
@@ -1416,7 +1440,11 @@ export default function IntegratedSearch() {
         <BookOpenIcon className="size-4" style={{ color: 'var(--fg-secondary)' }} />
         <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-primary)' }}>FAQ 답변</span>
         <span className="badge gray">{faqResults.length}건</span>
-        {faqMetadata.retrieval_mode && <span className="badge outline">{faqMetadata.retrieval_mode}</span>}
+        {faqMetadata.effective_retrieval_mode && (
+          <span className="badge outline">
+            실제 적용 {faqRetrievalModeLabel(faqMetadata.effective_retrieval_mode)}
+          </span>
+        )}
       </div>
       {faqMetadata.clarification_question && (
         <div
@@ -1438,6 +1466,24 @@ export default function IntegratedSearch() {
             </strong>
             <span style={{ fontSize: 13, lineHeight: 1.5 }}>{faqMetadata.clarification_question}</span>
           </div>
+        </div>
+      )}
+      {faqMetadata.retrieval_fallback_reason && (
+        <div
+          className="row"
+          style={{
+            gap: 8,
+            padding: '9px 11px',
+            border: '1px solid var(--warning)',
+            borderRadius: 'var(--radius-md)',
+            background: 'var(--warning-soft)',
+            color: 'var(--fg-primary)',
+            fontSize: 12.5
+          }}
+        >
+          <InfoIcon className="size-4" style={{ color: 'var(--warning)' }} />
+          그래프를 사용할 수 없어 키워드+벡터 검색으로 처리했습니다.{' '}
+          ({faqFallbackReasonLabel(faqMetadata.retrieval_fallback_reason)})
         </div>
       )}
       {aliasExpansions.length > 0 && (
@@ -1801,7 +1847,7 @@ export default function IntegratedSearch() {
           </span>
           {includeFaq && (
             <span className="badge blue">
-              FAQ {faqOptions.retrieval_mode === 'hybrid' ? '하이브리드' : faqOptions.retrieval_mode}
+              FAQ {faqOptions.retrieval_mode === 'graph_hybrid' ? '그래프 결합' : faqOptions.retrieval_mode}
             </span>
           )}
         </div>
@@ -1874,8 +1920,8 @@ export default function IntegratedSearch() {
                 }))}
                 disabled={!includeFaq}
               >
-                <option value="hybrid">하이브리드 · 권장</option>
-                <option value="graph_hybrid">그래프 결합 · 선택</option>
+                <option value="graph_hybrid">그래프 결합 · 권장</option>
+                <option value="hybrid">키워드+벡터</option>
                 <option value="keyword">키워드</option>
                 <option value="vector">벡터</option>
                 <option value="llm_rerank">LLM 최종 선택</option>
