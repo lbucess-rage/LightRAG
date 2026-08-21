@@ -40,6 +40,7 @@ import {
 import { api } from '@/api/client'
 import TenantSelect from '@/components/TenantSelect'
 import WorkspaceSelect, { modeLabel, type Workspace, type WorkspaceMode } from '@/components/WorkspaceSelect'
+import WorkspaceScopeSelect from '@/components/WorkspaceScopeSelect'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import Textarea from '@/components/ui/Textarea'
@@ -53,11 +54,12 @@ import {
 } from '@/config'
 import { RelatedHelp } from '@/features/Help'
 import FaqBulkCreate from '@/features/FaqBulkCreate'
+import FaqGraphManager from '@/features/FaqGraphManager'
 import FaqTerminologyManager from '@/features/FaqTerminologyManager'
 import { selectClass } from '@/lib/form'
 import { PASSWORD_MIN_LENGTH, createUserDisabledReason, passwordRuleFeedback } from '@/lib/passwordPolicy'
 import { compactDateRange, deltaPercent, fillHourRows, ratio, toCountRows, type CountRow } from '@/lib/stats'
-import { canChooseWorkspace, resolveEffectiveWorkspaceScope } from '@/lib/workspaceAccess'
+import { resolveEffectiveWorkspaceScope } from '@/lib/workspaceAccess'
 import { useAuthStore } from '@/stores/auth'
 import { useWorkspaceScopeStore } from '@/stores/workspaceScope'
 
@@ -175,7 +177,37 @@ type FaqAnswer = {
   valid_until?: string | null
   priority?: number
   tags?: string[]
+  assets?: FaqAsset[]
   update_time?: string | null
+}
+
+type FaqAsset = {
+  asset_id: string
+  answer_id: string
+  workspace: string
+  asset_type: 'image' | 'video' | 'audio' | 'table' | 'file'
+  storage_type: 'external' | 's3' | 'local' | 'inline'
+  storage_uri?: string | null
+  content_url?: string | null
+  file_name?: string | null
+  mime_type?: string | null
+  file_size?: number
+  caption?: string | null
+  alt_text?: string | null
+  search_text?: string | null
+  content_text?: string | null
+  display_order?: number
+}
+
+function faqAssetAdminUrl(asset: FaqAsset) {
+  if (asset.storage_type === 'external' || asset.storage_type === 's3') {
+    return asset.content_url || asset.storage_uri || ''
+  }
+  return (
+    `/api/knowledge/faq-answers/${encodeURIComponent(asset.answer_id)}` +
+    `/assets/${encodeURIComponent(asset.asset_id)}/content` +
+    `?faq_workspace=${encodeURIComponent(asset.workspace)}`
+  )
 }
 
 const KNOWLEDGE_DOCUMENT_PAGE_SIZE = 200
@@ -2774,6 +2806,7 @@ function KmsDocumentReingestModal({
 
 function FaqAnswerSettings({
   answer,
+  workspace,
   onClose,
   onSave,
   guidance,
@@ -2782,6 +2815,7 @@ function FaqAnswerSettings({
   onDeleteGuidance
 }: {
   answer: FaqAnswer
+  workspace: string
   onClose: () => void
   onSave: (answerId: string, payload: Record<string, unknown>, rebuild: boolean) => Promise<void>
   guidance: FaqGuidance[]
@@ -2806,6 +2840,28 @@ function FaqAnswerSettings({
   const [saving, setSaving] = useState(false)
   const [guidanceSaving, setGuidanceSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
+  const [assets, setAssets] = useState<FaqAsset[]>(answer.assets || [])
+  const [assetFile, setAssetFile] = useState<File | null>(null)
+  const [assetUrl, setAssetUrl] = useState('')
+  const [assetType, setAssetType] = useState<FaqAsset['asset_type']>('image')
+  const [assetCaption, setAssetCaption] = useState('')
+  const [assetAltText, setAssetAltText] = useState('')
+  const [assetSearchText, setAssetSearchText] = useState('')
+  const [assetSaving, setAssetSaving] = useState(false)
+  const [assetDrafts, setAssetDrafts] = useState<Record<string, {
+    caption: string
+    alt_text: string
+    search_text: string
+  }>>(
+    Object.fromEntries((answer.assets || []).map((asset) => [
+      asset.asset_id,
+      {
+        caption: asset.caption || '',
+        alt_text: asset.alt_text || '',
+        search_text: asset.search_text || ''
+      }
+    ]))
+  )
   const update = (patch: Partial<typeof form>) => {
     setForm((value) => ({ ...value, ...patch }))
     setDirty(true)
@@ -2852,6 +2908,100 @@ function FaqAnswerSettings({
       setDirty(true)
     } finally {
       setGuidanceSaving(false)
+    }
+  }
+  const applyAssets = (nextAssets: FaqAsset[]) => {
+    setAssets(nextAssets)
+    setAssetDrafts(Object.fromEntries(nextAssets.map((asset) => [
+      asset.asset_id,
+      {
+        caption: asset.caption || '',
+        alt_text: asset.alt_text || '',
+        search_text: asset.search_text || ''
+      }
+    ])))
+  }
+  const reloadAssets = async () => {
+    const response = await api.get(
+      `/api/knowledge/faq-answers/${encodeURIComponent(answer.answer_id)}/assets`,
+      { params: { faq_workspace: workspace } }
+    )
+    applyAssets(response.data.assets || [])
+  }
+  const uploadAsset = async () => {
+    if (!assetFile) return
+    setAssetSaving(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', assetFile)
+      formData.append('caption', assetCaption)
+      formData.append('alt_text', assetAltText)
+      formData.append('search_text', assetSearchText)
+      formData.append('display_order', String(assets.length))
+      await api.post(
+        `/api/knowledge/faq-answers/${encodeURIComponent(answer.answer_id)}/assets/upload`,
+        formData,
+        { params: { faq_workspace: workspace } }
+      )
+      setAssetFile(null)
+      setAssetCaption('')
+      setAssetAltText('')
+      setAssetSearchText('')
+      await reloadAssets()
+    } finally {
+      setAssetSaving(false)
+    }
+  }
+  const registerAssetUrl = async () => {
+    if (!assetUrl.trim()) return
+    setAssetSaving(true)
+    try {
+      await api.post(
+        `/api/knowledge/faq-answers/${encodeURIComponent(answer.answer_id)}/assets`,
+        {
+          asset_type: assetType,
+          external_url: assetUrl.trim(),
+          caption: assetCaption || null,
+          alt_text: assetAltText || null,
+          search_text: assetSearchText || null,
+          display_order: assets.length
+        },
+        { params: { faq_workspace: workspace } }
+      )
+      setAssetUrl('')
+      setAssetCaption('')
+      setAssetAltText('')
+      setAssetSearchText('')
+      await reloadAssets()
+    } finally {
+      setAssetSaving(false)
+    }
+  }
+  const saveAsset = async (asset: FaqAsset) => {
+    const draft = assetDrafts[asset.asset_id]
+    if (!draft) return
+    setAssetSaving(true)
+    try {
+      await api.patch(
+        `/api/knowledge/faq-answers/${encodeURIComponent(answer.answer_id)}/assets/${encodeURIComponent(asset.asset_id)}`,
+        draft,
+        { params: { faq_workspace: workspace } }
+      )
+      await reloadAssets()
+    } finally {
+      setAssetSaving(false)
+    }
+  }
+  const removeAsset = async (asset: FaqAsset) => {
+    setAssetSaving(true)
+    try {
+      await api.delete(
+        `/api/knowledge/faq-answers/${encodeURIComponent(answer.answer_id)}/assets/${encodeURIComponent(asset.asset_id)}`,
+        { params: { faq_workspace: workspace } }
+      )
+      await reloadAssets()
+    } finally {
+      setAssetSaving(false)
     }
   }
 
@@ -2912,6 +3062,91 @@ function FaqAnswerSettings({
           <span>답변 본문</span>
           <Textarea value={form.body} onChange={(event) => update({ body: event.target.value })} style={{ minHeight: 160 }} />
         </label>
+        <div className="field">
+          <span>첨부 자료</span>
+          <div className="muted" style={{ fontSize: 12, lineHeight: 1.55 }}>
+            이미지, 영상, 음성, 표와 파일을 함께 제공할 수 있습니다. 검색용 설명은 첨부 자료의 내용을 FAQ 검색에 반영합니다.
+          </div>
+          {assets.length > 0 && (
+            <div className="col" style={{ gap: 8 }}>
+              {assets.map((asset) => {
+                const url = faqAssetAdminUrl(asset)
+                const draft = assetDrafts[asset.asset_id] || { caption: '', alt_text: '', search_text: '' }
+                return (
+                  <div key={asset.asset_id} style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
+                    {asset.asset_type === 'image' && url && (
+                      <div style={{ maxHeight: 260, background: 'var(--bg-subtle)', display: 'grid', placeItems: 'center' }}>
+                        <img src={url} alt={draft.alt_text || draft.caption || asset.file_name || ''} style={{ display: 'block', maxWidth: '100%', maxHeight: 260, objectFit: 'contain' }} />
+                      </div>
+                    )}
+                    <div className="grid" style={{ gridTemplateColumns: 'minmax(150px,.7fr) repeat(3,minmax(160px,1fr)) auto', gap: 8, padding: 10 }}>
+                      <div>
+                        <div style={{ fontWeight: 650 }}>{asset.file_name || asset.asset_id}</div>
+                        <div className="muted" style={{ marginTop: 3, fontSize: 11.5 }}>{asset.asset_type}</div>
+                      </div>
+                      <Input
+                        value={draft.caption}
+                        placeholder="화면 표시 설명"
+                        onChange={(event) => setAssetDrafts((current) => ({
+                          ...current,
+                          [asset.asset_id]: { ...draft, caption: event.target.value }
+                        }))}
+                      />
+                      <Input
+                        value={draft.alt_text}
+                        placeholder="대체 텍스트"
+                        onChange={(event) => setAssetDrafts((current) => ({
+                          ...current,
+                          [asset.asset_id]: { ...draft, alt_text: event.target.value }
+                        }))}
+                      />
+                      <Input
+                        value={draft.search_text}
+                        placeholder="검색용 설명"
+                        onChange={(event) => setAssetDrafts((current) => ({
+                          ...current,
+                          [asset.asset_id]: { ...draft, search_text: event.target.value }
+                        }))}
+                      />
+                      <div className="row" style={{ gap: 4 }}>
+                        <Button type="button" size="sm" variant="outline" onClick={() => saveAsset(asset)} disabled={assetSaving}>
+                          <SaveIcon className="size-4" /> 저장
+                        </Button>
+                        <Button type="button" size="sm" variant="ghost" onClick={() => removeAsset(asset)} disabled={assetSaving}>
+                          <Trash2Icon className="size-4" /> 삭제
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          <div className="grid" style={{ gridTemplateColumns: '1fr 160px 1fr auto', gap: 8 }}>
+            <Input type="file" onChange={(event) => setAssetFile(event.target.files?.[0] || null)} />
+            <select className={selectClass} value={assetType} onChange={(event) => setAssetType(event.target.value as FaqAsset['asset_type'])}>
+              <option value="image">이미지</option>
+              <option value="video">영상</option>
+              <option value="audio">음성</option>
+              <option value="table">표</option>
+              <option value="file">파일</option>
+            </select>
+            <Input value={assetUrl} onChange={(event) => setAssetUrl(event.target.value)} placeholder="또는 외부 URL" />
+            <div className="row" style={{ gap: 6 }}>
+              <Button type="button" variant="outline" onClick={uploadAsset} disabled={assetSaving || !assetFile}>
+                <UploadIcon className="size-4" /> 업로드
+              </Button>
+              <Button type="button" variant="outline" onClick={registerAssetUrl} disabled={assetSaving || !assetUrl.trim()}>
+                <LinkIcon className="size-4" /> URL 등록
+              </Button>
+            </div>
+          </div>
+          <div className="grid" style={{ gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+            <Input value={assetCaption} onChange={(event) => setAssetCaption(event.target.value)} placeholder="화면 표시 설명" />
+            <Input value={assetAltText} onChange={(event) => setAssetAltText(event.target.value)} placeholder="대체 텍스트" />
+            <Input value={assetSearchText} onChange={(event) => setAssetSearchText(event.target.value)} placeholder="검색용 설명" />
+          </div>
+        </div>
         <label className="field">
           <span>요약</span>
           <Textarea value={form.approved_summary} onChange={(event) => update({ approved_summary: event.target.value })} style={{ minHeight: 70 }} />
@@ -3173,10 +3408,11 @@ export function KnowledgeManagement() {
   const [sourceType, setSourceType] = useState<KnowledgeSourceType>('faq')
   const [form, setForm] = useState(initialKnowledgeForm)
   const [file, setFile] = useState<File | null>(null)
+  const tenantId = useWorkspaceScopeStore((state) => state.tenantId)
+  const tenantName = useWorkspaceScopeStore((state) => state.tenantName)
   const kmsWorkspace = useWorkspaceScopeStore((state) => state.kmsWorkspace)
   const faqWorkspace = useWorkspaceScopeStore((state) => state.faqWorkspace)
-  const setKmsWorkspace = useWorkspaceScopeStore((state) => state.setKmsWorkspace)
-  const setFaqWorkspace = useWorkspaceScopeStore((state) => state.setFaqWorkspace)
+  const setTenantScope = useWorkspaceScopeStore((state) => state.setTenantScope)
   const [items, setItems] = useState<any[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [documents, setDocuments] = useState<KmsDocument[]>([])
@@ -3211,6 +3447,7 @@ export function KnowledgeManagement() {
   const [faqCandidateTopK, setFaqCandidateTopK] = useState('5')
   const [faqCandidateIncludeDrafts, setFaqCandidateIncludeDrafts] = useState(true)
   const [faqCandidateRetrievalMode, setFaqCandidateRetrievalMode] = useState('hybrid')
+  const [faqCandidateSelectionPolicy, setFaqCandidateSelectionPolicy] = useState('workspace')
   const [faqCandidateResult, setFaqCandidateResult] = useState<any>(null)
   const [faqCandidateLoading, setFaqCandidateLoading] = useState(false)
   const [faqCandidateError, setFaqCandidateError] = useState('')
@@ -3218,23 +3455,28 @@ export function KnowledgeManagement() {
   const [syncing, setSyncing] = useState(false)
   const [formError, setFormError] = useState('')
   const [faqBulkCreateOpen, setFaqBulkCreateOpen] = useState(false)
+  const [faqGraphOpen, setFaqGraphOpen] = useState(false)
   const [faqTerminologyOpen, setFaqTerminologyOpen] = useState(false)
-  const canChooseWorkspaceForUser = canChooseWorkspace(user?.role)
-  const { kmsWorkspace: effectiveKmsWorkspace, faqWorkspace: effectiveFaqWorkspace } = resolveEffectiveWorkspaceScope({
+  const {
+    tenantId: effectiveTenantId,
+    tenantName: effectiveTenantName,
+    kmsWorkspace: effectiveKmsWorkspace,
+    faqWorkspace: effectiveFaqWorkspace
+  } = resolveEffectiveWorkspaceScope({
     role: user?.role,
+    selectedTenantId: tenantId,
+    selectedTenantName: tenantName,
     selectedKmsWorkspace: kmsWorkspace,
     selectedFaqWorkspace: faqWorkspace,
+    userTenantId: user?.tenant_id,
+    userTenantName: user?.tenant_name,
     userKmsWorkspace: user?.kms_workspace,
     userFaqWorkspace: user?.faq_workspace
   })
 
-  useEffect(() => {
-    if (effectiveKmsWorkspace !== kmsWorkspace) setKmsWorkspace(effectiveKmsWorkspace)
-    if (effectiveFaqWorkspace !== faqWorkspace) setFaqWorkspace(effectiveFaqWorkspace)
-  }, [effectiveFaqWorkspace, effectiveKmsWorkspace, faqWorkspace, kmsWorkspace, setFaqWorkspace, setKmsWorkspace])
-
   const load = async (options: { syncRunning?: boolean } = {}) => {
     const scopeParams = new URLSearchParams({
+      tenant_id: effectiveTenantId,
       kms_workspace: effectiveKmsWorkspace,
       faq_workspace: effectiveFaqWorkspace
     })
@@ -3248,14 +3490,14 @@ export function KnowledgeManagement() {
     })
     if (options.syncRunning ?? true) {
       try {
-        await api.post('/api/jobs/sync-running')
+        await api.post('/api/jobs/sync-running', undefined, { params: { tenant_id: effectiveTenantId } })
       } catch {
         // The list should still render when the background LightRAG task endpoint is temporarily unavailable.
       }
     }
     const [knowledgeResponse, categoryResponse, documentResponse, faqResponse, jobsResponse] = await Promise.all([
       api.get(`/api/knowledge?${scopeParams.toString()}`),
-      api.get('/api/categories'),
+      api.get('/api/categories', { params: { tenant_id: effectiveTenantId } }),
       fetchAllKnowledgePages<KmsDocument>({
         endpoint: '/api/knowledge/kms-documents',
         params: documentParams,
@@ -3270,7 +3512,7 @@ export function KnowledgeManagement() {
         itemKey: 'answers',
         totalPages: faqAnswerTotalPages
       }),
-      api.get('/api/jobs')
+      api.get('/api/jobs', { params: { tenant_id: effectiveTenantId } })
     ])
     setItems(knowledgeResponse.data.items || [])
     setCategories(categoryResponse.data.categories || [])
@@ -3282,7 +3524,7 @@ export function KnowledgeManagement() {
 
   useEffect(() => {
     load()
-  }, [documentStatus, faqStatus, faqSearch, effectiveKmsWorkspace, effectiveFaqWorkspace])
+  }, [documentStatus, faqStatus, faqSearch, effectiveTenantId, effectiveKmsWorkspace, effectiveFaqWorkspace])
 
   const updateForm = (patch: Partial<typeof initialKnowledgeForm>) => {
     setForm((value) => ({ ...value, ...patch }))
@@ -3297,6 +3539,7 @@ export function KnowledgeManagement() {
   const commonPayload = () => ({
     title: form.title,
     body: form.body,
+    tenant_id: effectiveTenantId,
     category_id: form.category_id || null,
     enabled: form.enabled,
     valid_from: form.valid_from ? new Date(form.valid_from).toISOString() : null,
@@ -3310,6 +3553,7 @@ export function KnowledgeManagement() {
     const data = new FormData()
     data.set('title', form.title)
     data.set('body', form.body)
+    data.set('tenant_id', effectiveTenantId)
     data.set('category_id', form.category_id)
     data.set('enabled', String(form.enabled))
     data.set('kms_workspace', effectiveKmsWorkspace)
@@ -3431,7 +3675,7 @@ export function KnowledgeManagement() {
       }
       resetKnowledgeForm()
       setAdding(false)
-      await api.post('/api/jobs/sync-running')
+      await api.post('/api/jobs/sync-running', undefined, { params: { tenant_id: effectiveTenantId } })
       await load()
     } catch (error) {
       setFormError(apiErrorMessage(error, '지식 추가 중 오류가 발생했습니다.'))
@@ -3664,6 +3908,7 @@ export function KnowledgeManagement() {
     setExistingLinkError('')
     try {
       const response = await api.post('/api/knowledge/link-existing', {
+        tenant_id: effectiveTenantId,
         category_id: existingLinkForm.category_id || null,
         enabled: existingLinkForm.enabled,
         valid_from: existingLinkForm.valid_from ? new Date(existingLinkForm.valid_from).toISOString() : null,
@@ -3693,7 +3938,7 @@ export function KnowledgeManagement() {
   const syncRunningJobs = async (options: { silent?: boolean } = {}) => {
     if (!options.silent) setSyncing(true)
     try {
-      await api.post('/api/jobs/sync-running')
+      await api.post('/api/jobs/sync-running', undefined, { params: { tenant_id: effectiveTenantId } })
       await load({ syncRunning: false })
     } finally {
       if (!options.silent) setSyncing(false)
@@ -3708,7 +3953,7 @@ export function KnowledgeManagement() {
       void syncRunningJobs({ silent: true })
     }, 5000)
     return () => window.clearInterval(timer)
-  }, [runningJobCount, effectiveKmsWorkspace, effectiveFaqWorkspace, documentStatus, faqStatus, faqSearch])
+  }, [runningJobCount, effectiveTenantId, effectiveKmsWorkspace, effectiveFaqWorkspace, documentStatus, faqStatus, faqSearch])
 
   const deleteDocument = async (doc: KmsDocument) => {
     if (!window.confirm(`${doc.file_path || doc.id} 문서를 LightRAG 워크스페이스에서 삭제하시겠습니까?`)) {
@@ -3743,7 +3988,8 @@ export function KnowledgeManagement() {
           include_drafts: faqCandidateIncludeDrafts,
           include_candidates: true,
           strategy: 'balanced',
-          retrieval_mode: faqCandidateRetrievalMode
+          retrieval_mode: faqCandidateRetrievalMode,
+          selection_policy: faqCandidateSelectionPolicy
         },
         { params: { faq_workspace: effectiveFaqWorkspace } }
       )
@@ -3815,6 +4061,7 @@ export function KnowledgeManagement() {
         {
           title: documentReingestForm.title,
           body: documentReingestForm.body,
+          tenant_id: effectiveTenantId,
           category_id: documentReingestForm.category_id || null,
           enabled: documentReingestForm.enabled,
           valid_from: documentReingestForm.valid_from ? new Date(documentReingestForm.valid_from).toISOString() : null,
@@ -3828,7 +4075,7 @@ export function KnowledgeManagement() {
         { params: { kms_workspace: effectiveKmsWorkspace } }
       )
       closeDocumentReingest()
-      await api.post('/api/jobs/sync-running')
+      await api.post('/api/jobs/sync-running', undefined, { params: { tenant_id: effectiveTenantId } })
       await load()
     } catch (error) {
       setDocumentReingestError(apiErrorMessage(error, '문서 재지식화 중 오류가 발생했습니다.'))
@@ -3938,25 +4185,26 @@ export function KnowledgeManagement() {
             'HELP-KNOWLEDGE-014',
             'HELP-KNOWLEDGE-015',
             'HELP-KNOWLEDGE-016',
-            'HELP-KNOWLEDGE-017'
+            'HELP-KNOWLEDGE-017',
+            'HELP-KNOWLEDGE-018'
           ]}
         />
-        <div className="row" style={{ gap: 8, minWidth: 420 }}>
-          <WorkspaceSelect
-            value={effectiveKmsWorkspace}
-            mode="kms"
-            onChange={setKmsWorkspace}
-            placeholder="KMS 워크스페이스"
-            disabled={!canChooseWorkspaceForUser}
-          />
-          <WorkspaceSelect
-            value={effectiveFaqWorkspace}
-            mode="answer_catalog"
-            onChange={setFaqWorkspace}
-            placeholder="FAQ 워크스페이스"
-            disabled={!canChooseWorkspaceForUser}
-          />
-        </div>
+        <WorkspaceScopeSelect
+          role={user?.role}
+          tenantId={effectiveTenantId}
+          tenantName={effectiveTenantName}
+          kmsWorkspace={effectiveKmsWorkspace}
+          faqWorkspace={effectiveFaqWorkspace}
+          compact
+          onChange={(scope) =>
+            setTenantScope({
+              tenantId: scope.tenant_id,
+              tenantName: scope.name,
+              kmsWorkspace: scope.kms_workspace,
+              faqWorkspace: scope.faq_workspace
+            })
+          }
+        />
         <Button type="button" variant="outline" onClick={syncRunningJobs} disabled={syncing}>
           <RefreshCwIcon className={syncing ? 'spin size-4' : 'size-4'} /> 진행 상태 동기화
         </Button>
@@ -3965,6 +4213,9 @@ export function KnowledgeManagement() {
         </Button>
         <Button type="button" variant="outline" onClick={() => setFaqTerminologyOpen(true)}>
           <TagIcon className="size-4" /> 공통 용어
+        </Button>
+        <Button type="button" variant="outline" onClick={() => setFaqGraphOpen(true)}>
+          <NetworkIcon className="size-4" /> FAQ 그래프
         </Button>
         <Button type="button" variant="outline" onClick={() => setFaqBulkCreateOpen(true)}>
           <DatabaseIcon className="size-4" /> FAQ 일괄 생성
@@ -4210,9 +4461,20 @@ export function KnowledgeManagement() {
                 onChange={(event) => setFaqCandidateRetrievalMode(event.target.value)}
               >
                 <option value="hybrid">하이브리드 · 권장</option>
+                <option value="graph_hybrid">그래프 결합 · 선택</option>
                 <option value="keyword">키워드</option>
                 <option value="vector">벡터</option>
                 <option value="llm_rerank">LLM 최종 선택</option>
+              </select>
+              <select
+                className={selectClass}
+                style={{ width: 170 }}
+                value={faqCandidateSelectionPolicy}
+                onChange={(event) => setFaqCandidateSelectionPolicy(event.target.value)}
+              >
+                <option value="workspace">워크스페이스 기준</option>
+                <option value="precision">확실한 경우만 답변</option>
+                <option value="coverage">답변 제공 우선</option>
               </select>
               <label className="check" style={{ minHeight: 32 }}>
                 <input type="checkbox" checked={faqCandidateIncludeDrafts} onChange={(event) => setFaqCandidateIncludeDrafts(event.target.checked)} />
@@ -4237,11 +4499,18 @@ export function KnowledgeManagement() {
                   <div className="row wrap" style={{ gap: 6, marginBottom: 8 }}>
                     <span className={`badge ${faqCandidateResult.matched ? 'green' : 'amber'}`}>{faqCandidateResult.matched ? '매칭' : '미매칭'}</span>
                     <span className="badge outline">신뢰도 {Number((faqCandidateResult.confidence || 0) * 100).toFixed(1)}%</span>
+                    {faqCandidateResult.selection_policy && <span className="badge outline">{faqCandidateResult.selection_policy}</span>}
+                    {faqCandidateResult.abstention_reason && <span className="badge amber">{faqCandidateResult.abstention_reason}</span>}
                     {faqCandidateResult.status && <StatusBadge status={faqCandidateResult.status} />}
                   </div>
                   <div className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}>
                     {faqCandidateResult.response || faqCandidateResult.summary || faqCandidateResult.rationale || '응답 본문이 없습니다.'}
                   </div>
+                  {faqCandidateResult.clarification_question && (
+                    <div style={{ marginTop: 10, padding: 9, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)', background: 'var(--warning-soft)', color: 'var(--fg-primary)', fontSize: 12, lineHeight: 1.5 }}>
+                      <strong>확인 질문:</strong> {faqCandidateResult.clarification_question}
+                    </div>
+                  )}
                   {Array.isArray(faqCandidateResult.alias_expansions) && faqCandidateResult.alias_expansions.length > 0 && (
                     <div style={{ marginTop: 10, paddingTop: 9, borderTop: '1px solid var(--border-subtle)' }}>
                       <div className="eyebrow" style={{ marginBottom: 6 }}>적용된 공통 용어</div>
@@ -4272,7 +4541,19 @@ export function KnowledgeManagement() {
                             <div className="ttl">{candidate.answer?.title || candidate.title || candidate.answer?.answer_id || '-'}</div>
                             <div className="mono muted" style={{ fontSize: 10.5 }}>{candidate.answer?.answer_id || candidate.answer_id || '-'}</div>
                           </td>
-                          <td className="muted" style={{ maxWidth: 280 }}>{candidate.reason || candidate.selected_by || '-'}</td>
+                          <td className="muted" style={{ maxWidth: 320 }}>
+                            <div>{candidate.reason || candidate.selected_by || '-'}</div>
+                            {Array.isArray(candidate.graph_evidence) && candidate.graph_evidence.length > 0 && (
+                              <div className="faq-graph-evidence">
+                                <div className="eyebrow">그래프 연결 근거</div>
+                                {candidate.graph_evidence.slice(0, 2).map((evidence: any, index: number) => (
+                                  <div key={`${candidate.answer?.answer_id || candidate.answer_id}-graph-${index}`} className="reference-summary-meta">
+                                    {(evidence.path || []).join(' → ')}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </td>
                           <td>
                             {(candidate.matched_guidance || []).slice(0, 3).map((item: string) => (
                               <span key={item} className="badge gray" style={{ marginRight: 4 }}>{item}</span>
@@ -4605,6 +4886,7 @@ export function KnowledgeManagement() {
       {faqEditing && (
         <FaqAnswerSettings
           answer={faqEditing}
+          workspace={effectiveFaqWorkspace}
           onClose={closeFaqEdit}
           onSave={saveFaqAnswer}
           guidance={faqGuidance}
@@ -4619,8 +4901,19 @@ export function KnowledgeManagement() {
           onClose={() => setFaqTerminologyOpen(false)}
         />
       )}
+      {faqGraphOpen && (
+        <FaqGraphManager
+          workspace={effectiveFaqWorkspace}
+          answers={faqAnswers.map((answer) => ({
+            answer_id: answer.answer_id,
+            title: answer.title || answer.answer_id
+          }))}
+          onClose={() => setFaqGraphOpen(false)}
+        />
+      )}
       {faqBulkCreateOpen && (
         <FaqBulkCreate
+          tenantId={effectiveTenantId}
           workspace={effectiveFaqWorkspace}
           categories={categories}
           onClose={() => setFaqBulkCreateOpen(false)}

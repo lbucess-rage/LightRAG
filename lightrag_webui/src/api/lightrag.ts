@@ -1892,6 +1892,31 @@ export type AnswerStatus = 'draft' | 'published' | 'archived' | 'expired'
 export type AnswerDisplayPolicy = 'summary' | 'full' | 'both'
 export type AnswerContentFormat = 'plain' | 'markdown' | 'html'
 export type AnswerGuidanceType = 'keyword' | 'question' | 'synonym' | 'negative_keyword' | 'note'
+export type AnswerAssetType = 'image' | 'video' | 'audio' | 'table' | 'file'
+export type AnswerAssetStorageType = 'external' | 's3' | 'local' | 'inline'
+
+export type AnswerAsset = {
+  asset_id: string
+  workspace: string
+  answer_id: string
+  answer_version: number
+  asset_type: AnswerAssetType
+  storage_type: AnswerAssetStorageType
+  storage_uri?: string | null
+  content_url?: string | null
+  file_name?: string | null
+  mime_type?: string | null
+  file_size: number
+  caption?: string | null
+  alt_text?: string | null
+  search_text?: string | null
+  content_text?: string | null
+  display_order: number
+  is_active: boolean
+  metadata: Record<string, any>
+  create_time?: string | null
+  update_time?: string | null
+}
 
 export type AnswerItem = {
   answer_id: string
@@ -1908,6 +1933,7 @@ export type AnswerItem = {
   priority: number
   tags: string[]
   metadata: Record<string, any>
+  assets: AnswerAsset[]
   publish_time?: string | null
   create_time?: string | null
   update_time?: string | null
@@ -2270,9 +2296,10 @@ export type AnswerResolveRequest = {
   min_score?: number
   include_drafts?: boolean
   strategy?: 'fast' | 'balanced'
-  retrieval_mode?: 'keyword' | 'hybrid' | 'llm_rerank'
+  retrieval_mode?: 'keyword' | 'hybrid' | 'graph_hybrid' | 'llm_rerank'
   vector_top_k?: number
   llm_candidate_count?: number
+  selection_policy?: 'workspace' | 'coverage' | 'precision'
 }
 
 export type AnswerResolveCandidate = {
@@ -2282,6 +2309,79 @@ export type AnswerResolveCandidate = {
   reason: string
   score_details?: Record<string, number>
   selected_by?: string
+  graph_evidence?: AnswerGraphEvidence[]
+}
+
+export type AnswerGraphEvidence = {
+  answer_id: string
+  score: number
+  start_node: string
+  path: string[]
+  relation_types: string[]
+}
+
+export type AnswerGraphConfig = {
+  workspace: string
+  enabled: boolean
+  auto_sync: boolean
+  graph_weight: number
+  min_similarity: number
+  max_hops: number
+  precision_mode: boolean
+  precision_min_score: number
+  min_score_margin: number
+  min_category_margin: number
+  min_evidence_sources: number
+  llm_min_confidence: number
+  entity_types: string[]
+  relation_types: string[]
+  extraction_prompt: string
+  schema_version: number
+  create_time?: string | null
+  update_time?: string | null
+}
+
+export type AnswerGraphNode = {
+  node_id: string
+  entity_type: string
+  label: string
+  description: string
+  source: string
+}
+
+export type AnswerGraphRelation = {
+  source_id: string
+  target_id: string
+  relation_type: string
+  description: string
+  weight: number
+  source: string
+}
+
+export type AnswerGraphProjection = {
+  workspace: string
+  answer_id: string
+  answer_version: number
+  schema_version: number
+  status: string
+  content_hash: string
+  nodes: AnswerGraphNode[]
+  relations: AnswerGraphRelation[]
+  error?: string | null
+  built_at?: string | null
+  update_time?: string | null
+}
+
+export type AnswerGraphStatus = {
+  workspace: string
+  enabled: boolean
+  total_answers: number
+  ready: number
+  stale: number
+  pending: number
+  failed: number
+  missing: number
+  last_built_at?: string | null
 }
 
 export type AnswerAliasGroup = {
@@ -2354,9 +2454,12 @@ export type AnswerResolveResponse = {
   candidates: AnswerResolveCandidate[]
   trace_id: string
   rationale: string
-  retrieval_mode?: 'keyword' | 'hybrid' | 'llm_rerank'
+  retrieval_mode?: 'keyword' | 'hybrid' | 'graph_hybrid' | 'llm_rerank'
   selected_by?: string
   alias_expansions?: AnswerAliasExpansion[]
+  selection_policy?: 'coverage' | 'precision'
+  abstention_reason?: string | null
+  clarification_question?: string | null
 }
 
 export type AnswerSearchRequest = AnswerResolveRequest & {
@@ -2382,12 +2485,16 @@ export type AnswerSearchResponse = {
   tags: string[]
   source_type?: string | null
   source_uri?: string | null
+  assets: AnswerAsset[]
   candidates: AnswerResolveCandidate[]
   trace_id: string
   rationale: string
-  retrieval_mode?: 'keyword' | 'hybrid' | 'llm_rerank'
+  retrieval_mode?: 'keyword' | 'hybrid' | 'graph_hybrid' | 'llm_rerank'
   selected_by?: string
   alias_expansions?: AnswerAliasExpansion[]
+  selection_policy?: 'coverage' | 'precision'
+  abstention_reason?: string | null
+  clarification_question?: string | null
 }
 
 export type AnswerGuidanceSuggestionRequest = {
@@ -2502,6 +2609,107 @@ export const updateAnswer = async (answerId: string, request: AnswerUpdateReques
   return response.data
 }
 
+export const listAnswerAssets = async (
+  answerId: string,
+  includeInactive = false
+): Promise<AnswerAsset[]> => {
+  const response = await axiosInstance.get(
+    `/api/answers/${encodeURIComponent(answerId)}/assets`,
+    { params: { include_inactive: includeInactive } }
+  )
+  return response.data
+}
+
+export const createAnswerAsset = async (
+  answerId: string,
+  request: {
+    asset_type: AnswerAssetType
+    external_url?: string | null
+    file_name?: string | null
+    mime_type?: string | null
+    caption?: string | null
+    alt_text?: string | null
+    search_text?: string | null
+    content_text?: string | null
+    display_order?: number
+    metadata?: Record<string, any>
+  }
+): Promise<AnswerAsset> => {
+  const response = await axiosInstance.post(
+    `/api/answers/${encodeURIComponent(answerId)}/assets`,
+    request
+  )
+  return response.data
+}
+
+export const uploadAnswerAsset = async (
+  answerId: string,
+  file: File,
+  options?: {
+    asset_type?: AnswerAssetType
+    caption?: string
+    alt_text?: string
+    search_text?: string
+    display_order?: number
+    metadata?: Record<string, any>
+  }
+): Promise<AnswerAsset> => {
+  const form = new FormData()
+  form.append('file', file)
+  if (options?.asset_type) form.append('asset_type', options.asset_type)
+  if (options?.caption) form.append('caption', options.caption)
+  if (options?.alt_text) form.append('alt_text', options.alt_text)
+  if (options?.search_text) form.append('search_text', options.search_text)
+  form.append('display_order', String(options?.display_order ?? 0))
+  form.append('metadata_json', JSON.stringify(options?.metadata ?? {}))
+  const response = await axiosInstance.post(
+    `/api/answers/${encodeURIComponent(answerId)}/assets/upload`,
+    form
+  )
+  return response.data
+}
+
+export const updateAnswerAsset = async (
+  answerId: string,
+  assetId: string,
+  request: {
+    caption?: string | null
+    alt_text?: string | null
+    search_text?: string | null
+    content_text?: string | null
+    display_order?: number
+    metadata?: Record<string, any>
+  }
+): Promise<AnswerAsset> => {
+  const response = await axiosInstance.patch(
+    `/api/answers/${encodeURIComponent(answerId)}/assets/${encodeURIComponent(assetId)}`,
+    request
+  )
+  return response.data
+}
+
+export const deleteAnswerAsset = async (
+  answerId: string,
+  assetId: string
+): Promise<{ message: string; answer_id: string; asset_id: string }> => {
+  const response = await axiosInstance.delete(
+    `/api/answers/${encodeURIComponent(answerId)}/assets/${encodeURIComponent(assetId)}`
+  )
+  return response.data
+}
+
+export const getAnswerAssetContent = async (asset: AnswerAsset): Promise<Blob> => {
+  if (!asset.content_url) {
+    return new Blob([asset.content_text || ''], {
+      type: asset.mime_type || 'text/plain',
+    })
+  }
+  const response = await axiosInstance.get(asset.content_url, {
+    responseType: 'blob',
+  })
+  return response.data
+}
+
 export const publishAnswer = async (answerId: string): Promise<AnswerItem> => {
   const response = await axiosInstance.post(`/api/answers/${encodeURIComponent(answerId)}/publish`)
   return response.data
@@ -2609,6 +2817,57 @@ export const rebuildAnswerVector = async (
   answerId: string
 ): Promise<{ message: string; answer_id: string; dimensions: number }> => {
   const response = await axiosInstance.post(`/api/answers/${encodeURIComponent(answerId)}/vectors/rebuild`)
+  return response.data
+}
+
+export const getAnswerGraphConfig = async (): Promise<AnswerGraphConfig> => {
+  const response = await axiosInstance.get('/api/answers/graph/config')
+  return response.data
+}
+
+export const updateAnswerGraphConfig = async (
+  request: Partial<Omit<AnswerGraphConfig, 'workspace' | 'schema_version' | 'create_time' | 'update_time'>>
+): Promise<AnswerGraphConfig> => {
+  const response = await axiosInstance.put('/api/answers/graph/config', request)
+  return response.data
+}
+
+export const getAnswerGraphStatus = async (): Promise<AnswerGraphStatus> => {
+  const response = await axiosInstance.get('/api/answers/graph/status')
+  return response.data
+}
+
+export const previewAnswerGraph = async (
+  answerId: string,
+  useLlm = false
+): Promise<AnswerGraphProjection> => {
+  const response = await axiosInstance.post('/api/answers/graph/preview', {
+    answer_id: answerId,
+    use_llm: useLlm,
+  })
+  return response.data
+}
+
+export const getAnswerGraphProjection = async (
+  answerId: string
+): Promise<AnswerGraphProjection> => {
+  const response = await axiosInstance.get(`/api/answers/${encodeURIComponent(answerId)}/graph`)
+  return response.data
+}
+
+export const rebuildAnswerGraph = async (request: {
+  answer_ids?: string[]
+  include_drafts?: boolean
+  only_stale?: boolean
+  use_llm?: boolean
+  limit?: number
+} = {}): Promise<{
+  task_id: string
+  stream_url: string
+  answer_count: number
+  message: string
+}> => {
+  const response = await axiosInstance.post('/api/answers/graph/rebuild', request)
   return response.data
 }
 

@@ -5,6 +5,7 @@ import {
   BookOpenIcon,
   CheckIcon,
   ChevronRightIcon,
+  CircleHelpIcon,
   DownloadIcon,
   ExternalLinkIcon,
   FilterIcon,
@@ -20,10 +21,10 @@ import {
   XIcon
 } from 'lucide-react'
 import { api } from '@/api/client'
-import WorkspaceSelect from '@/components/WorkspaceSelect'
+import WorkspaceScopeSelect from '@/components/WorkspaceScopeSelect'
 import Button from '@/components/ui/Button'
 import { RelatedHelp } from '@/features/Help'
-import { canChooseWorkspace, resolveEffectiveWorkspaceScope } from '@/lib/workspaceAccess'
+import { resolveEffectiveWorkspaceScope } from '@/lib/workspaceAccess'
 import { useAuthStore } from '@/stores/auth'
 import { useWorkspaceScopeStore } from '@/stores/workspaceScope'
 
@@ -49,10 +50,11 @@ type KmsSearchOptions = {
   enable_rerank: boolean
 }
 
-type FaqRetrievalMode = 'keyword' | 'vector' | 'hybrid' | 'llm_rerank'
+type FaqRetrievalMode = 'keyword' | 'vector' | 'hybrid' | 'graph_hybrid' | 'llm_rerank'
 
 type FaqSearchOptions = {
   retrieval_mode: FaqRetrievalMode
+  selection_policy: 'workspace' | 'coverage' | 'precision'
   top_k: number
   min_score: number
   include_candidates: boolean
@@ -81,6 +83,7 @@ const DEFAULT_KMS_OPTIONS: KmsSearchOptions = {
 
 const DEFAULT_FAQ_OPTIONS: FaqSearchOptions = {
   retrieval_mode: 'hybrid',
+  selection_policy: 'workspace',
   top_k: 5,
   min_score: 0.18,
   include_candidates: true
@@ -127,6 +130,92 @@ function faqTitle(item: any) {
 
 function faqBody(item: any) {
   return item.response || item.body || item.answer?.body || item.answer?.approved_summary || item.approved_summary || '본문이 없습니다.'
+}
+
+function faqAssets(item: any) {
+  if (Array.isArray(item?.assets)) return item.assets
+  if (Array.isArray(item?.answer?.assets)) return item.answer.assets
+  return []
+}
+
+function faqAssetUrl(asset: any) {
+  if (asset.storage_type === 'external' || asset.storage_type === 's3') {
+    return asset.content_url || asset.storage_uri || ''
+  }
+  if (!asset.answer_id || !asset.asset_id || !asset.workspace) return ''
+  return (
+    `/api/knowledge/faq-answers/${encodeURIComponent(asset.answer_id)}` +
+    `/assets/${encodeURIComponent(asset.asset_id)}/content` +
+    `?faq_workspace=${encodeURIComponent(asset.workspace)}`
+  )
+}
+
+function FaqAssetGallery({ assets }: { assets: any[] }) {
+  if (assets.length === 0) return null
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+        gap: 10,
+        marginTop: 12
+      }}
+    >
+      {assets.map((asset) => {
+        const url = faqAssetUrl(asset)
+        const label = asset.caption || asset.file_name || '첨부 자료'
+        return (
+          <div
+            key={asset.asset_id}
+            style={{
+              overflow: 'hidden',
+              border: '1px solid var(--line)',
+              borderRadius: 7,
+              background: 'var(--bg-card)'
+            }}
+          >
+            {asset.asset_type === 'image' && url && (
+              <div style={{ minHeight: 150, background: 'var(--bg-subtle)', display: 'grid', placeItems: 'center' }}>
+                <img
+                  src={url}
+                  alt={asset.alt_text || label}
+                  style={{ display: 'block', width: '100%', maxHeight: 320, objectFit: 'contain' }}
+                />
+              </div>
+            )}
+            {asset.asset_type === 'video' && url && (
+              <video controls preload="metadata" style={{ display: 'block', width: '100%', maxHeight: 320, background: '#000' }}>
+                <source src={url} type={asset.mime_type || undefined} />
+              </video>
+            )}
+            {asset.asset_type === 'audio' && url && (
+              <div style={{ padding: 12, background: 'var(--bg-subtle)' }}>
+                <audio controls preload="metadata" style={{ width: '100%' }}>
+                  <source src={url} type={asset.mime_type || undefined} />
+                </audio>
+              </div>
+            )}
+            {asset.asset_type === 'table' && asset.content_text && (
+              <pre style={{ maxHeight: 240, overflow: 'auto', margin: 0, padding: 12, fontSize: 12, whiteSpace: 'pre-wrap' }}>
+                {asset.content_text}
+              </pre>
+            )}
+            <div className="row" style={{ gap: 8, padding: '9px 11px', borderTop: '1px solid var(--line)' }}>
+              <span className="grow" style={{ minWidth: 0, fontSize: 12.5, fontWeight: 600, overflowWrap: 'anywhere' }}>
+                {label}
+              </span>
+              {url && (
+                <a href={url} target="_blank" rel="noreferrer" className="badge outline" aria-label={`${label} 열기`}>
+                  <ExternalLinkIcon className="size-3" />
+                  열기
+                </a>
+              )}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
 }
 
 function faqCandidateList(item: any) {
@@ -1015,6 +1104,7 @@ function FaqResult({ item, rank }: { item: any; rank: number }) {
   const candidates = faqCandidateList(item)
   const [showCandidates, setShowCandidates] = useState(false)
   const selectedAnswerId = item.answer_id || item.answer?.answer_id
+  const assets = faqAssets(item)
 
   return (
     <div className="card" style={{ padding: 'var(--pad-card)' }}>
@@ -1044,6 +1134,7 @@ function FaqResult({ item, rank }: { item: any; rank: number }) {
           <div className="rich" style={{ marginTop: 8 }}>
             <p>{faqBody(item)}</p>
           </div>
+          <FaqAssetGallery assets={assets} />
           <div className="row wrap" style={{ gap: 12, marginTop: 12 }}>
             {pct !== null && (
               <div className="row" style={{ gap: 8 }}>
@@ -1088,6 +1179,9 @@ function FaqResult({ item, rank }: { item: any; rank: number }) {
                       const candidatePct = scorePercent(candidate)
                       const candidateId = faqCandidateId(candidate, candidateIndex)
                       const guidance = faqCandidateGuidance(candidate)
+                      const graphEvidence = Array.isArray(candidate.graph_evidence)
+                        ? candidate.graph_evidence
+                        : []
                       const isSelected = selectedAnswerId && selectedAnswerId === candidateId
 
                       return (
@@ -1115,6 +1209,19 @@ function FaqResult({ item, rank }: { item: any; rank: number }) {
                                 <span key={`${candidateId}-guide-${guideIndex}`} className="badge gray">
                                   {safeString(guide)}
                                 </span>
+                              ))}
+                            </div>
+                          )}
+                          {graphEvidence.length > 0 && (
+                            <div className="faq-graph-evidence">
+                              <div className="eyebrow">그래프 연결 근거</div>
+                              {graphEvidence.slice(0, 3).map((evidence: any, evidenceIndex: number) => (
+                                <div key={`${candidateId}-graph-${evidenceIndex}`} className="reference-summary-meta">
+                                  {(Array.isArray(evidence.path) ? evidence.path : []).join(' → ')}
+                                  {Array.isArray(evidence.relation_types) && evidence.relation_types.length > 0
+                                    ? ` · ${evidence.relation_types.join(', ')}`
+                                    : ''}
+                                </div>
                               ))}
                             </div>
                           )}
@@ -1195,10 +1302,11 @@ export default function IntegratedSearch() {
   const [query, setQuery] = useState('')
   const [categories, setCategories] = useState<Category[]>([])
   const [categoryIds, setCategoryIds] = useState<string[]>([])
+  const tenantId = useWorkspaceScopeStore((state) => state.tenantId)
+  const tenantName = useWorkspaceScopeStore((state) => state.tenantName)
   const kmsWorkspace = useWorkspaceScopeStore((state) => state.kmsWorkspace)
   const faqWorkspace = useWorkspaceScopeStore((state) => state.faqWorkspace)
-  const setKmsWorkspace = useWorkspaceScopeStore((state) => state.setKmsWorkspace)
-  const setFaqWorkspace = useWorkspaceScopeStore((state) => state.setFaqWorkspace)
+  const setTenantScope = useWorkspaceScopeStore((state) => state.setTenantScope)
   const [layout, setLayout] = useState<'rail' | 'overview' | 'tabs'>('rail')
   const [tab, setTab] = useState<'all' | 'ai' | 'faq'>('all')
   const [includeGenerative, setIncludeGenerative] = useState(true)
@@ -1210,23 +1318,29 @@ export default function IntegratedSearch() {
   const [faqOptions, setFaqOptions] = useState<FaqSearchOptions>(DEFAULT_FAQ_OPTIONS)
   const [result, setResult] = useState<any>(null)
   const [loading, setLoading] = useState(false)
-  const canChooseWorkspaceForUser = canChooseWorkspace(user?.role)
-  const { kmsWorkspace: effectiveKmsWorkspace, faqWorkspace: effectiveFaqWorkspace } = resolveEffectiveWorkspaceScope({
+  const {
+    tenantId: effectiveTenantId,
+    tenantName: effectiveTenantName,
+    kmsWorkspace: effectiveKmsWorkspace,
+    faqWorkspace: effectiveFaqWorkspace
+  } = resolveEffectiveWorkspaceScope({
     role: user?.role,
+    selectedTenantId: tenantId,
+    selectedTenantName: tenantName,
     selectedKmsWorkspace: kmsWorkspace,
     selectedFaqWorkspace: faqWorkspace,
+    userTenantId: user?.tenant_id,
+    userTenantName: user?.tenant_name,
     userKmsWorkspace: user?.kms_workspace,
     userFaqWorkspace: user?.faq_workspace
   })
 
   useEffect(() => {
-    api.get('/api/categories').then((response) => setCategories(response.data.categories || []))
-  }, [])
-
-  useEffect(() => {
-    if (effectiveKmsWorkspace !== kmsWorkspace) setKmsWorkspace(effectiveKmsWorkspace)
-    if (effectiveFaqWorkspace !== faqWorkspace) setFaqWorkspace(effectiveFaqWorkspace)
-  }, [effectiveFaqWorkspace, effectiveKmsWorkspace, faqWorkspace, kmsWorkspace, setFaqWorkspace, setKmsWorkspace])
+    setCategoryIds([])
+    api
+      .get('/api/categories', { params: { tenant_id: effectiveTenantId } })
+      .then((response) => setCategories(response.data.categories || []))
+  }, [effectiveTenantId])
 
   const categoryMap = useMemo(
     () => new Map(categories.map((category) => [category.category_id, category])),
@@ -1267,6 +1381,7 @@ export default function IntegratedSearch() {
       const response = await api.post('/api/search/integrated', {
         query,
         category_ids: categoryIds,
+        tenant_id: effectiveTenantId,
         include_generative: includeGenerative,
         include_faq: includeFaq,
         kms_workspace: effectiveKmsWorkspace,
@@ -1303,6 +1418,28 @@ export default function IntegratedSearch() {
         <span className="badge gray">{faqResults.length}건</span>
         {faqMetadata.retrieval_mode && <span className="badge outline">{faqMetadata.retrieval_mode}</span>}
       </div>
+      {faqMetadata.clarification_question && (
+        <div
+          className="row"
+          style={{
+            gap: 10,
+            alignItems: 'flex-start',
+            padding: '11px 12px',
+            border: '1px solid var(--warning)',
+            borderRadius: 'var(--radius-md)',
+            background: 'var(--warning-soft)',
+            color: 'var(--fg-primary)'
+          }}
+        >
+          <CircleHelpIcon className="size-4" style={{ flex: '0 0 auto', marginTop: 1, color: 'var(--warning)' }} />
+          <div style={{ minWidth: 0 }}>
+            <strong style={{ display: 'block', marginBottom: 3, fontSize: 12 }}>
+              답변을 정확히 찾으려면 확인이 필요합니다
+            </strong>
+            <span style={{ fontSize: 13, lineHeight: 1.5 }}>{faqMetadata.clarification_question}</span>
+          </div>
+        </div>
+      )}
       {aliasExpansions.length > 0 && (
         <div
           className="row wrap"
@@ -1376,28 +1513,21 @@ export default function IntegratedSearch() {
           </div>
         </div>
         <div className="card-b">
-          <div className="col" style={{ gap: 10 }}>
-            <label className="field">
-              <span>KMS 워크스페이스</span>
-              <WorkspaceSelect
-                value={effectiveKmsWorkspace}
-                mode="kms"
-                onChange={setKmsWorkspace}
-                placeholder="KMS 워크스페이스"
-                disabled={!canChooseWorkspaceForUser}
-              />
-            </label>
-            <label className="field">
-              <span>FAQ 워크스페이스</span>
-              <WorkspaceSelect
-                value={effectiveFaqWorkspace}
-                mode="answer_catalog"
-                onChange={setFaqWorkspace}
-                placeholder="FAQ 워크스페이스"
-                disabled={!canChooseWorkspaceForUser}
-              />
-            </label>
-          </div>
+          <WorkspaceScopeSelect
+            role={user?.role}
+            tenantId={effectiveTenantId}
+            tenantName={effectiveTenantName}
+            kmsWorkspace={effectiveKmsWorkspace}
+            faqWorkspace={effectiveFaqWorkspace}
+            onChange={(scope) =>
+              setTenantScope({
+                tenantId: scope.tenant_id,
+                tenantName: scope.name,
+                kmsWorkspace: scope.kms_workspace,
+                faqWorkspace: scope.faq_workspace
+              })
+            }
+          />
         </div>
       </div>
 
@@ -1745,9 +1875,26 @@ export default function IntegratedSearch() {
                 disabled={!includeFaq}
               >
                 <option value="hybrid">하이브리드 · 권장</option>
+                <option value="graph_hybrid">그래프 결합 · 선택</option>
                 <option value="keyword">키워드</option>
                 <option value="vector">벡터</option>
                 <option value="llm_rerank">LLM 최종 선택</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>FAQ 답변 선택 기준</span>
+              <select
+                className="select"
+                value={faqOptions.selection_policy}
+                onChange={(event) => setFaqOptions((current) => ({
+                  ...current,
+                  selection_policy: event.target.value as FaqSearchOptions['selection_policy']
+                }))}
+                disabled={!includeFaq}
+              >
+                <option value="workspace">워크스페이스 설정</option>
+                <option value="precision">확실한 경우만 답변</option>
+                <option value="coverage">답변 제공 우선</option>
               </select>
             </label>
             <label className="field">

@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { CheckCircle2Icon, Loader2Icon, SearchIcon, XCircleIcon } from 'lucide-react'
 
 import { AnswerResolveResponse, resolveAnswer } from '@/api/lightrag'
+import AnswerAssetGallery from '@/components/answers/AnswerAssetGallery'
 import AnswerHelpButton from '@/components/answers/AnswerHelpButton'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
@@ -21,7 +22,8 @@ export default function AnswerTestConsole({ embedded = false }: { embedded?: boo
   const [topK, setTopK] = useState('5')
   const [minScore, setMinScore] = useState('0.18')
   const [strategy, setStrategy] = useState<'fast' | 'balanced'>('balanced')
-  const [retrievalMode, setRetrievalMode] = useState<'keyword' | 'hybrid' | 'llm_rerank'>('hybrid')
+  const [retrievalMode, setRetrievalMode] = useState<'keyword' | 'hybrid' | 'graph_hybrid' | 'llm_rerank'>('hybrid')
+  const [selectionPolicy, setSelectionPolicy] = useState<'workspace' | 'coverage' | 'precision'>('workspace')
   const [includeDrafts, setIncludeDrafts] = useState(false)
   const [result, setResult] = useState<AnswerResolveResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -48,6 +50,7 @@ export default function AnswerTestConsole({ embedded = false }: { embedded?: boo
         vector_top_k: 8,
         llm_candidate_count: 5,
         include_drafts: includeDrafts,
+        selection_policy: selectionPolicy,
       })
       if (workspaceId !== useWorkspaceStore.getState().currentWorkspaceId) return
       setResult(response)
@@ -73,7 +76,7 @@ export default function AnswerTestConsole({ embedded = false }: { embedded?: boo
       )}
 
       <div className="rounded-md border p-4">
-        <div className="grid gap-3 lg:grid-cols-[1fr_140px_150px_170px_160px_auto]">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(280px,1fr)_110px_140px_170px_180px_110px_auto]">
           <div>
             <Label>{t('answerCatalog.test.query', 'User Query')}</Label>
             <Input
@@ -113,14 +116,39 @@ export default function AnswerTestConsole({ embedded = false }: { embedded?: boo
           </div>
           <div>
             <Label>{t('answerCatalog.test.retrievalMode', 'Retrieval Mode')}</Label>
-            <Select value={retrievalMode} onValueChange={(value) => setRetrievalMode(value as 'keyword' | 'hybrid' | 'llm_rerank')}>
+            <Select value={retrievalMode} onValueChange={(value) => setRetrievalMode(value as 'keyword' | 'hybrid' | 'graph_hybrid' | 'llm_rerank')}>
               <SelectTrigger className="mt-1">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="keyword">{t('answerCatalog.test.modeKeyword', 'Keyword')}</SelectItem>
                 <SelectItem value="hybrid">{t('answerCatalog.test.modeHybrid', 'Keyword + Vector')}</SelectItem>
+                <SelectItem value="graph_hybrid">{t('answerCatalog.test.modeGraphHybrid', 'Keyword + Vector + Graph')}</SelectItem>
                 <SelectItem value="llm_rerank">{t('answerCatalog.test.modeLlm', 'LLM ID Select')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>{t('answerCatalog.test.selectionPolicy', 'Answer Policy')}</Label>
+            <Select
+              value={selectionPolicy}
+              onValueChange={(value) =>
+                setSelectionPolicy(value as 'workspace' | 'coverage' | 'precision')
+              }
+            >
+              <SelectTrigger className="mt-1">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="workspace">
+                  {t('answerCatalog.test.policyWorkspace', 'Workspace setting')}
+                </SelectItem>
+                <SelectItem value="precision">
+                  {t('answerCatalog.test.policyPrecision', 'Answer only when certain')}
+                </SelectItem>
+                <SelectItem value="coverage">
+                  {t('answerCatalog.test.policyCoverage', 'Prefer an answer')}
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -153,6 +181,7 @@ export default function AnswerTestConsole({ embedded = false }: { embedded?: boo
               <h2 className="font-semibold">{t('answerCatalog.test.selected', 'Selected Answer')}</h2>
               <Badge variant="outline">{Math.round(result.confidence * 100)}%</Badge>
               <Badge variant="outline">{result.selected_by || result.retrieval_mode || retrievalMode}</Badge>
+              <Badge variant="outline">{result.selection_policy || selectionPolicy}</Badge>
             </div>
             {result.selected_answer ? (
               <div className="space-y-3">
@@ -173,9 +202,24 @@ export default function AnswerTestConsole({ embedded = false }: { embedded?: boo
                 <div className="whitespace-pre-wrap rounded-md border p-3 text-sm">
                   {result.selected_answer.body}
                 </div>
+                <AnswerAssetGallery assets={result.selected_answer.assets} />
               </div>
             ) : (
-              <div className="text-sm text-muted-foreground">{result.rationale}</div>
+              <div className="space-y-3 text-sm text-muted-foreground">
+                <div>
+                  {result.abstention_reason
+                    ? t(
+                        `answerCatalog.test.abstention.${result.abstention_reason}`,
+                        result.rationale
+                      )
+                    : result.rationale}
+                </div>
+                {result.clarification_question && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 font-medium text-amber-950 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-100">
+                    {t('answerCatalog.test.clarification', 'Follow-up question')}: {result.clarification_question}
+                  </div>
+                )}
+              </div>
             )}
             <div className="mt-4 text-xs text-muted-foreground">
               {t('answerCatalog.test.trace', 'Trace ID')}: {result.trace_id}
@@ -223,6 +267,23 @@ export default function AnswerTestConsole({ embedded = false }: { embedded?: boo
                             {key}: {Number(value).toFixed(2)}
                           </Badge>
                         ))}
+                      </div>
+                    )}
+                    {candidate.graph_evidence && candidate.graph_evidence.length > 0 && (
+                      <div className="mt-3 rounded-md border bg-muted/20 p-3">
+                        <div className="text-xs font-medium">
+                          {t('answerCatalog.test.graphEvidence', 'Why the graph found this FAQ')}
+                        </div>
+                        <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                          {candidate.graph_evidence.map((evidence, index) => (
+                            <div key={`${candidate.answer.answer_id}-graph-${index}`}>
+                              {evidence.path.join(' → ')}
+                              {evidence.relation_types.length > 0 && (
+                                <span> · {evidence.relation_types.join(', ')}</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     )}
                     {candidate.matched_guidance.length > 0 && (

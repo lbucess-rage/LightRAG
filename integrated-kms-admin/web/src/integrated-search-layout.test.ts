@@ -74,6 +74,13 @@ test('integrated search exposes FAQ candidate evidence from answer search result
   expect(css).toContain('.faq-candidate-card.selected')
 })
 
+test('integrated search shows FAQ clarification questions for ambiguous queries', () => {
+  const source = readFileSync(resolve(import.meta.dir, 'features/IntegratedSearch.tsx'), 'utf8')
+
+  expect(source).toContain('faqMetadata.clarification_question')
+  expect(source).toContain('답변을 정확히 찾으려면 확인이 필요합니다')
+})
+
 test('integrated search opens category options from a picker and shows selected categories only', () => {
   const source = readFileSync(resolve(import.meta.dir, 'features/IntegratedSearch.tsx'), 'utf8')
 

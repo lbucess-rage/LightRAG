@@ -16,6 +16,7 @@ import {
   KeyRoundIcon,
   LibraryIcon,
   MousePointerClickIcon,
+  NetworkIcon,
   PlayCircleIcon,
   SearchCheckIcon,
   SearchIcon,
@@ -71,6 +72,10 @@ const terms = [
   {
     term: '답변 후보',
     description: '아직 게시되지 않은 개별 답변입니다. 소스에서 여러 개를 만들 수 있고, 답변 메뉴에서 검토한 뒤 게시해야 서비스됩니다.',
+  },
+  {
+    term: 'FAQ 첨부 자료',
+    description: 'FAQ 본문과 함께 보여주는 이미지, 영상, 음성, 표 또는 파일입니다. 화면 표시 설명은 사용자에게 보이고, 검색용 설명과 대체 텍스트는 미디어 내용을 검색 후보에 반영할 때 사용합니다.',
   },
   {
     term: '공통 적용 정보',
@@ -173,10 +178,10 @@ const terms = [
 const screenshotGuides = [
   {
     title: 'FAQ 목록',
-    caption: '등록된 FAQ를 찾고, 게시 상태와 본문을 확인하며 상세 화면에서 검색 설정과 변경 이력을 관리합니다.',
+    caption: '등록된 FAQ를 찾고, 게시 상태와 본문을 확인하며 상세 화면에서 첨부 자료, 검색 설정과 변경 이력을 관리합니다.',
     image: 'help/answer-catalog/answers-screen.png',
-    points: ['FAQ 검색', '게시 상태', '상세 설정'],
-    example: '“유심 불량 무상 교체 기준” FAQ를 검색한 뒤 상세 화면에서 본문과 찾기 힌트를 함께 검토합니다.',
+    points: ['FAQ 검색', '본문과 첨부 자료', '상세 설정'],
+    example: '“유심 불량 무상 교체 기준” FAQ에 교체 절차 이미지를 추가하고 “유심 교체 화면 순서”를 검색용 설명으로 입력한 뒤 실제 질문으로 확인합니다.',
     tab: 'answers' as AppTab,
   },
   {
@@ -216,9 +221,9 @@ const screenshotGuides = [
 const featureGuides = [
   {
     title: 'FAQ 목록',
-    purpose: '등록된 FAQ의 본문, 게시 상태, 유효기간, 찾기 힌트와 변경 이력을 관리합니다.',
+    purpose: '등록된 FAQ의 본문, 첨부 자료, 게시 상태, 유효기간, 찾기 힌트와 변경 이력을 관리합니다.',
     when: '원하는 FAQ를 찾거나 본문과 검색 설정을 함께 검토해야 할 때 사용합니다.',
-    example: '상담사가 그대로 읽어도 되는 안내문을 게시하고, 기간이 지난 프로모션 FAQ는 만료 처리합니다.',
+    example: '상담사가 읽을 안내문과 앱 설정 화면 이미지를 함께 게시합니다. 콜봇은 본문을 읽고, 웹 채널은 본문과 이미지를 함께 보여줍니다.',
     tab: 'answers' as AppTab,
   },
   {
@@ -829,7 +834,7 @@ function MatchingTopic({
 }) {
   return (
     <div className="grid gap-5">
-      <section className="grid gap-3 xl:grid-cols-3">
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <MatchingModeCard
           icon={<BadgeCheckIcon className="h-4 w-4" />}
           title="빠른 키워드"
@@ -845,12 +850,60 @@ function MatchingTopic({
           bestFor="유심 변경/SIM 교체처럼 같은 뜻을 여러 표현으로 묻는 질문"
         />
         <MatchingModeCard
+          icon={<NetworkIcon className="h-4 w-4" />}
+          title="키워드+벡터+그래프"
+          badge="선택 기능"
+          text="키워드와 벡터 후보를 유지하면서, 질문과 가까운 제품·증상·용어 노드가 어떤 FAQ로 이어지는지 경로 점수를 추가합니다."
+          bestFor="제품명과 증상, 동의어와 처리 절차처럼 여러 관계를 함께 따라가야 답변을 찾을 수 있는 질문"
+        />
+        <MatchingModeCard
           icon={<SparklesIcon className="h-4 w-4" />}
           title="LLM ID 선택"
           badge="후보 최종 선택"
           text="LLM은 본문을 만들지 않고, 검색된 후보 답변 ID 중 하나만 선택합니다."
           bestFor="상위 후보 점수가 비슷해 운영 테스트에서 추가 판단이 필요한 질문"
         />
+      </section>
+
+      <section className="rounded-md border p-4">
+        <SectionTitle
+          icon={<NetworkIcon className="h-4 w-4" />}
+          title="FAQ 그래프를 적용하는 순서"
+          description="기존 조회 방식을 바꾸지 않고 품질 관리의 FAQ 그래프 화면에서 선택적으로 준비합니다."
+        />
+        <div className="mt-4 grid gap-3 md:grid-cols-4">
+          <ChecklistItem title="1. 스키마 확인" text="FAQAnswer, 제품, 시스템, 증상, 오류코드, 절차, 용어 유형과 허용 관계를 확인합니다." />
+          <ChecklistItem title="2. 미리보기" text="FAQ 하나를 선택해 기본 규칙으로 만들어질 노드와 관계를 먼저 확인합니다. 이 단계는 저장하지 않습니다." />
+          <ChecklistItem title="3. 필요한 경우 AI 보완" text="원문에 명시된 제품·증상·절차를 더 추출해야 할 때만 참고 프롬프트와 AI 추출 보완을 사용합니다." />
+          <ChecklistItem title="4. 구축 후 비교" text="미구축·변경 FAQ를 구축한 뒤 테스트에서 키워드+벡터와 키워드+벡터+그래프 결과를 비교합니다." />
+        </div>
+        <div className="mt-4 rounded-md border border-emerald-200 bg-emerald-50/50 p-3 text-sm leading-6 dark:border-emerald-900 dark:bg-emerald-950/10">
+          <strong>예시:</strong> “팀즈 연결이 안 돼”가 들어오면 <code>팀즈</code> 용어가
+          <code className="mx-1">Microsoft Teams</code> 표준 용어와 연결되고, Teams 제품과 회의 연결 증상을 거쳐
+          관련 FAQ로 이어진 경로가 후보 근거에 표시됩니다. 그래프가 준비되지 않았으면 기존 하이브리드 검색 결과를 그대로 사용합니다.
+        </div>
+        <div className="mt-3 border-t pt-4">
+          <div className="font-semibold">정확도를 우선해 답변을 보류하는 방법</div>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+            FAQ 그래프 설정에서 <strong className="text-foreground">확실한 경우만 답변</strong>을 켜면
+            최소 점수와 키워드·벡터·그래프 근거 수를 확인합니다. 기준을 통과한 후보가 여러 개이면
+            점수 차이가 작아도 가장 높은 후보 하나를 선택하고 접전 여부는 진단 정보에 남깁니다.
+          </p>
+          <div className="mt-3 grid gap-3 md:grid-cols-3">
+            <ChecklistItem title="근거 부족" text="질문 길이와 관계없이 검색 근거가 부족하면 답변하지 않습니다. 짧은 질문도 한 후보가 충분히 우세하면 답변합니다." />
+            <ChecklistItem title="가장 가까운 답변" text="최소 점수와 근거 기준을 통과하면 후보 간 점수 차이가 작아도 1위 FAQ를 선택합니다." />
+            <ChecklistItem title="AI 최종 선택" text="그래프 후보만 전달하며, AI가 범위 밖 또는 모호함을 명시하거나 신뢰도가 낮거나 호출을 완료하지 못한 경우에는 답변하지 않습니다." />
+          </div>
+          <div className="mt-3 rounded-md border border-amber-200 bg-amber-50/60 p-3 text-sm leading-6 dark:border-amber-900 dark:bg-amber-950/10">
+            <strong>예시:</strong> “PUK 잠김”, “유심 배송”처럼 의미가 고유한 짧은 질문은 답변합니다.
+            “유심 안돼”처럼 여러 FAQ가 비슷하면 최소 기준을 통과한 후보 중 점수가 가장 높은 답변을
+            우선 선택합니다. 점수가 기준보다 낮거나 검색 근거가 부족할 때만 추가 정보를 요청합니다.
+          </div>
+        </div>
+        <Button className="mt-4" onClick={() => goToTab('answer-test')}>
+          <NetworkIcon className="h-4 w-4" />
+          품질 관리 열기
+        </Button>
       </section>
 
       <section className="rounded-md border p-4">
@@ -877,7 +930,9 @@ function MatchingTopic({
           <TroubleshootingItem title="엉뚱한 답변이 선택됩니다" text="먼저 제외어를 추가하고, 대표 질문을 더 구체적으로 분리합니다. 그 다음 동의어를 보강합니다." />
           <TroubleshootingItem title="표현이 다르면 답변을 못 찾습니다" text="키워드+벡터 모드로 테스트하고, 벡터 점수가 낮으면 대표 질문과 요약 문장을 보강한 뒤 벡터를 갱신합니다." />
           <TroubleshootingItem title="LLM ID 선택이 느립니다" text="모든 요청에 쓰지 말고 후보가 애매한 질문에만 사용합니다. top-k와 후보 수를 줄이면 지연을 낮출 수 있습니다." />
+          <TroubleshootingItem title="AI 장애 때도 답변이 보류됩니다" text="정확도 우선 정책의 LLM ID 선택은 AI 호출 실패나 잘못된 응답을 기존 후보로 대체하지 않습니다. 오답 위험을 줄이기 위한 정상적인 안전 동작입니다." />
           <TroubleshootingItem title="후보가 전혀 없습니다" text="답변이 게시 상태인지, 유효기간이 맞는지, 최소 점수가 너무 높지 않은지 확인합니다." />
+          <TroubleshootingItem title="후보는 있지만 답변하지 않습니다" text="정확도 우선 정책에서 최소 점수나 필수 근거 수가 부족하거나, AI가 범위 밖·모호함을 명시한 정상 보류일 수 있습니다. 후보 점수 차이만으로는 보류하지 않습니다." />
         </div>
       </section>
     </div>

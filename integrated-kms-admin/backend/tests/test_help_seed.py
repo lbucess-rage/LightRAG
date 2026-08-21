@@ -4,13 +4,16 @@ from kms_admin.help_seed import load_help_seed_topics, nav_key_for_help_id
 def test_help_seed_loads_content_and_visibility():
     topics = load_help_seed_topics()
 
-    assert len(topics) == 29
+    assert len(topics) == 30
     search = next(topic for topic in topics if topic.help_id == "HELP-SEARCH-001")
     assert search.nav_key == "search"
     assert search.menu_label == "통합 검색"
     assert search.visibility == {"user": True, "manager": True, "admin": True}
     assert search.screenshot_path == "/help/screenshots/search/search-basic.png"
     assert "통합 검색 사용하기" in search.body_md
+    graph = next(topic for topic in topics if topic.help_id == "HELP-KNOWLEDGE-018")
+    assert graph.nav_key == "knowledge"
+    assert "그래프 결합" in graph.body_md
 
 
 def test_help_seed_maps_known_prefixes_to_nav_keys():

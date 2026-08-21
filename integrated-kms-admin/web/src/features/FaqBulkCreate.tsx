@@ -87,6 +87,7 @@ type ConnectorPreview = {
 }
 
 type FaqBulkCreateProps = {
+  tenantId: string
   workspace: string
   categories: CategoryOption[]
   onClose: () => void
@@ -282,6 +283,7 @@ function SampleTable({ profile }: { profile: StructuredProfile }) {
 }
 
 export default function FaqBulkCreate({
+  tenantId,
   workspace,
   categories,
   onClose,
@@ -488,6 +490,7 @@ export default function FaqBulkCreate({
           created_from: 'integrated_kms_admin_bulk_ui',
           source_tab: sourceTab
         },
+        tenant_id: tenantId,
         category_id: categoryId || null,
         enabled: true,
         faq_workspace: workspace

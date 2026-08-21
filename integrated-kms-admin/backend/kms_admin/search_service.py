@@ -337,6 +337,9 @@ async def integrated_search(
                     "rationale",
                     "retrieval_mode",
                     "selected_by",
+                    "selection_policy",
+                    "abstention_reason",
+                    "clarification_question",
                     "alias_expansions",
                 )
                 if faq_response.get(key) is not None
@@ -496,6 +499,9 @@ async def integrated_search_stream(
                     "rationale",
                     "retrieval_mode",
                     "selected_by",
+                    "selection_policy",
+                    "abstention_reason",
+                    "clarification_question",
                     "alias_expansions",
                 )
                 if faq_response.get(key) is not None

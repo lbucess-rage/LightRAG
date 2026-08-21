@@ -10,6 +10,7 @@ import {
   HistoryIcon,
   LinkIcon,
   Loader2Icon,
+  PaperclipIcon,
   PlusIcon,
   RefreshCwIcon,
   RotateCcwIcon,
@@ -17,9 +18,12 @@ import {
   SendIcon,
   SparklesIcon,
   Trash2Icon,
+  UploadIcon,
 } from 'lucide-react'
 
 import {
+  AnswerAsset,
+  AnswerAssetType,
   AnswerContentFormat,
   AnswerDisplayPolicy,
   AnswerGuidance,
@@ -30,7 +34,11 @@ import {
   AnswerStatus,
   addAnswerGuidance,
   archiveAnswer,
+  createAnswerAsset,
+  deleteAnswerAsset,
   deleteAnswerGuidance,
+  getAnswer,
+  listAnswerAssets,
   listAnswerSourceLinks,
   listAnswerGuidance,
   listAnswerRevisions,
@@ -38,8 +46,11 @@ import {
   publishAnswer,
   restoreAnswerRevision,
   suggestAnswerGuidance,
+  updateAnswerAsset,
   updateAnswer,
+  uploadAnswerAsset,
 } from '@/api/lightrag'
+import AnswerAssetGallery from '@/components/answers/AnswerAssetGallery'
 import AnswerContentPreview from '@/components/answers/AnswerContentPreview'
 import Badge from '@/components/ui/Badge'
 import AnswerHelpButton from '@/components/answers/AnswerHelpButton'
@@ -106,6 +117,113 @@ const answerSourceTypeOptions = [
   'nosql_collection',
   'web',
 ]
+
+function AnswerAssetEditor({
+  answerId,
+  asset,
+  disabled,
+  onSaved,
+  onDelete,
+}: {
+  answerId: string
+  asset: AnswerAsset
+  disabled: boolean
+  onSaved: () => Promise<void>
+  onDelete: () => void
+}) {
+  const { t } = useTranslation()
+  const [caption, setCaption] = useState(asset.caption || '')
+  const [altText, setAltText] = useState(asset.alt_text || '')
+  const [searchText, setSearchText] = useState(asset.search_text || '')
+  const [displayOrder, setDisplayOrder] = useState(String(asset.display_order || 0))
+  const [isSaving, setIsSaving] = useState(false)
+
+  useEffect(() => {
+    setCaption(asset.caption || '')
+    setAltText(asset.alt_text || '')
+    setSearchText(asset.search_text || '')
+    setDisplayOrder(String(asset.display_order || 0))
+  }, [asset])
+
+  const handleSave = async () => {
+    setIsSaving(true)
+    try {
+      await updateAnswerAsset(answerId, asset.asset_id, {
+        caption: caption.trim() || null,
+        alt_text: altText.trim() || null,
+        search_text: searchText.trim() || null,
+        display_order: Number(displayOrder) || 0,
+      })
+      await onSaved()
+      toast.success(t('answerCatalog.assets.saved', 'Attachment information saved.'))
+    } catch (err) {
+      toast.error(localizedErrorMessage(err, t))
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  return (
+    <div className="grid gap-3 p-3 lg:grid-cols-[minmax(150px,0.7fr)_repeat(3,minmax(160px,1fr))_90px_auto]">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <PaperclipIcon className="h-4 w-4 text-muted-foreground" />
+          <span className="truncate">{asset.file_name || asset.asset_id}</span>
+        </div>
+        <div className="mt-1 text-xs text-muted-foreground">
+          {t(`answerCatalog.assets.types.${asset.asset_type}`, asset.asset_type)}
+        </div>
+      </div>
+      <Input
+        value={caption}
+        aria-label={t('answerCatalog.assets.caption', 'Caption')}
+        placeholder={t('answerCatalog.assets.caption', 'Caption')}
+        onChange={(event) => setCaption(event.target.value)}
+      />
+      <Input
+        value={altText}
+        aria-label={t('answerCatalog.assets.altText', 'Alternative text')}
+        placeholder={t('answerCatalog.assets.altText', 'Alternative text')}
+        onChange={(event) => setAltText(event.target.value)}
+      />
+      <Input
+        value={searchText}
+        aria-label={t('answerCatalog.assets.searchText', 'Search description')}
+        placeholder={t('answerCatalog.assets.searchText', 'Search description')}
+        onChange={(event) => setSearchText(event.target.value)}
+      />
+      <Input
+        type="number"
+        value={displayOrder}
+        aria-label={t('answerCatalog.assets.order', 'Order')}
+        onChange={(event) => setDisplayOrder(event.target.value)}
+      />
+      <div className="flex justify-end gap-1">
+        <Button
+          type="button"
+          size="icon"
+          variant="outline"
+          tooltip={t('common.save', 'Save')}
+          onClick={handleSave}
+          disabled={disabled || isSaving}
+        >
+          {isSaving ? <Loader2Icon className="h-4 w-4 animate-spin" /> : <SaveIcon className="h-4 w-4" />}
+        </Button>
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          tooltip={t('common.delete', 'Delete')}
+          onClick={onDelete}
+          disabled={disabled || isSaving}
+          className="text-destructive hover:text-destructive"
+        >
+          <Trash2Icon className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  )
+}
 
 export default function AnswerLibrary() {
   const { t } = useTranslation()
@@ -512,7 +630,7 @@ function AnswerDetailDialog({
   onChanged: (answer: AnswerItem) => void
 }) {
   const { t } = useTranslation()
-  const [section, setSection] = useState<'content' | 'guidance' | 'history'>('content')
+  const [section, setSection] = useState<'content' | 'assets' | 'guidance' | 'history'>('content')
   const [title, setTitle] = useState('')
   const [summary, setSummary] = useState('')
   const [body, setBody] = useState('')
@@ -526,6 +644,13 @@ function AnswerDetailDialog({
   const [guidance, setGuidance] = useState<AnswerGuidance[]>([])
   const [revisions, setRevisions] = useState<AnswerRevision[]>([])
   const [sourceLinks, setSourceLinks] = useState<AnswerSourceLink[]>([])
+  const [assets, setAssets] = useState<AnswerAsset[]>([])
+  const [assetFile, setAssetFile] = useState<File | null>(null)
+  const [assetCaption, setAssetCaption] = useState('')
+  const [assetAltText, setAssetAltText] = useState('')
+  const [assetSearchText, setAssetSearchText] = useState('')
+  const [externalAssetUrl, setExternalAssetUrl] = useState('')
+  const [externalAssetType, setExternalAssetType] = useState<AnswerAssetType>('image')
   const [guidanceType, setGuidanceType] = useState<AnswerGuidanceType>('keyword')
   const [guidanceText, setGuidanceText] = useState('')
   const [guidanceWeight, setGuidanceWeight] = useState('1')
@@ -554,14 +679,16 @@ function AnswerDetailDialog({
     if (!answer) return
     setIsLoadingDetails(true)
     try {
-      const [nextGuidance, nextRevisions, nextSourceLinks] = await Promise.all([
+      const [nextGuidance, nextRevisions, nextSourceLinks, nextAssets] = await Promise.all([
         listAnswerGuidance(answer.answer_id),
         listAnswerRevisions(answer.answer_id),
         listAnswerSourceLinks(answer.answer_id),
+        listAnswerAssets(answer.answer_id),
       ])
       setGuidance(nextGuidance)
       setRevisions(nextRevisions)
       setSourceLinks(nextSourceLinks)
+      setAssets(nextAssets)
     } catch (err) {
       toast.error(localizedErrorMessage(err, t))
     } finally {
@@ -710,6 +837,85 @@ function AnswerDetailDialog({
     }
   }
 
+  const refreshAfterAssetChange = async () => {
+    if (!answer) return
+    const [updatedAnswer, nextAssets] = await Promise.all([
+      getAnswer(answer.answer_id),
+      listAnswerAssets(answer.answer_id),
+    ])
+    setAssets(nextAssets)
+    onChanged(updatedAnswer)
+    reloadDetails()
+  }
+
+  const handleUploadAsset = async () => {
+    if (!answer || !assetFile) {
+      toast.error(t('answerCatalog.assets.fileRequired', 'Select a file to upload.'))
+      return
+    }
+    setIsSaving(true)
+    try {
+      await uploadAnswerAsset(answer.answer_id, assetFile, {
+        caption: assetCaption.trim() || undefined,
+        alt_text: assetAltText.trim() || undefined,
+        search_text: assetSearchText.trim() || undefined,
+        display_order: assets.length,
+      })
+      setAssetFile(null)
+      setAssetCaption('')
+      setAssetAltText('')
+      setAssetSearchText('')
+      await refreshAfterAssetChange()
+      toast.success(t('answerCatalog.assets.uploaded', 'Attachment uploaded.'))
+    } catch (err) {
+      toast.error(localizedErrorMessage(err, t))
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleRegisterExternalAsset = async () => {
+    if (!answer || !externalAssetUrl.trim()) {
+      toast.error(t('answerCatalog.assets.urlRequired', 'Enter an attachment URL.'))
+      return
+    }
+    setIsSaving(true)
+    try {
+      await createAnswerAsset(answer.answer_id, {
+        asset_type: externalAssetType,
+        external_url: externalAssetUrl.trim(),
+        caption: assetCaption.trim() || null,
+        alt_text: assetAltText.trim() || null,
+        search_text: assetSearchText.trim() || null,
+        display_order: assets.length,
+      })
+      setExternalAssetUrl('')
+      setAssetCaption('')
+      setAssetAltText('')
+      setAssetSearchText('')
+      await refreshAfterAssetChange()
+      toast.success(t('answerCatalog.assets.registered', 'External attachment registered.'))
+    } catch (err) {
+      toast.error(localizedErrorMessage(err, t))
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleDeleteAsset = async (asset: AnswerAsset) => {
+    if (!answer) return
+    setIsSaving(true)
+    try {
+      await deleteAnswerAsset(answer.answer_id, asset.asset_id)
+      await refreshAfterAssetChange()
+      toast.success(t('answerCatalog.assets.removed', 'Attachment removed.'))
+    } catch (err) {
+      toast.error(localizedErrorMessage(err, t))
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
   if (!answer) return null
 
   return (
@@ -724,7 +930,7 @@ function AnswerDetailDialog({
         </DialogHeader>
 
         <div className="flex flex-wrap gap-2">
-          {(['content', 'guidance', 'history'] as const).map((item) => (
+          {(['content', 'assets', 'guidance', 'history'] as const).map((item) => (
             <Button
               key={item}
               type="button"
@@ -733,6 +939,13 @@ function AnswerDetailDialog({
               onClick={() => setSection(item)}
             >
               {item === 'content' && t('answerCatalog.library.contentSection', 'Content')}
+              {item === 'assets' && (
+                <>
+                  <PaperclipIcon className="h-4 w-4" />
+                  {t('answerCatalog.assets.section', 'Attachments')}
+                  {assets.length > 0 && <Badge variant="outline">{assets.length}</Badge>}
+                </>
+              )}
               {item === 'guidance' && t('answerCatalog.library.guidanceSection', 'Search settings')}
               {item === 'history' && t('answerCatalog.library.historySection', 'Source and history')}
             </Button>
@@ -815,6 +1028,113 @@ function AnswerDetailDialog({
             <div className="grid gap-2">
               <Label>{t('answerCatalog.library.tags', 'Tags')}</Label>
               <Input value={tags} onChange={(event) => setTags(event.target.value)} />
+            </div>
+          </div>
+        )}
+
+        {section === 'assets' && (
+          <div className="grid gap-4 py-2">
+            <div>
+              <h3 className="font-medium">{t('answerCatalog.assets.title', 'FAQ attachments')}</h3>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                {t(
+                  'answerCatalog.assets.description',
+                  'Add images, video, audio, tables, or files. Captions and search descriptions help users find this FAQ even when the media itself has no searchable text.'
+                )}
+              </p>
+            </div>
+
+            <AnswerAssetGallery assets={assets} />
+
+            {assets.length > 0 && (
+              <div className="divide-y rounded-md border">
+                {assets.map((asset) => (
+                  <AnswerAssetEditor
+                    key={asset.asset_id}
+                    answerId={answer.answer_id}
+                    asset={asset}
+                    disabled={isSaving}
+                    onSaved={refreshAfterAssetChange}
+                    onDelete={() => handleDeleteAsset(asset)}
+                  />
+                ))}
+              </div>
+            )}
+
+            <div className="grid gap-4 rounded-md border p-4 lg:grid-cols-2">
+              <div className="grid content-start gap-3">
+                <div className="flex items-center gap-2 font-medium">
+                  <UploadIcon className="h-4 w-4" />
+                  {t('answerCatalog.assets.uploadTitle', 'Upload a file')}
+                </div>
+                <Input
+                  type="file"
+                  accept=".png,.jpg,.jpeg,.gif,.webp,.mp4,.webm,.mov,.mp3,.wav,.ogg,.pdf,.csv,.xlsx,.xls,.docx,.pptx,.txt,.md"
+                  onChange={(event) => setAssetFile(event.target.files?.[0] || null)}
+                />
+                <p className="text-xs leading-5 text-muted-foreground">
+                  {t(
+                    'answerCatalog.assets.uploadHelp',
+                    'Up to 100MB. Images, video, audio, spreadsheets, documents, and text files are supported.'
+                  )}
+                </p>
+                <Button type="button" onClick={handleUploadAsset} disabled={isSaving || !assetFile}>
+                  <UploadIcon className="h-4 w-4" />
+                  {t('answerCatalog.assets.upload', 'Upload attachment')}
+                </Button>
+              </div>
+
+              <div className="grid content-start gap-3">
+                <div className="flex items-center gap-2 font-medium">
+                  <LinkIcon className="h-4 w-4" />
+                  {t('answerCatalog.assets.externalTitle', 'Register an external URL')}
+                </div>
+                <div className="grid gap-3 sm:grid-cols-[150px_1fr]">
+                  <Select
+                    value={externalAssetType}
+                    onValueChange={(value) => setExternalAssetType(value as AnswerAssetType)}
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {(['image', 'video', 'audio', 'table', 'file'] as const).map((type) => (
+                        <SelectItem key={type} value={type}>
+                          {t(`answerCatalog.assets.types.${type}`, type)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    type="url"
+                    value={externalAssetUrl}
+                    placeholder="https://..."
+                    onChange={(event) => setExternalAssetUrl(event.target.value)}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleRegisterExternalAsset}
+                  disabled={isSaving || !externalAssetUrl.trim()}
+                >
+                  <LinkIcon className="h-4 w-4" />
+                  {t('answerCatalog.assets.register', 'Register URL')}
+                </Button>
+              </div>
+
+              <div className="grid gap-3 border-t pt-4 lg:col-span-2 lg:grid-cols-3">
+                <div className="grid gap-1.5">
+                  <Label>{t('answerCatalog.assets.caption', 'Caption')}</Label>
+                  <Input value={assetCaption} onChange={(event) => setAssetCaption(event.target.value)} />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>{t('answerCatalog.assets.altText', 'Alternative text')}</Label>
+                  <Input value={assetAltText} onChange={(event) => setAssetAltText(event.target.value)} />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>{t('answerCatalog.assets.searchText', 'Search description')}</Label>
+                  <Input value={assetSearchText} onChange={(event) => setAssetSearchText(event.target.value)} />
+                </div>
+              </div>
             </div>
           </div>
         )}

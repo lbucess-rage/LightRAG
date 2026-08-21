@@ -12,7 +12,8 @@ from kms_admin.routers.knowledge import (
     _json_list,
     _text_file_sources,
 )
-from kms_admin.routers.search import EXTERNAL_CATEGORIES_SQL
+from kms_admin.routers import search as search_router
+from kms_admin.routers.search import EXTERNAL_CATEGORIES_SQL, IntegratedSearchRequest
 from kms_admin.search_service import (
     BRIEF_ANSWER_RESPONSE_TYPE,
     CandidateScope,
@@ -49,6 +50,53 @@ def test_external_categories_query_documents_valid_counts_and_active_filter():
     assert "valid_from IS NULL OR valid_from <= NOW()" in EXTERNAL_CATEGORIES_SQL
     assert "valid_until IS NULL OR valid_until >= NOW()" in EXTERNAL_CATEGORIES_SQL
     assert "$2::boolean OR is_active = TRUE" in EXTERNAL_CATEGORIES_SQL
+
+
+def test_admin_integrated_search_resolves_registered_tenant_pair(monkeypatch):
+    class FakeDb:
+        async def fetchrow(self, query, *params):
+            assert params == ("tenant-1",)
+            return {
+                "tenant_id": "tenant-1",
+                "kms_workspace": "kms-1",
+                "faq_workspace": "faq-1",
+            }
+
+    monkeypatch.setattr(search_router, "db", FakeDb())
+    scope = asyncio.run(
+        search_router._internal_scope(
+            IntegratedSearchRequest(
+                query="문의",
+                tenant_id="tenant-1",
+                kms_workspace="stale-kms",
+                faq_workspace="stale-faq",
+            ),
+            {"role": "admin", "tenant_id": "admin-default"},
+        )
+    )
+
+    assert scope == WorkspaceScope("tenant-1", "kms-1", "faq-1")
+
+
+def test_non_admin_integrated_search_ignores_requested_workspace_override():
+    scope = asyncio.run(
+        search_router._internal_scope(
+            IntegratedSearchRequest(
+                query="문의",
+                tenant_id="other-tenant",
+                kms_workspace="other-kms",
+                faq_workspace="other-faq",
+            ),
+            {
+                "role": "manager",
+                "tenant_id": "tenant-1",
+                "kms_workspace": "kms-1",
+                "faq_workspace": "faq-1",
+            },
+        )
+    )
+
+    assert scope == WorkspaceScope("tenant-1", "kms-1", "faq-1")
 
 
 def test_admin_workspace_defaults_use_test_pair():

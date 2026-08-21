@@ -32,6 +32,7 @@ class TaskType(str, Enum):
     FAQ_GUIDANCE_ENRICHMENT = "faq_guidance_enrichment"
     FAQ_TERM_DISCOVERY = "faq_term_discovery"
     FAQ_VECTOR_REBUILD = "faq_vector_rebuild"
+    FAQ_GRAPH_REBUILD = "faq_graph_rebuild"
 
 
 class TaskStatus(str, Enum):
