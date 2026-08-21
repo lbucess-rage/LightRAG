@@ -848,6 +848,7 @@ class AnswerGraphRebuildResponse(BaseModel):
     stream_url: str
     answer_count: int
     message: str
+    reused: bool = False
 
 
 class AnswerGraphStatusResponse(BaseModel):
@@ -1058,7 +1059,26 @@ class ResolveResponse(BaseModel):
     candidates: list[ResolveCandidate]
     trace_id: str
     rationale: str
-    retrieval_mode: RetrievalMode = "hybrid"
+    retrieval_mode: RetrievalMode = Field(
+        default="hybrid",
+        description="Compatibility alias for requested_retrieval_mode.",
+    )
+    requested_retrieval_mode: RetrievalMode = Field(
+        default="hybrid",
+        description="Retrieval mode requested by the caller.",
+    )
+    effective_retrieval_mode: RetrievalMode = Field(
+        default="hybrid",
+        description="Retrieval mode actually used after graph availability checks.",
+    )
+    graph_status: str = Field(
+        default="not_requested",
+        description="Graph lookup outcome such as graph_ready or graph_below_similarity.",
+    )
+    retrieval_fallback_reason: Optional[str] = Field(
+        default=None,
+        description="Reason graph_hybrid fell back to hybrid; null when no fallback occurred.",
+    )
     selected_by: str = "keyword"
     alias_expansions: list[AnswerAliasExpansion] = Field(default_factory=list)
     selection_policy: Literal["coverage", "precision"] = "coverage"
@@ -1075,7 +1095,10 @@ class AnswerSearchRequest(BaseModel):
     min_score: float = Field(default=0.18, ge=0.0, le=1.0)
     include_drafts: bool = False
     strategy: ResolveStrategy = "balanced"
-    retrieval_mode: RetrievalMode = "hybrid"
+    retrieval_mode: RetrievalMode = Field(
+        default="hybrid",
+        description="Direct API default remains hybrid; products can request graph_hybrid explicitly.",
+    )
     vector_top_k: int = Field(default=8, ge=1, le=50)
     llm_candidate_count: int = Field(default=5, ge=1, le=10)
     allowed_answer_ids: Optional[list[str]] = None
@@ -1109,7 +1132,26 @@ class AnswerSearchResponse(BaseModel):
     candidates: list[ResolveCandidate] = Field(default_factory=list)
     trace_id: str
     rationale: str
-    retrieval_mode: RetrievalMode = "hybrid"
+    retrieval_mode: RetrievalMode = Field(
+        default="hybrid",
+        description="Compatibility alias for requested_retrieval_mode.",
+    )
+    requested_retrieval_mode: RetrievalMode = Field(
+        default="hybrid",
+        description="Retrieval mode requested by the caller.",
+    )
+    effective_retrieval_mode: RetrievalMode = Field(
+        default="hybrid",
+        description="Retrieval mode actually used after graph availability checks.",
+    )
+    graph_status: str = Field(
+        default="not_requested",
+        description="Graph lookup outcome such as graph_ready or graph_below_similarity.",
+    )
+    retrieval_fallback_reason: Optional[str] = Field(
+        default=None,
+        description="Reason graph_hybrid fell back to hybrid; null when no fallback occurred.",
+    )
     selected_by: str = "keyword"
     alias_expansions: list[AnswerAliasExpansion] = Field(default_factory=list)
     selection_policy: Literal["coverage", "precision"] = "coverage"
@@ -4122,6 +4164,7 @@ async def _rebuild_answer_graph_for_ids(
     answer_ids: list[str],
     use_llm: bool,
     task_id: Optional[str] = None,
+    trigger_source: str = "manual_api",
 ) -> dict[str, Any]:
     config = await _get_answer_graph_config(db, workspace)
     answers, guidance_by_answer = await _answer_rows_and_guidance(
@@ -4129,13 +4172,30 @@ async def _rebuild_answer_graph_for_ids(
     )
     service = None
     if task_id:
-        from lightrag.api.task_manager import get_task_service
+        from lightrag.api.task_manager import TaskStatus, get_task_service
 
         service = get_task_service()
     rebuilt: list[str] = []
     failed: dict[str, str] = {}
     total = len(answers)
+    processed = 0
+    cancelled = False
+    logger.info(
+        "[Answers] FAQ graph rebuild started workspace=%s trigger=%s task=%s "
+        "answers=%d schema_version=%d use_llm=%s",
+        workspace,
+        trigger_source,
+        task_id or "-",
+        total,
+        config.schema_version,
+        use_llm,
+    )
     for index, answer in enumerate(answers):
+        if service and task_id:
+            current_task = service.get_task(task_id)
+            if current_task and current_task.status == TaskStatus.CANCELLED:
+                cancelled = True
+                break
         try:
             projection = await _build_answer_graph_preview(
                 db,
@@ -4161,7 +4221,12 @@ async def _rebuild_answer_graph_for_ids(
                 answer.answer_id,
                 exc,
             )
+        processed += 1
         if service and task_id:
+            current_task = service.get_task(task_id)
+            if current_task and current_task.status == TaskStatus.CANCELLED:
+                cancelled = True
+                break
             await service.update_progress(
                 task_id,
                 min(99.0, ((index + 1) / max(total, 1)) * 95.0),
@@ -4172,12 +4237,29 @@ async def _rebuild_answer_graph_for_ids(
                     "graph_failed": len(failed),
                 },
             )
-    return {
-        "processed": total,
+    result = {
+        "processed": processed,
+        "total": total,
         "rebuilt": rebuilt,
         "failed": failed,
+        "cancelled": cancelled,
         "schema_version": config.schema_version,
+        "trigger_source": trigger_source,
+        "task_id": task_id,
     }
+    logger.info(
+        "[Answers] FAQ graph rebuild finished workspace=%s trigger=%s task=%s "
+        "processed=%d rebuilt=%d failed=%d cancelled=%s schema_version=%d",
+        workspace,
+        trigger_source,
+        task_id or "-",
+        processed,
+        len(rebuilt),
+        len(failed),
+        cancelled,
+        config.schema_version,
+    )
+    return result
 
 
 async def _rebuild_answer_graph_background(
@@ -4189,7 +4271,7 @@ async def _rebuild_answer_graph_background(
     answer_ids: list[str],
     use_llm: bool,
 ) -> None:
-    from lightrag.api.task_manager import get_task_service
+    from lightrag.api.task_manager import TaskStatus, get_task_service
 
     service = get_task_service()
     result = await _rebuild_answer_graph_for_ids(
@@ -4199,7 +4281,13 @@ async def _rebuild_answer_graph_background(
         answer_ids=answer_ids,
         use_llm=use_llm,
         task_id=task_id,
+        trigger_source="manual_api",
     )
+    current_task = service.get_task(task_id)
+    if result["cancelled"] or (
+        current_task and current_task.status == TaskStatus.CANCELLED
+    ):
+        return
     await service.complete_task(task_id, result=result)
 
 
@@ -4208,6 +4296,7 @@ async def _refresh_answer_graph_safely(
     db,
     workspace: str,
     answer_id: str,
+    trigger_source: str,
 ) -> None:
     try:
         config = await _get_answer_graph_config(db, workspace)
@@ -4222,12 +4311,15 @@ async def _refresh_answer_graph_safely(
             rag=rag,
             answer_ids=[answer_id],
             use_llm=False,
+            trigger_source=trigger_source,
         )
     except Exception as exc:
         logger.warning(
-            "[Answers] Automatic graph refresh failed workspace=%s answer=%s: %s",
+            "[Answers] Automatic graph refresh failed workspace=%s answer=%s "
+            "trigger=%s: %s",
             workspace,
             answer_id,
+            trigger_source,
             exc,
         )
 
@@ -4272,9 +4364,11 @@ async def _answer_graph_scores(
 
     answer_scores: dict[str, float] = {}
     evidence: dict[str, list[AnswerGraphEvidence]] = {}
+    eligible_start_nodes = 0
     for start_node, start_score in faq_results:
         if start_score < config.min_similarity:
             continue
+        eligible_start_nodes += 1
         queue: list[tuple[str, list[str], list[str], int]] = [
             (start_node, [start_node], [], 0)
         ]
@@ -4322,6 +4416,8 @@ async def _answer_graph_scores(
                     )
                 )
 
+    if eligible_start_nodes == 0:
+        return {}, {}, "graph_below_similarity"
     if not answer_scores:
         return {}, {}, "graph_no_answers"
     ready_rows = await db.query(
@@ -4346,6 +4442,17 @@ async def _answer_graph_scores(
         {answer_id: paths[:3] for answer_id, paths in evidence.items() if answer_id in ready_ids},
         "graph_ready" if ready_ids else "graph_stale",
     )
+
+
+def _effective_answer_retrieval(
+    requested_mode: RetrievalMode,
+    graph_status: str,
+) -> tuple[RetrievalMode, Optional[str]]:
+    if requested_mode != "graph_hybrid":
+        return requested_mode, None
+    if graph_status == "graph_ready":
+        return requested_mode, None
+    return "hybrid", graph_status
 
 
 def _answer_vector_content(answer: AnswerItem, guidance: list[AnswerGuidance]) -> str:
@@ -5349,6 +5456,7 @@ async def _touch_answer_after_asset_change(
             db=db,
             workspace=workspace,
             answer_id=answer_id,
+            trigger_source="answer_asset_change",
         )
     )
     answer = _answer_from_row(dict(row))
@@ -6769,7 +6877,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
         request: Request,
         payload: AnswerGraphRebuildRequest,
     ):
-        from lightrag.api.task_manager import TaskType, get_task_service
+        from lightrag.api.task_manager import TaskStatus, TaskType, get_task_service
 
         workspace, db = await db_for_request(request)
         config = await _get_answer_graph_config(db, workspace)
@@ -6777,6 +6885,22 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             raise HTTPException(
                 status_code=409,
                 detail="Enable the FAQ graph for this workspace before rebuilding it.",
+            )
+        service = get_task_service()
+        active_tasks = [
+            task
+            for task in service.get_tasks_by_workspace(workspace)
+            if task.task_type == TaskType.FAQ_GRAPH_REBUILD
+            and task.status in (TaskStatus.PENDING, TaskStatus.RUNNING)
+        ]
+        if active_tasks:
+            active_task = max(active_tasks, key=lambda task: task.updated_at)
+            return AnswerGraphRebuildResponse(
+                task_id=active_task.task_id,
+                stream_url=f"/api/tasks/{active_task.task_id}/stream",
+                answer_count=int(active_task.metadata.get("answer_count", 0)),
+                message="An FAQ graph rebuild is already running.",
+                reused=True,
             )
         workspace_rag = await rag_for_workspace(workspace)
         if payload.use_llm and getattr(workspace_rag, "llm_model_func", None) is None:
@@ -6823,7 +6947,6 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             multirows=True,
         )
         answer_ids = [str(row["answer_id"]) for row in rows or []]
-        service = get_task_service()
         task = service.create_task(
             task_type=TaskType.FAQ_GRAPH_REBUILD,
             workspace=workspace,
@@ -6831,6 +6954,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 "answer_count": len(answer_ids),
                 "use_llm": payload.use_llm,
                 "schema_version": config.schema_version,
+                "trigger_source": "manual_api",
             },
         )
         service.run_in_background(
@@ -7025,6 +7149,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                     db=db,
                     workspace=workspace,
                     answer_id=answer_id,
+                    trigger_source="answer_create",
                 )
             )
             return _answer_from_row(dict(row))
@@ -9120,6 +9245,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 db=db,
                 workspace=workspace,
                 answer_id=answer_id,
+                trigger_source="answer_update",
             )
         )
         answer = _answer_from_row(dict(row))
@@ -9256,6 +9382,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 db=db,
                 workspace=workspace,
                 answer_id=answer_id,
+                trigger_source="answer_restore",
             )
         )
         answer = _answer_from_row(dict(row))
@@ -9396,6 +9523,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 db=db,
                 workspace=workspace,
                 answer_id=answer_id,
+                trigger_source="guidance_create",
             )
         )
         return _guidance_from_row(dict(row))
@@ -9427,6 +9555,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 db=db,
                 workspace=workspace,
                 answer_id=answer_id,
+                trigger_source="guidance_delete",
             )
         )
         return {"message": "Guidance deleted", "guidance_id": guidance_id}
@@ -9623,6 +9752,12 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 allowed_answer_ids,
                 graph_config,
             )
+        effective_retrieval_mode, retrieval_fallback_reason = (
+            _effective_answer_retrieval(
+                payload.retrieval_mode,
+                graph_status,
+            )
+        )
 
         candidate_answer_ids = list(
             dict.fromkeys(
@@ -9858,6 +9993,9 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 **(event_metadata or {}),
                 "latency_ms": int((time.time() - started) * 1000),
                 "mode": payload.retrieval_mode,
+                "requested_retrieval_mode": payload.retrieval_mode,
+                "effective_retrieval_mode": effective_retrieval_mode,
+                "retrieval_fallback_reason": retrieval_fallback_reason,
                 "strategy": payload.strategy,
                 "selected_by": selected_by,
                 "selection_policy": effective_selection_policy,
@@ -9897,6 +10035,10 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             trace_id=trace_id,
             rationale=rationale,
             retrieval_mode=payload.retrieval_mode,
+            requested_retrieval_mode=payload.retrieval_mode,
+            effective_retrieval_mode=effective_retrieval_mode,
+            graph_status=graph_status,
+            retrieval_fallback_reason=retrieval_fallback_reason,
             selected_by=selected_by,
             alias_expansions=alias_expansions,
             selection_policy=effective_selection_policy,
@@ -9942,6 +10084,10 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 trace_id=result.trace_id,
                 rationale=result.rationale,
                 retrieval_mode=result.retrieval_mode,
+                requested_retrieval_mode=result.requested_retrieval_mode,
+                effective_retrieval_mode=result.effective_retrieval_mode,
+                graph_status=result.graph_status,
+                retrieval_fallback_reason=result.retrieval_fallback_reason,
                 selected_by=result.selected_by,
                 alias_expansions=result.alias_expansions,
                 selection_policy=result.selection_policy,
@@ -9973,6 +10119,10 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             trace_id=result.trace_id,
             rationale=result.rationale,
             retrieval_mode=result.retrieval_mode,
+            requested_retrieval_mode=result.requested_retrieval_mode,
+            effective_retrieval_mode=result.effective_retrieval_mode,
+            graph_status=result.graph_status,
+            retrieval_fallback_reason=result.retrieval_fallback_reason,
             selected_by=result.selected_by,
             alias_expansions=result.alias_expansions,
             selection_policy=result.selection_policy,

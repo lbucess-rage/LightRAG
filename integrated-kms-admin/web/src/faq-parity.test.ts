@@ -30,10 +30,10 @@ test('knowledge management exposes FAQ bulk creation and terminology tools', () 
   expect(graphSource).toContain('확실한 경우만 답변')
 })
 
-test('integrated search defaults FAQ retrieval to hybrid and explains aliases', () => {
+test('integrated search defaults FAQ retrieval to graph hybrid and explains aliases', () => {
   const source = readFileSync(resolve(import.meta.dir, 'features/IntegratedSearch.tsx'), 'utf8')
 
-  expect(source).toContain("retrieval_mode: 'hybrid'")
+  expect(source).toContain("retrieval_mode: 'graph_hybrid'")
   expect(source).toContain("selection_policy: 'workspace'")
   expect(source).toContain('faq_options')
   expect(source).toContain('alias_expansions')

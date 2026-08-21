@@ -2866,6 +2866,7 @@ export const rebuildAnswerGraph = async (request: {
   stream_url: string
   answer_count: number
   message: string
+  reused?: boolean
 }> => {
   const response = await axiosInstance.post('/api/answers/graph/rebuild', request)
   return response.data

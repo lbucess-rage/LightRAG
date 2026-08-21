@@ -18,6 +18,7 @@ from kms_admin.search_service import (
     BRIEF_ANSWER_RESPONSE_TYPE,
     CandidateScope,
     WorkspaceScope,
+    build_faq_search_payload,
     build_kms_query_payload,
     extract_keywords,
     resolve_candidate_scope,
@@ -42,6 +43,26 @@ def test_build_kms_query_payload_uses_admin_defaults():
     assert payload["highlight_entities"] is True
     assert payload["enable_rerank"] is True
     assert payload["stream"] is False
+
+
+def test_build_faq_search_payload_defaults_to_graph_hybrid():
+    payload = build_faq_search_payload("카드 인증 실패")
+
+    assert payload == {
+        "query": "카드 인증 실패",
+        "include_candidates": True,
+        "retrieval_mode": "graph_hybrid",
+    }
+
+
+def test_build_faq_search_payload_preserves_caller_override():
+    payload = build_faq_search_payload(
+        "카드 인증 실패",
+        {"retrieval_mode": "hybrid", "top_k": 3},
+    )
+
+    assert payload["retrieval_mode"] == "hybrid"
+    assert payload["top_k"] == 3
 
 
 def test_external_categories_query_documents_valid_counts_and_active_filter():
@@ -181,13 +202,16 @@ def test_integrated_search_preserves_faq_alias_expansion_metadata(monkeypatch):
             assert method == "POST"
             assert path == "/api/answers/search"
             assert workspace == "faq-helpdesk"
-            assert json_body["retrieval_mode"] == "hybrid"
+            assert json_body["retrieval_mode"] == "graph_hybrid"
             return {
                 "matched": True,
                 "matched_id": "ANS-TEAMS-1",
                 "confidence": 0.91,
-                "retrieval_mode": "hybrid",
-                "selected_by": "hybrid",
+                "retrieval_mode": "graph_hybrid",
+                "requested_retrieval_mode": "graph_hybrid",
+                "effective_retrieval_mode": "graph_hybrid",
+                "graph_status": "graph_ready",
+                "selected_by": "graph_hybrid",
                 "alias_expansions": [
                     {"source": "팀즈", "canonical": "Microsoft Teams"},
                 ],
@@ -217,12 +241,13 @@ def test_integrated_search_preserves_faq_alias_expansion_metadata(monkeypatch):
                 "query": "팀즈 연결이 안 돼요",
                 "include_generative": False,
                 "include_faq": True,
-                "faq_options": {"retrieval_mode": "hybrid"},
             },
         )
     )
 
     assert result["faq_metadata"]["matched_id"] == "ANS-TEAMS-1"
+    assert result["faq_metadata"]["effective_retrieval_mode"] == "graph_hybrid"
+    assert result["faq_metadata"]["graph_status"] == "graph_ready"
     assert result["faq_metadata"]["alias_expansions"] == [
         {"source": "팀즈", "canonical": "Microsoft Teams"}
     ]

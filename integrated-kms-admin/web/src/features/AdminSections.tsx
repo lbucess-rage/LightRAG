@@ -917,7 +917,7 @@ const externalSearchSamplePresets: ExternalSearchSamplePreset[] = [
       faq_options: {
         top_k: 5,
         min_score: 0.18,
-        retrieval_mode: 'keyword',
+        retrieval_mode: 'graph_hybrid',
         include_candidates: true
       },
       client_trace_id: 'sample-integrated-basic'
@@ -959,7 +959,7 @@ const externalSearchSamplePresets: ExternalSearchSamplePreset[] = [
         top_k: 10,
         min_score: 0.12,
         strategy: 'balanced',
-        retrieval_mode: 'keyword',
+        retrieval_mode: 'graph_hybrid',
         include_candidates: true
       },
       client_trace_id: 'sample-faq-only'
@@ -1052,7 +1052,7 @@ const externalSearchParameterDocs = [
     name: 'faq_options',
     required: '선택',
     type: 'object',
-    description: 'FAQ 검색 옵션입니다. top_k, min_score, retrieval_mode, include_candidates 등을 지정합니다.'
+    description: 'FAQ 검색 옵션입니다. retrieval_mode 기본값은 graph_hybrid이며 top_k, min_score, include_candidates 등을 재정의할 수 있습니다.'
   },
   {
     name: 'client_trace_id',
@@ -1066,6 +1066,8 @@ const externalSearchResponseDocs = [
   ['search_id', '어드민 통합 검색 로그 ID'],
   ['generative_answer', '생성형 KMS 답변, 주요 키워드, 근거 refs'],
   ['faq_results', 'FAQ KMS 답변 후보 목록'],
+  ['faq_metadata.effective_retrieval_mode', '실제로 적용된 FAQ 검색 방식'],
+  ['faq_metadata.graph_status', 'FAQ 그래프 준비 또는 폴백 상태'],
   ['keywords', '통합 검색 결과 기준 주요 키워드'],
   ['references', '통합 근거 목록'],
   ['trace.eligibility', '카테고리, 사용 여부, 유효기간 적용 결과와 제외 사유'],
