@@ -10,6 +10,8 @@ import {
   RefreshCwIcon,
   SaveIcon,
   ShieldCheckIcon,
+  SparklesIcon,
+  TriangleAlertIcon,
 } from 'lucide-react'
 
 import {
@@ -30,7 +32,6 @@ import AnswerGraphVisualization from '@/components/answers/AnswerGraphVisualizat
 import TaskProgressPanel from '@/components/documents/TaskProgressPanel'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
-import Checkbox from '@/components/ui/Checkbox'
 import Input from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select'
@@ -72,7 +73,7 @@ export default function AnswerGraphManagement() {
   const [entityTypes, setEntityTypes] = useState('')
   const [relationTypes, setRelationTypes] = useState('')
   const [prompt, setPrompt] = useState('')
-  const [useLlm, setUseLlm] = useState(false)
+  const [useLlm, setUseLlm] = useState(true)
   const [preview, setPreview] = useState<AnswerGraphProjection | null>(null)
   const [previewMode, setPreviewMode] = useState<'graph' | 'list'>('graph')
   const [graphTask, setGraphTask] = useState<TaskStatusResponse | null>(null)
@@ -157,6 +158,7 @@ export default function AnswerGraphManagement() {
     () => answers.find((answer) => answer.answer_id === selectedAnswerId),
     [answers, selectedAnswerId]
   )
+  const rebuildTargetCount = (status?.stale || 0) + (status?.missing || 0) + (status?.failed || 0)
 
   const saveConfig = async () => {
     if (!config) return
@@ -174,6 +176,10 @@ export default function AnswerGraphManagement() {
         min_category_margin: config.min_category_margin,
         min_evidence_sources: config.min_evidence_sources,
         llm_min_confidence: config.llm_min_confidence,
+        ai_extraction_strategy: config.ai_extraction_strategy,
+        ai_retry_max_tokens: config.ai_retry_max_tokens,
+        ai_min_relations: config.ai_min_relations,
+        ai_min_relation_types: config.ai_min_relation_types,
         entity_types: splitTypes(entityTypes),
         relation_types: splitTypes(relationTypes),
         extraction_prompt: prompt,
@@ -306,6 +312,86 @@ export default function AnswerGraphManagement() {
                   onCheckedChange={(auto_sync) => setConfig({ ...config, auto_sync })}
                 />
               </label>
+            </div>
+
+            <div className="rounded-md border">
+              <div className="space-y-3 px-3 py-3">
+                <div>
+                  <Label>{t('answerCatalog.graph.aiStrategy', 'AI graph build strategy')}</Label>
+                  <Select
+                    value={config.ai_extraction_strategy}
+                    onValueChange={(value) => setConfig({
+                      ...config,
+                      ai_extraction_strategy: value as AnswerGraphConfig['ai_extraction_strategy'],
+                    })}
+                  >
+                    <SelectTrigger className="mt-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="fast">
+                        {t('answerCatalog.graph.aiStrategyFast', 'Fast structured extraction')}
+                      </SelectItem>
+                      <SelectItem value="adaptive">
+                        {t('answerCatalog.graph.aiStrategyAdaptive', 'Adaptive analysis (experimental)')}
+                      </SelectItem>
+                      <SelectItem value="deep">
+                        {t('answerCatalog.graph.aiStrategyDeep', 'Deep analysis for every FAQ')}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    {t(`answerCatalog.graph.aiStrategyHint.${config.ai_extraction_strategy}`)}
+                  </p>
+                </div>
+                {config.ai_extraction_strategy !== 'fast' && (
+                  <div className="grid gap-3 border-t pt-3 sm:grid-cols-3">
+                    <div>
+                      <Label>{t('answerCatalog.graph.aiRetryMaxTokens', 'Deep analysis token budget')}</Label>
+                      <Input
+                        className="mt-1"
+                        type="number"
+                        min="1024"
+                        max="32768"
+                        step="1024"
+                        value={config.ai_retry_max_tokens}
+                        onChange={(event) => setConfig({
+                          ...config,
+                          ai_retry_max_tokens: Number(event.target.value),
+                        })}
+                      />
+                    </div>
+                    <div>
+                      <Label>{t('answerCatalog.graph.aiMinRelations', 'Minimum answer relations')}</Label>
+                      <Input
+                        className="mt-1"
+                        type="number"
+                        min="1"
+                        max="12"
+                        value={config.ai_min_relations}
+                        onChange={(event) => setConfig({
+                          ...config,
+                          ai_min_relations: Number(event.target.value),
+                        })}
+                      />
+                    </div>
+                    <div>
+                      <Label>{t('answerCatalog.graph.aiMinRelationTypes', 'Minimum relation types')}</Label>
+                      <Input
+                        className="mt-1"
+                        type="number"
+                        min="1"
+                        max="8"
+                        value={config.ai_min_relation_types}
+                        onChange={(event) => setConfig({
+                          ...config,
+                          ai_min_relation_types: Number(event.target.value),
+                        })}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="rounded-md border">
@@ -518,7 +604,7 @@ export default function AnswerGraphManagement() {
           </Button>
         </div>
 
-        <div className="grid gap-3 border-b p-4 lg:grid-cols-[minmax(240px,1fr)_auto_auto_auto]">
+        <div className="grid gap-3 border-b p-4 lg:grid-cols-[minmax(240px,1fr)_auto_auto]">
           <div>
             <Label>{t('answerCatalog.graph.previewAnswer', 'FAQ to preview')}</Label>
             <Select value={selectedAnswerId} onValueChange={setSelectedAnswerId}>
@@ -533,10 +619,13 @@ export default function AnswerGraphManagement() {
                 ))}
               </SelectContent>
             </Select>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t('answerCatalog.graph.previewSelectionHint', 'This selection applies only to the preview below.')}
+            </p>
           </div>
           <label className="flex items-end gap-2 pb-2 text-sm">
-            <Checkbox checked={useLlm} onCheckedChange={(checked) => setUseLlm(Boolean(checked))} />
-            {t('answerCatalog.graph.useLlm', 'Add AI extraction')}
+            <Switch checked={useLlm} onCheckedChange={setUseLlm} />
+            {t('answerCatalog.graph.useLlm', 'Build graph with AI')}
           </label>
           <div className="flex items-end">
             <Button variant="outline" onClick={runPreview} disabled={isPreviewing}>
@@ -544,18 +633,57 @@ export default function AnswerGraphManagement() {
               {t('answerCatalog.graph.preview', 'Preview')}
             </Button>
           </div>
-          <div className="flex items-end">
-            <Button onClick={runRebuild} disabled={isRebuilding || isGraphTaskActive || !config?.enabled}>
-              {isRebuilding || isGraphTaskActive
-                ? <Loader2Icon className="h-4 w-4 animate-spin" />
-                : <DatabaseZapIcon className="h-4 w-4" />}
-              {isGraphTaskActive
-                ? t('answerCatalog.graph.rebuildRunning', 'Building FAQ graphs ({{progress}}%)', {
-                  progress: Math.round(graphTask?.progress || 0),
-                })
-                : t('answerCatalog.graph.rebuild', 'Build missing and changed FAQ')}
-            </Button>
+          <div
+            className={`flex items-start gap-2 rounded-md border px-3 py-2 text-xs leading-5 lg:col-span-3 ${
+              useLlm
+                ? 'border-emerald-200 bg-emerald-50/50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/10 dark:text-emerald-100'
+                : 'border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-800 dark:bg-amber-950/20 dark:text-amber-100'
+            }`}
+          >
+            {useLlm
+              ? <SparklesIcon className="mt-0.5 h-4 w-4 shrink-0" />
+              : <TriangleAlertIcon className="mt-0.5 h-4 w-4 shrink-0" />}
+            <span>
+              {useLlm
+                ? t('answerCatalog.graph.aiModeHint', 'Build the base graph with rules, then use the workspace AI profile to add entities and relations.')
+                : t('answerCatalog.graph.ruleModeWarning', 'Rule-based mode: only questions, finding hints, and tags are used. The workspace AI profile is not called.')}
+            </span>
           </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/20 px-4 py-3">
+          <div>
+            <div className="flex items-center gap-2 font-medium">
+              <DatabaseZapIcon className="h-4 w-4" />
+              {t('answerCatalog.graph.workspaceBuildTitle', 'Build workspace FAQ graphs')}
+              <Badge variant="outline">
+                {t('answerCatalog.graph.rebuildTargetCount', '{{count}} target FAQ', {
+                  count: rebuildTargetCount,
+                })}
+              </Badge>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t('answerCatalog.graph.workspaceBuildHint', 'Regardless of the preview selection, build every missing, changed, or failed FAQ in this workspace.')}
+            </p>
+          </div>
+          <Button
+            onClick={runRebuild}
+            disabled={
+              isRebuilding
+              || isGraphTaskActive
+              || !config?.enabled
+              || rebuildTargetCount === 0
+            }
+          >
+            {isRebuilding || isGraphTaskActive
+              ? <Loader2Icon className="h-4 w-4 animate-spin" />
+              : <DatabaseZapIcon className="h-4 w-4" />}
+            {isGraphTaskActive
+              ? t('answerCatalog.graph.rebuildRunning', 'Building FAQ graphs ({{progress}}%)', {
+                progress: Math.round(graphTask?.progress || 0),
+              })
+              : t('answerCatalog.graph.rebuild', 'Build all missing and changed FAQ')}
+          </Button>
         </div>
 
         {graphTask && (

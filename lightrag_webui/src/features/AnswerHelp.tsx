@@ -872,15 +872,30 @@ function MatchingTopic({
           description="기존 조회 방식을 바꾸지 않고 품질 관리의 FAQ 그래프 화면에서 선택적으로 준비합니다."
         />
         <div className="mt-4 grid gap-3 md:grid-cols-4">
-          <ChecklistItem title="1. 스키마 확인" text="FAQAnswer, 제품, 시스템, 증상, 오류코드, 절차, 용어 유형과 허용 관계를 확인합니다." />
-          <ChecklistItem title="2. 미리보기" text="FAQ 하나를 선택해 기본 규칙으로 만들어질 노드와 관계를 먼저 확인합니다. 이 단계는 저장하지 않습니다." />
-          <ChecklistItem title="3. 필요한 경우 AI 보완" text="원문에 명시된 제품·증상·절차를 더 추출해야 할 때만 참고 프롬프트와 AI 추출 보완을 사용합니다." />
-          <ChecklistItem title="4. 구축 후 비교" text="미구축·변경 FAQ를 구축한 뒤 테스트에서 키워드+벡터와 키워드+벡터+그래프 결과를 비교합니다." />
+          <ChecklistItem title="1. 스키마 확인" text="FAQ 전용 스키마의 FAQAnswer, 제품, 시스템, 증상, 오류코드, 절차, 용어 유형과 허용 관계를 확인합니다. KMS 문서 스키마와는 별도로 관리됩니다." />
+          <ChecklistItem title="2. 선택 FAQ 미리보기" text="FAQ 하나를 선택해 만들어질 노드와 관계를 확인합니다. 선택값은 미리보기에만 적용되며 저장하지 않습니다." />
+          <ChecklistItem title="3. AI로 그래프 구축" text="기본적으로 AI 구축을 사용해 규칙 그래프에 제품·증상·절차 엔티티와 관계를 추가합니다. 끄면 질문, 찾기 힌트와 태그만 사용하는 규칙 기반 그래프가 생성됩니다." />
+          <ChecklistItem title="4. 워크스페이스 전체 구축" text="전체 구축은 선택한 FAQ와 무관하게 워크스페이스의 미구축·변경·실패 FAQ를 처리합니다. 완료 후 조회 방식별 결과를 비교합니다." />
         </div>
         <div className="mt-4 rounded-md border border-emerald-200 bg-emerald-50/50 p-3 text-sm leading-6 dark:border-emerald-900 dark:bg-emerald-950/10">
           <strong>예시:</strong> “팀즈 연결이 안 돼”가 들어오면 <code>팀즈</code> 용어가
           <code className="mx-1">Microsoft Teams</code> 표준 용어와 연결되고, Teams 제품과 회의 연결 증상을 거쳐
           관련 FAQ로 이어진 경로가 후보 근거에 표시됩니다. 그래프가 준비되지 않았으면 기존 하이브리드 검색 결과를 그대로 사용합니다.
+        </div>
+        <div className="mt-3 rounded-md border p-3">
+          <div className="font-semibold">AI 그래프 구축 방식 선택</div>
+          <div className="mt-3 grid gap-3 md:grid-cols-3">
+            <ChecklistItem title="빠른 구조화 추출 (운영 권장)" text="Thinking 없이 한 번 추출합니다. 현재 비교 테스트에서 가장 높은 통과 결과와 합리적인 구축 시간을 보였습니다." />
+            <ChecklistItem title="적응형 분석 (실험)" text="먼저 빠르게 추출한 뒤 필요한 관계가 부족한 FAQ만 Thinking으로 다시 분석합니다. 관계는 풍부해지지만 검색 품질 개선은 별도 검증이 필요합니다." />
+            <ChecklistItem title="모든 FAQ 정밀 분석" text="모든 FAQ에 Thinking을 사용합니다. 느리므로 소량의 복잡한 FAQ를 재구축할 때 사용합니다." />
+          </div>
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">
+            LLM 설정에서 <strong className="text-foreground">FAQ 그래프 구성</strong>은 대량 처리용으로
+            Thinking을 끄고, <strong className="text-foreground">도메인 스키마 설계</strong>는 더 넉넉한
+            응답 예산과 Thinking을 사용하도록 별도로 지정할 수 있습니다. 현재 운영 권장은 FAQ 그래프 구성은
+            빠른 구축, 스키마 설계는 Thinking 사용입니다. 적응형 재분석은 FAQ 그래프 설정의 응답 예산을
+            사용하며 서버를 재시작하지 않아도 다음 구축부터 적용됩니다.
+          </p>
         </div>
         <div className="mt-3 border-t pt-4">
           <div className="font-semibold">정확도를 우선해 답변을 보류하는 방법</div>

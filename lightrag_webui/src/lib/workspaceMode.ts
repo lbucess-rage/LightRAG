@@ -9,6 +9,7 @@ export type AppTab =
   | 'retrieval'
   | 'api'
   | 'prompts'
+  | 'llm-settings'
   | 'workspaces'
   | 'answers'
   | 'answer-sources'
@@ -44,6 +45,7 @@ export const navigationItems: NavigationItem[] = [
   { value: 'answer-help', labelKey: 'header.answerHelp', fallback: 'Help', group: 'answer', showInNavigation: false },
   { value: 'api', labelKey: 'header.api', fallback: 'API', group: 'ops' },
   { value: 'prompts', labelKey: 'header.prompts', fallback: 'Prompts', group: 'ops' },
+  { value: 'llm-settings', labelKey: 'header.llmSettings', fallback: 'LLM Settings', group: 'ops' },
   { value: 'workspaces', labelKey: 'header.workspaces', fallback: 'Workspaces', group: 'ops' },
 ]
 
@@ -59,6 +61,7 @@ export const getVisibleTabsForMode = (mode: WorkspaceMode): AppTab[] => {
       'answer-detailed-analytics',
       'answer-help',
       'api',
+      'llm-settings',
       'workspaces',
     ]
   }
@@ -80,6 +83,7 @@ export const getVisibleTabsForMode = (mode: WorkspaceMode): AppTab[] => {
       'answer-help',
       'api',
       'prompts',
+      'llm-settings',
       'workspaces',
     ]
   }
@@ -92,6 +96,7 @@ export const getVisibleTabsForMode = (mode: WorkspaceMode): AppTab[] => {
     'retrieval',
     'api',
     'prompts',
+    'llm-settings',
     'workspaces',
   ]
 }
