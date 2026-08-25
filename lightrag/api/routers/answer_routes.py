@@ -113,7 +113,13 @@ Each entity must contain `type`, `label`, and `description`.
 Each relation must contain `source_type`, `source_label`, `target_type`,
 `target_label`, `type`, and `description`.
 Use only the configured entity and relation types. Do not create facts that are
-not supported by the FAQ title, body, tags, metadata, or finding hints."""
+not supported by the FAQ title, body, tags, metadata, or finding hints.
+Always connect the FAQAnswer to an Intent with REPRESENTS_QUESTION.
+Use HAS_TERM for at most four important domain terms, HAS_SYMPTOM only for an
+explicit symptom, APPLIES_TO only for a named product or system, BELONGS_TO for
+categories, and RESOLVES when the answer contains a procedure or action.
+Prefer three to eight useful relations spanning at least two relation types when
+the supplied content supports them. Do not use APPLIES_TO for procedures."""
 TOKEN_RE = re.compile(r"[0-9A-Za-z가-힣_]+")
 GUIDANCE_TYPE_MULTIPLIER = {
     "question": 1.25,
@@ -411,6 +417,10 @@ async def _ensure_tables(db) -> None:
             entity_types JSONB NOT NULL DEFAULT '[]'::jsonb,
             relation_types JSONB NOT NULL DEFAULT '[]'::jsonb,
             extraction_prompt TEXT NOT NULL DEFAULT '',
+            ai_extraction_strategy TEXT NOT NULL DEFAULT 'fast',
+            ai_retry_max_tokens INTEGER NOT NULL DEFAULT 8192,
+            ai_min_relations INTEGER NOT NULL DEFAULT 4,
+            ai_min_relation_types INTEGER NOT NULL DEFAULT 3,
             schema_version INTEGER NOT NULL DEFAULT 1,
             create_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             update_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -447,6 +457,30 @@ async def _ensure_tables(db) -> None:
         """
         ALTER TABLE LIGHTRAG_ANSWER_GRAPH_CONFIG
         ADD COLUMN IF NOT EXISTS llm_min_confidence DOUBLE PRECISION NOT NULL DEFAULT 0.80
+        """,
+        """
+        ALTER TABLE LIGHTRAG_ANSWER_GRAPH_CONFIG
+        ADD COLUMN IF NOT EXISTS ai_extraction_strategy TEXT NOT NULL DEFAULT 'fast'
+        """,
+        """
+        ALTER TABLE LIGHTRAG_ANSWER_GRAPH_CONFIG
+        ADD COLUMN IF NOT EXISTS ai_retry_max_tokens INTEGER NOT NULL DEFAULT 8192
+        """,
+        """
+        ALTER TABLE LIGHTRAG_ANSWER_GRAPH_CONFIG
+        ADD COLUMN IF NOT EXISTS ai_min_relations INTEGER NOT NULL DEFAULT 4
+        """,
+        """
+        ALTER TABLE LIGHTRAG_ANSWER_GRAPH_CONFIG
+        ALTER COLUMN ai_min_relations SET DEFAULT 4
+        """,
+        """
+        ALTER TABLE LIGHTRAG_ANSWER_GRAPH_CONFIG
+        ADD COLUMN IF NOT EXISTS ai_min_relation_types INTEGER NOT NULL DEFAULT 3
+        """,
+        """
+        ALTER TABLE LIGHTRAG_ANSWER_GRAPH_CONFIG
+        ALTER COLUMN ai_min_relation_types SET DEFAULT 3
         """,
         """
         CREATE TABLE IF NOT EXISTS LIGHTRAG_ANSWER_GRAPH_PROJECTIONS (
@@ -667,6 +701,10 @@ class AnswerGraphConfig(BaseModel):
         default_factory=lambda: list(DEFAULT_ANSWER_GRAPH_RELATION_TYPES)
     )
     extraction_prompt: str = DEFAULT_ANSWER_GRAPH_PROMPT
+    ai_extraction_strategy: Literal["fast", "adaptive", "deep"] = "fast"
+    ai_retry_max_tokens: int = Field(default=8192, ge=1024, le=32768)
+    ai_min_relations: int = Field(default=4, ge=1, le=12)
+    ai_min_relation_types: int = Field(default=3, ge=1, le=8)
     schema_version: int = 1
     create_time: Optional[str] = None
     update_time: Optional[str] = None
@@ -771,6 +809,17 @@ class AnswerGraphConfigUpdate(BaseModel):
         default=None,
         description="Optional LLM extraction prompt. Deterministic projection runs first.",
     )
+    ai_extraction_strategy: Optional[Literal["fast", "adaptive", "deep"]] = Field(
+        default=None,
+        description=(
+            "fast disables thinking, adaptive retries weak projections with thinking, "
+            "and deep enables thinking for every FAQ."
+        ),
+        examples=["fast"],
+    )
+    ai_retry_max_tokens: Optional[int] = Field(default=None, ge=1024, le=32768)
+    ai_min_relations: Optional[int] = Field(default=None, ge=1, le=12)
+    ai_min_relation_types: Optional[int] = Field(default=None, ge=1, le=8)
 
 
 class AnswerGraphNode(BaseModel):
@@ -810,9 +859,9 @@ class AnswerGraphPreviewRequest(BaseModel):
         examples=["ANS-IT-OFFICE-007"],
     )
     use_llm: bool = Field(
-        default=False,
-        description="Add bounded LLM extraction after deterministic projection.",
-        examples=[False],
+        default=True,
+        description="Build the deterministic projection, then extend it with bounded AI extraction.",
+        examples=[True],
     )
 
 
@@ -831,8 +880,8 @@ class AnswerGraphRebuildRequest(BaseModel):
         description="Build only missing, stale, pending, or failed projections.",
     )
     use_llm: bool = Field(
-        default=False,
-        description="Add bounded LLM extraction after deterministic projection.",
+        default=True,
+        description="Build deterministic projections, then extend them with bounded AI extraction.",
     )
     limit: int = Field(
         default=500,
@@ -3463,6 +3512,20 @@ def _graph_config_from_row(workspace: str, row: Optional[dict[str, Any]]) -> Ans
             else list(DEFAULT_ANSWER_GRAPH_RELATION_TYPES)
         ),
         extraction_prompt=str(row.get("extraction_prompt") or DEFAULT_ANSWER_GRAPH_PROMPT),
+        ai_extraction_strategy=(
+            str(row.get("ai_extraction_strategy"))
+            if str(row.get("ai_extraction_strategy")) in {"fast", "adaptive", "deep"}
+            else "fast"
+        ),
+        ai_retry_max_tokens=max(
+            1024, min(32768, int(row.get("ai_retry_max_tokens") or 8192))
+        ),
+        ai_min_relations=max(
+            1, min(12, int(row.get("ai_min_relations") or 4))
+        ),
+        ai_min_relation_types=max(
+            1, min(8, int(row.get("ai_min_relation_types") or 3))
+        ),
         schema_version=int(row.get("schema_version") or 1),
         create_time=_iso(row.get("create_time")),
         update_time=_iso(row.get("update_time")),
@@ -3475,7 +3538,9 @@ async def _get_answer_graph_config(db, workspace: str) -> AnswerGraphConfig:
         SELECT workspace, enabled, auto_sync, graph_weight, min_similarity, max_hops,
                precision_mode, precision_min_score, min_score_margin,
                min_category_margin, min_evidence_sources, llm_min_confidence,
-               entity_types, relation_types, extraction_prompt, schema_version,
+               entity_types, relation_types, extraction_prompt,
+               ai_extraction_strategy, ai_retry_max_tokens, ai_min_relations,
+               ai_min_relation_types, schema_version,
                create_time, update_time
         FROM LIGHTRAG_ANSWER_GRAPH_CONFIG
         WHERE workspace = $1
@@ -3768,6 +3833,8 @@ def _deterministic_answer_graph_projection(
 def _parse_answer_graph_llm_result(
     raw: str,
     config: AnswerGraphConfig,
+    *,
+    source: str = "llm",
 ) -> tuple[list[AnswerGraphNode], list[AnswerGraphRelation]]:
     parsed = _coerce_json(raw.strip().removeprefix("```json").removesuffix("```").strip(), {})
     if not isinstance(parsed, dict):
@@ -3787,7 +3854,7 @@ def _parse_answer_graph_llm_result(
             entity_type=entity_type,
             label=label,
             description=_graph_clean_label(item.get("description"), 500),
-            source="llm",
+            source=source,
         )
         nodes[(entity_type, _normalise_text(label))] = node
 
@@ -3817,7 +3884,7 @@ def _parse_answer_graph_llm_result(
                     node_id=source_id,
                     entity_type=source_type,
                     label=source_label,
-                    source="llm",
+                    source=source,
                 ),
             )
         if target_type != "FAQAnswer":
@@ -3827,7 +3894,7 @@ def _parse_answer_graph_llm_result(
                     node_id=target_id,
                     entity_type=target_type,
                     label=target_label,
-                    source="llm",
+                    source=source,
                 ),
             )
         relations.append(
@@ -3836,10 +3903,67 @@ def _parse_answer_graph_llm_result(
                 target_id=target_id,
                 relation_type=relation_type,
                 description=_graph_clean_label(item.get("description"), 500),
-                source="llm",
+                source=source,
             )
         )
     return list(nodes.values()), relations
+
+
+def _answer_graph_llm_quality(
+    answer_node_id: str,
+    nodes: list[AnswerGraphNode],
+    relations: list[AnswerGraphRelation],
+    config: AnswerGraphConfig,
+    expected_relation_types: set[str] | None = None,
+) -> tuple[bool, tuple[int, int, int, int, int], list[str]]:
+    connected = [
+        relation
+        for relation in relations
+        if answer_node_id in {relation.source_id, relation.target_id}
+    ]
+    relation_types = {relation.relation_type for relation in connected}
+    expected = expected_relation_types or set()
+    satisfied_expected = expected.intersection(relation_types)
+    reasons: list[str] = []
+    if len(connected) < config.ai_min_relations:
+        reasons.append(
+            f"answer_relations={len(connected)}<{config.ai_min_relations}"
+        )
+    if len(relation_types) < config.ai_min_relation_types:
+        reasons.append(
+            f"relation_types={len(relation_types)}<{config.ai_min_relation_types}"
+        )
+    missing_expected = sorted(expected - relation_types)
+    if missing_expected:
+        reasons.append(f"missing_expected={','.join(missing_expected)}")
+    score = (
+        1 if not reasons else 0,
+        len(satisfied_expected),
+        len(relation_types),
+        len(connected),
+        len(nodes) + len(relations),
+    )
+    return not reasons, score, reasons
+
+
+def _expected_answer_graph_relation_types(
+    answer: AnswerItem,
+    config: AnswerGraphConfig,
+) -> set[str]:
+    allowed = set(config.relation_types)
+    expected = {"REPRESENTS_QUESTION"}.intersection(allowed)
+    title = _normalise_text(answer.title)
+    if "HAS_SYMPTOM" in allowed and re.search(
+        r"(안\s|않|오류|실패|불가|끊|느리|없|분실|잠김|인식|신호|소진|부족|못|문제)",
+        title,
+    ):
+        expected.add("HAS_SYMPTOM")
+    if "RESOLVES" in allowed and re.search(
+        r"(방법|싶|신청|변경|교체|발급|해지|정지|차단|환불|등록|전환|확인|조회|납부|설정)",
+        title,
+    ):
+        expected.add("RESOLVES")
+    return expected
 
 
 async def _llm_answer_graph_projection(
@@ -3852,6 +3976,7 @@ async def _llm_answer_graph_projection(
     if llm_func is None:
         return [], []
     answer_node_id = _answer_graph_node_id(answer.answer_id)
+    expected_relation_types = _expected_answer_graph_relation_types(answer, config)
     payload = {
         "answer_node": {
             "type": "FAQAnswer",
@@ -3881,20 +4006,106 @@ async def _llm_answer_graph_projection(
         "allowed_entity_types": config.entity_types,
         "allowed_relation_types": config.relation_types,
     }
-    prompt = (
+    base_prompt = (
         f"{config.extraction_prompt}\n\n"
         "Use the supplied FAQAnswer label exactly for every relation connected to the answer.\n"
+        "Relation rules: REPRESENTS_QUESTION connects the FAQAnswer to its intent; "
+        "HAS_TERM connects important domain terms; HAS_SYMPTOM is only for an explicit "
+        "symptom; APPLIES_TO is only for a named product or system; BELONGS_TO is for "
+        "categories; RESOLVES is for procedures or actions in the answer. Prefer three "
+        "to eight supported relations and at least two relation types.\n"
         f"INPUT:\n{json.dumps(payload, ensure_ascii=False)}"
     )
-    try:
+
+    async def extract(*, deep: bool) -> tuple[list[AnswerGraphNode], list[AnswerGraphRelation]]:
+        prompt = base_prompt
+        source = "llm"
+        options: dict[str, Any] = {"_llm_thinking_override": deep}
+        if deep:
+            source = "llm_deep"
+            options["max_tokens"] = config.ai_retry_max_tokens
+            prompt = (
+                f"{base_prompt}\n\n"
+                "Review the FAQ carefully before returning the final JSON. Check that "
+                "the FAQAnswer is connected to its intent and, when supported, its "
+                "terms, symptoms, product/system, category, and resolution procedure. "
+                "The following relation types are expected for this FAQ when supported "
+                f"by its title: {', '.join(sorted(expected_relation_types))}."
+            )
         raw = await llm_func(
             prompt,
             system_prompt="You build bounded FAQ retrieval graphs and return valid JSON only.",
+            _llm_purpose="knowledge_structure",
+            **options,
         )
-        return _parse_answer_graph_llm_result(str(raw), config)
+        return _parse_answer_graph_llm_result(str(raw), config, source=source)
+
+    strategy = config.ai_extraction_strategy
+    if strategy == "deep":
+        try:
+            return await extract(deep=True)
+        except Exception as exc:
+            logger.warning(
+                "[Answers] Deep FAQ graph extraction failed for %s; retrying fast: %s",
+                answer.answer_id,
+                exc,
+            )
+            try:
+                return await extract(deep=False)
+            except Exception as fallback_exc:
+                logger.warning(
+                    "[Answers] FAQ graph fallback extraction failed for %s: %s",
+                    answer.answer_id,
+                    fallback_exc,
+                )
+                return [], []
+
+    try:
+        fast_nodes, fast_relations = await extract(deep=False)
     except Exception as exc:
-        logger.warning("[Answers] FAQ graph LLM extraction failed: %s", exc)
-        return [], []
+        logger.warning(
+            "[Answers] FAQ graph LLM extraction failed for %s: %s",
+            answer.answer_id,
+            exc,
+        )
+        fast_nodes, fast_relations = [], []
+    if strategy == "fast":
+        return fast_nodes, fast_relations
+
+    fast_valid, fast_score, reasons = _answer_graph_llm_quality(
+        answer_node_id,
+        fast_nodes,
+        fast_relations,
+        config,
+        expected_relation_types,
+    )
+    if fast_valid:
+        return fast_nodes, fast_relations
+
+    logger.info(
+        "[Answers] Adaptive FAQ graph retry answer=%s reasons=%s",
+        answer.answer_id,
+        ",".join(reasons),
+    )
+    try:
+        deep_nodes, deep_relations = await extract(deep=True)
+    except Exception as exc:
+        logger.warning(
+            "[Answers] Adaptive FAQ graph retry failed for %s; keeping fast result: %s",
+            answer.answer_id,
+            exc,
+        )
+        return fast_nodes, fast_relations
+    _, deep_score, _ = _answer_graph_llm_quality(
+        answer_node_id,
+        deep_nodes,
+        deep_relations,
+        config,
+        expected_relation_types,
+    )
+    if deep_score > fast_score:
+        return deep_nodes, deep_relations
+    return fast_nodes, fast_relations
 
 
 async def _build_answer_graph_preview(
@@ -3918,12 +4129,20 @@ async def _build_answer_graph_preview(
         node_map = {node.node_id: node for node in nodes}
         node_map.update({node.node_id: node for node in llm_nodes})
         relation_map = {
-            tuple(sorted((relation.source_id, relation.target_id))): relation
+            (
+                relation.source_id,
+                relation.target_id,
+                relation.relation_type,
+            ): relation
             for relation in relations
         }
         relation_map.update(
             {
-                tuple(sorted((relation.source_id, relation.target_id))): relation
+                (
+                    relation.source_id,
+                    relation.target_id,
+                    relation.relation_type,
+                ): relation
                 for relation in llm_relations
             }
         )
@@ -4190,53 +4409,99 @@ async def _rebuild_answer_graph_for_ids(
         config.schema_version,
         use_llm,
     )
-    for index, answer in enumerate(answers):
-        if service and task_id:
-            current_task = service.get_task(task_id)
-            if current_task and current_task.status == TaskStatus.CANCELLED:
+    try:
+        rebuild_concurrency = int(os.getenv("FAQ_GRAPH_REBUILD_CONCURRENCY", "4"))
+    except ValueError:
+        rebuild_concurrency = 4
+    rebuild_concurrency = max(1, min(rebuild_concurrency, 16))
+    semaphore = asyncio.Semaphore(rebuild_concurrency)
+    logger.info(
+        "[Answers] FAQ graph rebuild concurrency workspace=%s task=%s concurrency=%d",
+        workspace,
+        task_id or "-",
+        rebuild_concurrency,
+    )
+
+    async def build_one(answer: AnswerItem) -> tuple[str, Optional[str], bool]:
+        async with semaphore:
+            if service and task_id:
+                current_task = service.get_task(task_id)
+                if current_task and current_task.status == TaskStatus.CANCELLED:
+                    return answer.answer_id, None, True
+            for attempt in range(2):
+                try:
+                    projection = await _build_answer_graph_preview(
+                        db,
+                        workspace,
+                        rag,
+                        answer,
+                        guidance_by_answer.get(answer.answer_id, []),
+                        config,
+                        use_llm=use_llm,
+                    )
+                    await _persist_answer_graph_projection(
+                        db=db,
+                        workspace=workspace,
+                        rag=rag,
+                        projection=projection,
+                    )
+                    return answer.answer_id, None, False
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    duplicate_race = "already exists" in str(exc).lower()
+                    if attempt == 0 and duplicate_race:
+                        logger.warning(
+                            "[Answers] Retrying FAQ graph projection after a concurrent "
+                            "entity write workspace=%s answer=%s: %s",
+                            workspace,
+                            answer.answer_id,
+                            exc,
+                        )
+                        await asyncio.sleep(0.25)
+                        continue
+                    logger.error(
+                        "[Answers] FAQ graph projection failed workspace=%s answer=%s: %s",
+                        workspace,
+                        answer.answer_id,
+                        exc,
+                    )
+                    return answer.answer_id, str(exc), False
+            return answer.answer_id, "FAQ graph projection retry exhausted", False
+
+    build_tasks = [asyncio.create_task(build_one(answer)) for answer in answers]
+    try:
+        for completed in asyncio.as_completed(build_tasks):
+            answer_id, error, task_cancelled = await completed
+            if task_cancelled:
                 cancelled = True
                 break
-        try:
-            projection = await _build_answer_graph_preview(
-                db,
-                workspace,
-                rag,
-                answer,
-                guidance_by_answer.get(answer.answer_id, []),
-                config,
-                use_llm=use_llm,
-            )
-            await _persist_answer_graph_projection(
-                db=db,
-                workspace=workspace,
-                rag=rag,
-                projection=projection,
-            )
-            rebuilt.append(answer.answer_id)
-        except Exception as exc:
-            failed[answer.answer_id] = str(exc)
-            logger.error(
-                "[Answers] FAQ graph projection failed workspace=%s answer=%s: %s",
-                workspace,
-                answer.answer_id,
-                exc,
-            )
-        processed += 1
-        if service and task_id:
-            current_task = service.get_task(task_id)
-            if current_task and current_task.status == TaskStatus.CANCELLED:
-                cancelled = True
-                break
-            await service.update_progress(
-                task_id,
-                min(99.0, ((index + 1) / max(total, 1)) * 95.0),
-                f"FAQ graph {index + 1}/{total} prepared",
-                detail={
-                    "graph_processed": index + 1,
-                    "graph_rebuilt": len(rebuilt),
-                    "graph_failed": len(failed),
-                },
-            )
+            processed += 1
+            if error:
+                failed[answer_id] = error
+            else:
+                rebuilt.append(answer_id)
+            if service and task_id:
+                current_task = service.get_task(task_id)
+                if current_task and current_task.status == TaskStatus.CANCELLED:
+                    cancelled = True
+                    break
+                await service.update_progress(
+                    task_id,
+                    min(99.0, (processed / max(total, 1)) * 95.0),
+                    f"FAQ graph {processed}/{total} prepared",
+                    detail={
+                        "graph_processed": processed,
+                        "graph_rebuilt": len(rebuilt),
+                        "graph_failed": len(failed),
+                    },
+                )
+    finally:
+        if cancelled:
+            for build_task in build_tasks:
+                if not build_task.done():
+                    build_task.cancel()
+        await asyncio.gather(*build_tasks, return_exceptions=True)
     result = {
         "processed": processed,
         "total": total,
@@ -5141,6 +5406,7 @@ async def _discover_answer_terms_background(
                     "synonym, abbreviation, and neologism candidates for FAQ retrieval. "
                     "Return strict JSON only."
                 ),
+                _llm_purpose="knowledge_structure",
             )
             parsed = _parse_term_discovery_candidates(
                 str(raw),
@@ -5253,7 +5519,11 @@ async def _llm_select_candidate(rag, query: str, candidates: list[ResolveCandida
         "answer_id must be one of the candidate answer_id values, or null if none match."
     )
     try:
-        raw = await llm_func(prompt, system_prompt=system_prompt)
+        raw = await llm_func(
+            prompt,
+            system_prompt=system_prompt,
+            _llm_purpose="faq_selection",
+        )
     except Exception as exc:
         logger.warning("[Answers] LLM answer selector failed: %s", exc)
         return None, {"status": "llm_failed", "error": str(exc)}
@@ -6026,6 +6296,7 @@ async def _enrich_answer_guidance_background(
                     "questions, keywords, colloquial expressions, and bilingual aliases for "
                     "Korean search. Return strict JSON only."
                 ),
+                _llm_purpose="knowledge_structure",
             )
             parsed = _parse_batch_guidance_suggestions(
                 str(raw),
@@ -6649,10 +6920,6 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
         workspace, db = await db_for_request(request)
         current = await _get_answer_graph_config(db, workspace)
         updates = payload.model_dump(exclude_unset=True)
-        schema_changed = any(
-            key in updates
-            for key in ("entity_types", "relation_types", "extraction_prompt")
-        )
         entity_types = updates.get("entity_types", current.entity_types)
         relation_types = updates.get("relation_types", current.relation_types)
         if "FAQAnswer" not in entity_types:
@@ -6665,6 +6932,27 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 if _graph_clean_label(item, 80)
             )
         )
+        schema_changed = (
+            "entity_types" in updates and entity_types != current.entity_types
+        ) or (
+            "relation_types" in updates
+            and relation_types != current.relation_types
+        ) or (
+            "extraction_prompt" in updates
+            and updates["extraction_prompt"] != current.extraction_prompt
+        ) or (
+            "ai_extraction_strategy" in updates
+            and updates["ai_extraction_strategy"] != current.ai_extraction_strategy
+        ) or (
+            "ai_retry_max_tokens" in updates
+            and updates["ai_retry_max_tokens"] != current.ai_retry_max_tokens
+        ) or (
+            "ai_min_relations" in updates
+            and updates["ai_min_relations"] != current.ai_min_relations
+        ) or (
+            "ai_min_relation_types" in updates
+            and updates["ai_min_relation_types"] != current.ai_min_relation_types
+        )
         next_schema_version = current.schema_version + (1 if schema_changed else 0)
         row = await db.query(
             """
@@ -6673,11 +6961,13 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                     workspace, enabled, auto_sync, graph_weight, min_similarity, max_hops,
                     precision_mode, precision_min_score, min_score_margin,
                     min_category_margin, min_evidence_sources, llm_min_confidence,
-                    entity_types, relation_types, extraction_prompt, schema_version
+                    entity_types, relation_types, extraction_prompt,
+                    ai_extraction_strategy, ai_retry_max_tokens, ai_min_relations,
+                    ai_min_relation_types, schema_version
                 )
             VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                $13::jsonb, $14::jsonb, $15, $16
+                $13::jsonb, $14::jsonb, $15, $16, $17, $18, $19, $20
             )
             ON CONFLICT (workspace)
             DO UPDATE SET
@@ -6695,12 +6985,18 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 entity_types = EXCLUDED.entity_types,
                 relation_types = EXCLUDED.relation_types,
                 extraction_prompt = EXCLUDED.extraction_prompt,
+                ai_extraction_strategy = EXCLUDED.ai_extraction_strategy,
+                ai_retry_max_tokens = EXCLUDED.ai_retry_max_tokens,
+                ai_min_relations = EXCLUDED.ai_min_relations,
+                ai_min_relation_types = EXCLUDED.ai_min_relation_types,
                 schema_version = EXCLUDED.schema_version,
                 update_time = NOW()
             RETURNING workspace, enabled, auto_sync, graph_weight, min_similarity, max_hops,
                       precision_mode, precision_min_score, min_score_margin,
                       min_category_margin, min_evidence_sources, llm_min_confidence,
-                      entity_types, relation_types, extraction_prompt, schema_version,
+                      entity_types, relation_types, extraction_prompt,
+                      ai_extraction_strategy, ai_retry_max_tokens, ai_min_relations,
+                      ai_min_relation_types, schema_version,
                       create_time, update_time
             """,
             [
@@ -6719,6 +7015,14 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 _json_list(entity_types),
                 _json_list(relation_types),
                 updates.get("extraction_prompt", current.extraction_prompt),
+                updates.get(
+                    "ai_extraction_strategy", current.ai_extraction_strategy
+                ),
+                updates.get("ai_retry_max_tokens", current.ai_retry_max_tokens),
+                updates.get("ai_min_relations", current.ai_min_relations),
+                updates.get(
+                    "ai_min_relation_types", current.ai_min_relation_types
+                ),
                 next_schema_version,
             ],
         )
@@ -9453,6 +9757,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                             "You help FAQ operators add short representative questions, keywords, and synonyms. "
                             "Do not create final answer content."
                         ),
+                        _llm_purpose="knowledge_structure",
                     )
                     seen = {_normalise_text(item.text) for item in existing_guidance + suggestions}
                     allowed_types = {"question", "keyword", "synonym", "negative_keyword", "note"}

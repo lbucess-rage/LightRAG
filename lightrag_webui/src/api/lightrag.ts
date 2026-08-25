@@ -993,6 +993,171 @@ export const resetAllPrompts = async (): Promise<PromptResetResponse> => {
   return response.data
 }
 
+// LLM Profile Types
+export type LLMProfile = {
+  profile_id: string
+  name: string
+  description: string | null
+  provider: 'openai_compatible'
+  base_url: string
+  model: string
+  api_key_configured: boolean
+  timeout_seconds: number
+  context_window: number
+  max_tokens: number
+  temperature: number
+  top_p: number
+  presence_penalty: number
+  thinking_enabled: boolean
+  supports_thinking: boolean
+  supports_tools: boolean
+  supports_structured_output: boolean
+  supports_vision: boolean
+  verify_tls: boolean
+  extra_options: Record<string, any>
+  is_active: boolean
+  create_time?: string | null
+  update_time?: string | null
+}
+
+export type LLMProfileCreateRequest = Omit<LLMProfile, 'profile_id' | 'api_key_configured' | 'create_time' | 'update_time'> & {
+  profile_id?: string
+  api_key?: string | null
+}
+
+export type LLMProfileUpdateRequest = Partial<Omit<LLMProfileCreateRequest, 'profile_id'>> & {
+  clear_api_key?: boolean
+}
+
+export type LLMProfileProbeResult = {
+  status: 'ok' | 'failed' | 'not_supported' | 'skipped'
+  status_code?: number | null
+  detail?: string | null
+}
+
+export type LLMProfileTestRequest = {
+  prompt: string
+  thinking_enabled?: boolean
+  image_url?: string | null
+  max_tokens?: number
+}
+
+export type LLMProfileTestResponse = {
+  success: boolean
+  profile_id: string
+  model: string
+  endpoint: string
+  latency_ms: number
+  health: LLMProfileProbeResult
+  models: LLMProfileProbeResult
+  model_found?: boolean | null
+  content?: string | null
+  reasoning_detected: boolean
+  reasoning_length: number
+  vision_requested: boolean
+  thinking_enabled: boolean
+  usage?: Record<string, any> | null
+  error?: string | null
+}
+
+export type WorkspaceLLMPurpose =
+  | 'knowledge_ingestion'
+  | 'knowledge_structure'
+  | 'schema_design'
+  | 'search_answer'
+  | 'faq_selection'
+  | 'multimodal'
+
+export type WorkspaceLLMPolicy = {
+  workspace_id: string
+  purpose: WorkspaceLLMPurpose
+  profile_id: string
+  profile_name: string
+  profile_model: string
+  thinking_mode: 'inherit' | 'enabled' | 'disabled'
+  timeout_seconds?: number | null
+  max_tokens?: number | null
+  temperature?: number | null
+  top_p?: number | null
+  presence_penalty?: number | null
+  response_format?: 'json_object' | null
+  fallback_profile_id?: string | null
+  fallback_profile_name?: string | null
+  extra_options: Record<string, any>
+  update_time?: string | null
+}
+
+export type WorkspaceLLMPolicyUpsert = Pick<
+  WorkspaceLLMPolicy,
+  | 'purpose'
+  | 'profile_id'
+  | 'thinking_mode'
+  | 'timeout_seconds'
+  | 'max_tokens'
+  | 'temperature'
+  | 'top_p'
+  | 'presence_penalty'
+  | 'response_format'
+  | 'fallback_profile_id'
+  | 'extra_options'
+>
+
+export const getLLMProfiles = async (): Promise<LLMProfile[]> => {
+  const response = await axiosInstance.get('/llm-profiles')
+  return response.data
+}
+
+export const createLLMProfile = async (request: LLMProfileCreateRequest): Promise<LLMProfile> => {
+  const response = await axiosInstance.post('/llm-profiles', request)
+  return response.data
+}
+
+export const updateLLMProfile = async (
+  profileId: string,
+  request: LLMProfileUpdateRequest
+): Promise<LLMProfile> => {
+  const response = await axiosInstance.put(`/llm-profiles/${encodeURIComponent(profileId)}`, request)
+  return response.data
+}
+
+export const deleteLLMProfile = async (profileId: string): Promise<void> => {
+  await axiosInstance.delete(`/llm-profiles/${encodeURIComponent(profileId)}`)
+}
+
+export const testLLMProfile = async (
+  profileId: string,
+  request: LLMProfileTestRequest
+): Promise<LLMProfileTestResponse> => {
+  const response = await axiosInstance.post(`/llm-profiles/${encodeURIComponent(profileId)}/test`, request)
+  return response.data
+}
+
+export const getWorkspaceLLMPolicies = async (
+  workspaceId: string
+): Promise<WorkspaceLLMPolicy[]> => {
+  const response = await axiosInstance.get(
+    `/llm-profiles/workspaces/${encodeURIComponent(workspaceId)}/policies`
+  )
+  return response.data
+}
+
+export const updateWorkspaceLLMPolicies = async (
+  workspaceId: string,
+  policies: WorkspaceLLMPolicyUpsert[]
+): Promise<WorkspaceLLMPolicy[]> => {
+  const response = await axiosInstance.put(
+    `/llm-profiles/workspaces/${encodeURIComponent(workspaceId)}/policies`,
+    { policies }
+  )
+  return response.data
+}
+
+export const resetWorkspaceLLMPolicies = async (workspaceId: string): Promise<void> => {
+  await axiosInstance.delete(
+    `/llm-profiles/workspaces/${encodeURIComponent(workspaceId)}/policies`
+  )
+}
+
 // User Prompt Template Types
 export type UserPromptTemplate = {
   template_id: string
@@ -2336,6 +2501,10 @@ export type AnswerGraphConfig = {
   entity_types: string[]
   relation_types: string[]
   extraction_prompt: string
+  ai_extraction_strategy: 'fast' | 'adaptive' | 'deep'
+  ai_retry_max_tokens: number
+  ai_min_relations: number
+  ai_min_relation_types: number
   schema_version: number
   create_time?: string | null
   update_time?: string | null
@@ -2839,7 +3008,7 @@ export const getAnswerGraphStatus = async (): Promise<AnswerGraphStatus> => {
 
 export const previewAnswerGraph = async (
   answerId: string,
-  useLlm = false
+  useLlm = true
 ): Promise<AnswerGraphProjection> => {
   const response = await axiosInstance.post('/api/answers/graph/preview', {
     answer_id: answerId,

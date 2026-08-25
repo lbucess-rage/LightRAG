@@ -355,7 +355,7 @@ async def _summarize_descriptions(
     # Use LLM function with cache (higher priority for summary generation)
     summary, _ = await use_llm_func_with_cache(
         use_prompt,
-        use_llm_func,
+        partial(use_llm_func, _llm_purpose="knowledge_ingestion"),
         llm_response_cache=llm_response_cache,
         cache_type="summary",
     )
@@ -3030,7 +3030,7 @@ async def extract_entities(
 
         final_result, timestamp = await use_llm_func_with_cache(
             entity_extraction_user_prompt,
-            use_llm_func,
+            partial(use_llm_func, _llm_purpose="knowledge_ingestion"),
             system_prompt=entity_extraction_system_prompt,
             llm_response_cache=llm_response_cache,
             cache_type="extract",
@@ -3056,7 +3056,7 @@ async def extract_entities(
         if entity_extract_max_gleaning > 0:
             glean_result, timestamp = await use_llm_func_with_cache(
                 entity_continue_extraction_user_prompt,
-                use_llm_func,
+                partial(use_llm_func, _llm_purpose="knowledge_ingestion"),
                 system_prompt=entity_extraction_system_prompt,
                 llm_response_cache=llm_response_cache,
                 history_messages=history,
@@ -3381,6 +3381,7 @@ async def kg_query(
             history_messages=query_param.conversation_history,
             enable_cot=True,
             stream=query_param.stream,
+            _llm_purpose="search_answer",
         )
 
         if hashing_kv and hashing_kv.global_config.get("enable_llm_cache"):
@@ -3524,7 +3525,11 @@ async def extract_keywords_only(
         # Apply higher priority (5) to query relation LLM function
         use_model_func = partial(use_model_func, _priority=5)
 
-    result = await use_model_func(kw_prompt, keyword_extraction=True)
+    result = await use_model_func(
+        kw_prompt,
+        keyword_extraction=True,
+        _llm_purpose="search_answer",
+    )
 
     # 5. Parse out JSON from the LLM response
     result = remove_think_tags(result)
@@ -5272,6 +5277,7 @@ async def naive_query(
             history_messages=query_param.conversation_history,
             enable_cot=True,
             stream=query_param.stream,
+            _llm_purpose="search_answer",
         )
 
         if hashing_kv and hashing_kv.global_config.get("enable_llm_cache"):

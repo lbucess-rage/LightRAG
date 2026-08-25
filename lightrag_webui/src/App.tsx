@@ -23,6 +23,7 @@ import SchemaManager from '@/features/SchemaManager'
 import RetrievalTesting from '@/features/RetrievalTesting'
 import ApiSite from '@/features/ApiSite'
 import PromptSettings from '@/features/PromptSettings'
+import LLMProfileSettings from '@/features/LLMProfileSettings'
 import WorkspaceManagement from '@/features/WorkspaceManagement'
 import AnswerLibrary from '@/features/AnswerLibrary'
 import AnswerCreation from '@/features/AnswerCreation'
@@ -370,6 +371,11 @@ function App() {
                 {canShowTab('prompts') && (
                   <TabsContent value="prompts" className="absolute top-0 right-0 bottom-0 left-0 overflow-auto">
                     <PromptSettings />
+                  </TabsContent>
+                )}
+                {canShowTab('llm-settings') && (
+                  <TabsContent value="llm-settings" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
+                    <LLMProfileSettings />
                   </TabsContent>
                 )}
                 {canShowTab('workspaces') && (

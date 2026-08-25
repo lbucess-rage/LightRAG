@@ -338,10 +338,20 @@ def test_resolve_allowed_refs_filters_by_category(monkeypatch):
 def test_resolve_candidate_scope_reports_expired_exclusions(monkeypatch):
     now = datetime.now(timezone.utc)
 
+    async def fake_descendants(tenant_id, category_ids):
+        assert tenant_id == "default"
+        assert category_ids == ["cat-filter"]
+        return ["cat-filter"]
+
     class FakeDb:
         async def fetch(self, query, *params):
-            assert "i.category_id" not in query
-            assert params == ("kevcs", "kevcs_faq_pair_20260609_145749", "default")
+            assert "i.category_id = ANY($4::text[])" in query
+            assert params == (
+                "kevcs",
+                "kevcs_faq_pair_20260609_145749",
+                "default",
+                ["cat-filter"],
+            )
             return [
                 {
                     "item_id": "item-valid-doc",
@@ -385,12 +395,13 @@ def test_resolve_candidate_scope_reports_expired_exclusions(monkeypatch):
                 },
             ]
 
+    monkeypatch.setattr(search_service, "_category_descendants", fake_descendants)
     monkeypatch.setattr(search_service, "db", FakeDb())
 
     scope = asyncio.run(
         resolve_candidate_scope(
             scope=WorkspaceScope("default", "kevcs", "kevcs_faq_pair_20260609_145749"),
-            category_ids=[],
+            category_ids=["cat-filter"],
         )
     )
 
@@ -400,6 +411,27 @@ def test_resolve_candidate_scope_reports_expired_exclusions(monkeypatch):
     assert scope.eligibility["faq"]["excluded_by_reason"]["inactive"] == 1
     assert scope.eligibility["faq"]["excluded_by_reason"]["not_started"] == 1
     assert scope.eligibility["kms"]["excluded_items"][0]["title"] == "만료 문서"
+
+
+def test_resolve_candidate_scope_uses_full_workspace_without_category(monkeypatch):
+    class FailDb:
+        async def fetch(self, query, *params):
+            raise AssertionError("workspace-wide scope must not require mapped knowledge refs")
+
+    monkeypatch.setattr(search_service, "db", FailDb())
+
+    scope = asyncio.run(
+        resolve_candidate_scope(
+            scope=WorkspaceScope("tenant-1", "base", "faq-helpdesk"),
+            category_ids=[],
+        )
+    )
+
+    assert scope.allowed_doc_ids is None
+    assert scope.allowed_answer_ids is None
+    assert scope.eligibility["scope_mode"] == "workspace"
+    assert scope.eligibility["kms"]["allowed_count"] is None
+    assert scope.eligibility["faq"]["allowed_count"] is None
 
 
 def test_query_param_allowed_doc_ids_is_optional_and_backward_compatible():

@@ -208,6 +208,17 @@ async def resolve_candidate_scope(
     scope: WorkspaceScope,
     category_ids: list[str],
 ) -> CandidateScope:
+    if not category_ids:
+        eligibility = _empty_eligibility([], [])
+        eligibility["scope_mode"] = "workspace"
+        eligibility["kms"]["allowed_count"] = None
+        eligibility["faq"]["allowed_count"] = None
+        return CandidateScope(
+            allowed_doc_ids=None,
+            allowed_answer_ids=None,
+            eligibility=eligibility,
+        )
+
     expanded_category_ids = await _category_descendants(scope.tenant_id, category_ids) if category_ids else []
     params: list[Any] = [scope.kms_workspace, scope.faq_workspace, scope.tenant_id]
     category_filter = ""
@@ -272,6 +283,7 @@ async def resolve_candidate_scope(
 
     eligibility["kms"]["allowed_count"] = len(doc_ids)
     eligibility["faq"]["allowed_count"] = len(answer_ids)
+    eligibility["scope_mode"] = "category"
     return CandidateScope(
         allowed_doc_ids=sorted(doc_ids),
         allowed_answer_ids=sorted(answer_ids),

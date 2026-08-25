@@ -1299,6 +1299,8 @@ class PostgreSQLDB:
                 "LIGHTRAG_WORKSPACES",       # PK: workspace_id (no 'workspace' or 'id' columns)
                 "LIGHTRAG_WORKSPACE_SCHEMA", # PK: workspace (no 'id' column)
                 "LIGHTRAG_TASKS",            # PK: workspace + task_id (no 'id' column)
+                "LIGHTRAG_LLM_PROFILES",     # PK: profile_id (global profile table)
+                "LIGHTRAG_WORKSPACE_LLM_POLICIES", # PK: workspace_id + purpose
             }
 
             # Create missing indexes
@@ -5956,6 +5958,65 @@ TABLES = {
                     create_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
                     update_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
                     CONSTRAINT LIGHTRAG_WORKSPACES_PK PRIMARY KEY (workspace_id)
+                    )"""
+    },
+    "LIGHTRAG_LLM_PROFILES": {
+        "ddl": """CREATE TABLE LIGHTRAG_LLM_PROFILES (
+                    profile_id VARCHAR(100) NOT NULL,
+                    name VARCHAR(255) NOT NULL,
+                    description TEXT,
+                    provider VARCHAR(50) NOT NULL DEFAULT 'openai_compatible',
+                    base_url TEXT NOT NULL,
+                    model VARCHAR(255) NOT NULL,
+                    api_key_encrypted TEXT,
+                    timeout_seconds INTEGER NOT NULL DEFAULT 120,
+                    context_window INTEGER NOT NULL DEFAULT 131072,
+                    max_tokens INTEGER NOT NULL DEFAULT 2048,
+                    temperature FLOAT8 NOT NULL DEFAULT 0.7,
+                    top_p FLOAT8 NOT NULL DEFAULT 0.8,
+                    presence_penalty FLOAT8 NOT NULL DEFAULT 0.0,
+                    thinking_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                    supports_thinking BOOLEAN NOT NULL DEFAULT TRUE,
+                    supports_tools BOOLEAN NOT NULL DEFAULT FALSE,
+                    supports_structured_output BOOLEAN NOT NULL DEFAULT TRUE,
+                    supports_vision BOOLEAN NOT NULL DEFAULT FALSE,
+                    verify_tls BOOLEAN NOT NULL DEFAULT TRUE,
+                    extra_options JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    create_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
+                    update_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT LIGHTRAG_LLM_PROFILES_PK PRIMARY KEY (profile_id)
+                    )"""
+    },
+    "LIGHTRAG_WORKSPACE_LLM_POLICIES": {
+        "ddl": """CREATE TABLE LIGHTRAG_WORKSPACE_LLM_POLICIES (
+                    workspace_id VARCHAR(255) NOT NULL,
+                    purpose VARCHAR(64) NOT NULL,
+                    profile_id VARCHAR(100) NOT NULL,
+                    thinking_mode VARCHAR(16) NOT NULL DEFAULT 'inherit',
+                    timeout_seconds INTEGER,
+                    max_tokens INTEGER,
+                    temperature FLOAT8,
+                    top_p FLOAT8,
+                    presence_penalty FLOAT8,
+                    response_format VARCHAR(32),
+                    fallback_profile_id VARCHAR(100),
+                    extra_options JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    create_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
+                    update_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT LIGHTRAG_WORKSPACE_LLM_POLICIES_PK
+                        PRIMARY KEY (workspace_id, purpose),
+                    CONSTRAINT LIGHTRAG_WORKSPACE_LLM_POLICIES_WORKSPACE_FK
+                        FOREIGN KEY (workspace_id) REFERENCES LIGHTRAG_WORKSPACES(workspace_id)
+                        ON DELETE CASCADE,
+                    CONSTRAINT LIGHTRAG_WORKSPACE_LLM_POLICIES_PROFILE_FK
+                        FOREIGN KEY (profile_id) REFERENCES LIGHTRAG_LLM_PROFILES(profile_id)
+                        ON DELETE RESTRICT,
+                    CONSTRAINT LIGHTRAG_WORKSPACE_LLM_POLICIES_FALLBACK_FK
+                        FOREIGN KEY (fallback_profile_id) REFERENCES LIGHTRAG_LLM_PROFILES(profile_id)
+                        ON DELETE SET NULL,
+                    CONSTRAINT LIGHTRAG_WORKSPACE_LLM_POLICIES_THINKING_CHECK
+                        CHECK (thinking_mode IN ('inherit', 'enabled', 'disabled'))
                     )"""
     },
     "LIGHTRAG_WORKSPACE_SCHEMA": {
