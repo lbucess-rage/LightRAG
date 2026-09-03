@@ -5,12 +5,14 @@ import {
   BookOpenIcon,
   CheckIcon,
   ChevronRightIcon,
+  CircleHelpIcon,
   DownloadIcon,
   ExternalLinkIcon,
   FilterIcon,
   FileTextIcon,
   ImageIcon,
   InfoIcon,
+  LanguagesIcon,
   RotateCcwIcon,
   SearchIcon,
   SlidersHorizontalIcon,
@@ -19,10 +21,10 @@ import {
   XIcon
 } from 'lucide-react'
 import { api } from '@/api/client'
-import WorkspaceSelect from '@/components/WorkspaceSelect'
+import WorkspaceScopeSelect from '@/components/WorkspaceScopeSelect'
 import Button from '@/components/ui/Button'
 import { RelatedHelp } from '@/features/Help'
-import { canChooseWorkspace, resolveEffectiveWorkspaceScope } from '@/lib/workspaceAccess'
+import { resolveEffectiveWorkspaceScope } from '@/lib/workspaceAccess'
 import { useAuthStore } from '@/stores/auth'
 import { useWorkspaceScopeStore } from '@/stores/workspaceScope'
 
@@ -48,6 +50,16 @@ type KmsSearchOptions = {
   enable_rerank: boolean
 }
 
+type FaqRetrievalMode = 'keyword' | 'vector' | 'hybrid' | 'graph_hybrid' | 'llm_rerank'
+
+type FaqSearchOptions = {
+  retrieval_mode: FaqRetrievalMode
+  selection_policy: 'workspace' | 'coverage' | 'precision'
+  top_k: number
+  min_score: number
+  include_candidates: boolean
+}
+
 type ReferencePreviewState = {
   kind: 'document' | 'board'
   title: string
@@ -67,6 +79,14 @@ const DEFAULT_KMS_OPTIONS: KmsSearchOptions = {
   include_chunk_content: true,
   highlight_entities: true,
   enable_rerank: true
+}
+
+const DEFAULT_FAQ_OPTIONS: FaqSearchOptions = {
+  retrieval_mode: 'graph_hybrid',
+  selection_policy: 'workspace',
+  top_k: 5,
+  min_score: 0.18,
+  include_candidates: true
 }
 
 const queryModeOptions: Array<{ value: QueryMode; label: string }> = [
@@ -91,6 +111,30 @@ function responseFormatLabel(value: string) {
   return responseFormatOptions.find((option) => option.value === value)?.label || value
 }
 
+function faqRetrievalModeLabel(value: string) {
+  const labels: Record<string, string> = {
+    keyword: '키워드',
+    vector: '벡터',
+    hybrid: '키워드+벡터',
+    graph_hybrid: '그래프 결합',
+    llm_rerank: 'LLM ID 선택'
+  }
+  return labels[value] || value
+}
+
+function faqFallbackReasonLabel(value: string) {
+  const labels: Record<string, string> = {
+    graph_disabled: '워크스페이스에서 그래프를 사용하지 않음',
+    graph_unavailable: '그래프 저장소를 사용할 수 없음',
+    graph_query_failed: '그래프 조회 실패',
+    graph_no_nodes: '질문과 관련된 그래프 노드를 찾지 못함',
+    graph_below_similarity: '그래프 유사도가 기준에 미달함',
+    graph_no_answers: '그래프 경로에서 연결된 FAQ를 찾지 못함',
+    graph_stale: '그래프가 현재 FAQ 버전과 일치하지 않음'
+  }
+  return labels[value] || value
+}
+
 function categoryLabel(category: Category) {
   return category.path.split('/').filter(Boolean).join(' > ') || category.name
 }
@@ -110,6 +154,92 @@ function faqTitle(item: any) {
 
 function faqBody(item: any) {
   return item.response || item.body || item.answer?.body || item.answer?.approved_summary || item.approved_summary || '본문이 없습니다.'
+}
+
+function faqAssets(item: any) {
+  if (Array.isArray(item?.assets)) return item.assets
+  if (Array.isArray(item?.answer?.assets)) return item.answer.assets
+  return []
+}
+
+function faqAssetUrl(asset: any) {
+  if (asset.storage_type === 'external' || asset.storage_type === 's3') {
+    return asset.content_url || asset.storage_uri || ''
+  }
+  if (!asset.answer_id || !asset.asset_id || !asset.workspace) return ''
+  return (
+    `/api/knowledge/faq-answers/${encodeURIComponent(asset.answer_id)}` +
+    `/assets/${encodeURIComponent(asset.asset_id)}/content` +
+    `?faq_workspace=${encodeURIComponent(asset.workspace)}`
+  )
+}
+
+function FaqAssetGallery({ assets }: { assets: any[] }) {
+  if (assets.length === 0) return null
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+        gap: 10,
+        marginTop: 12
+      }}
+    >
+      {assets.map((asset) => {
+        const url = faqAssetUrl(asset)
+        const label = asset.caption || asset.file_name || '첨부 자료'
+        return (
+          <div
+            key={asset.asset_id}
+            style={{
+              overflow: 'hidden',
+              border: '1px solid var(--line)',
+              borderRadius: 7,
+              background: 'var(--bg-card)'
+            }}
+          >
+            {asset.asset_type === 'image' && url && (
+              <div style={{ minHeight: 150, background: 'var(--bg-subtle)', display: 'grid', placeItems: 'center' }}>
+                <img
+                  src={url}
+                  alt={asset.alt_text || label}
+                  style={{ display: 'block', width: '100%', maxHeight: 320, objectFit: 'contain' }}
+                />
+              </div>
+            )}
+            {asset.asset_type === 'video' && url && (
+              <video controls preload="metadata" style={{ display: 'block', width: '100%', maxHeight: 320, background: '#000' }}>
+                <source src={url} type={asset.mime_type || undefined} />
+              </video>
+            )}
+            {asset.asset_type === 'audio' && url && (
+              <div style={{ padding: 12, background: 'var(--bg-subtle)' }}>
+                <audio controls preload="metadata" style={{ width: '100%' }}>
+                  <source src={url} type={asset.mime_type || undefined} />
+                </audio>
+              </div>
+            )}
+            {asset.asset_type === 'table' && asset.content_text && (
+              <pre style={{ maxHeight: 240, overflow: 'auto', margin: 0, padding: 12, fontSize: 12, whiteSpace: 'pre-wrap' }}>
+                {asset.content_text}
+              </pre>
+            )}
+            <div className="row" style={{ gap: 8, padding: '9px 11px', borderTop: '1px solid var(--line)' }}>
+              <span className="grow" style={{ minWidth: 0, fontSize: 12.5, fontWeight: 600, overflowWrap: 'anywhere' }}>
+                {label}
+              </span>
+              {url && (
+                <a href={url} target="_blank" rel="noreferrer" className="badge outline" aria-label={`${label} 열기`}>
+                  <ExternalLinkIcon className="size-3" />
+                  열기
+                </a>
+              )}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
 }
 
 function faqCandidateList(item: any) {
@@ -998,6 +1128,7 @@ function FaqResult({ item, rank }: { item: any; rank: number }) {
   const candidates = faqCandidateList(item)
   const [showCandidates, setShowCandidates] = useState(false)
   const selectedAnswerId = item.answer_id || item.answer?.answer_id
+  const assets = faqAssets(item)
 
   return (
     <div className="card" style={{ padding: 'var(--pad-card)' }}>
@@ -1027,6 +1158,7 @@ function FaqResult({ item, rank }: { item: any; rank: number }) {
           <div className="rich" style={{ marginTop: 8 }}>
             <p>{faqBody(item)}</p>
           </div>
+          <FaqAssetGallery assets={assets} />
           <div className="row wrap" style={{ gap: 12, marginTop: 12 }}>
             {pct !== null && (
               <div className="row" style={{ gap: 8 }}>
@@ -1071,6 +1203,9 @@ function FaqResult({ item, rank }: { item: any; rank: number }) {
                       const candidatePct = scorePercent(candidate)
                       const candidateId = faqCandidateId(candidate, candidateIndex)
                       const guidance = faqCandidateGuidance(candidate)
+                      const graphEvidence = Array.isArray(candidate.graph_evidence)
+                        ? candidate.graph_evidence
+                        : []
                       const isSelected = selectedAnswerId && selectedAnswerId === candidateId
 
                       return (
@@ -1098,6 +1233,19 @@ function FaqResult({ item, rank }: { item: any; rank: number }) {
                                 <span key={`${candidateId}-guide-${guideIndex}`} className="badge gray">
                                   {safeString(guide)}
                                 </span>
+                              ))}
+                            </div>
+                          )}
+                          {graphEvidence.length > 0 && (
+                            <div className="faq-graph-evidence">
+                              <div className="eyebrow">그래프 연결 근거</div>
+                              {graphEvidence.slice(0, 3).map((evidence: any, evidenceIndex: number) => (
+                                <div key={`${candidateId}-graph-${evidenceIndex}`} className="reference-summary-meta">
+                                  {(Array.isArray(evidence.path) ? evidence.path : []).join(' → ')}
+                                  {Array.isArray(evidence.relation_types) && evidence.relation_types.length > 0
+                                    ? ` · ${evidence.relation_types.join(', ')}`
+                                    : ''}
+                                </div>
                               ))}
                             </div>
                           )}
@@ -1178,10 +1326,11 @@ export default function IntegratedSearch() {
   const [query, setQuery] = useState('')
   const [categories, setCategories] = useState<Category[]>([])
   const [categoryIds, setCategoryIds] = useState<string[]>([])
+  const tenantId = useWorkspaceScopeStore((state) => state.tenantId)
+  const tenantName = useWorkspaceScopeStore((state) => state.tenantName)
   const kmsWorkspace = useWorkspaceScopeStore((state) => state.kmsWorkspace)
   const faqWorkspace = useWorkspaceScopeStore((state) => state.faqWorkspace)
-  const setKmsWorkspace = useWorkspaceScopeStore((state) => state.setKmsWorkspace)
-  const setFaqWorkspace = useWorkspaceScopeStore((state) => state.setFaqWorkspace)
+  const setTenantScope = useWorkspaceScopeStore((state) => state.setTenantScope)
   const [layout, setLayout] = useState<'rail' | 'overview' | 'tabs'>('rail')
   const [tab, setTab] = useState<'all' | 'ai' | 'faq'>('all')
   const [includeGenerative, setIncludeGenerative] = useState(true)
@@ -1190,25 +1339,32 @@ export default function IntegratedSearch() {
   const [showCategoryPicker, setShowCategoryPicker] = useState(false)
   const [categorySearch, setCategorySearch] = useState('')
   const [kmsOptions, setKmsOptions] = useState<KmsSearchOptions>(DEFAULT_KMS_OPTIONS)
+  const [faqOptions, setFaqOptions] = useState<FaqSearchOptions>(DEFAULT_FAQ_OPTIONS)
   const [result, setResult] = useState<any>(null)
   const [loading, setLoading] = useState(false)
-  const canChooseWorkspaceForUser = canChooseWorkspace(user?.role)
-  const { kmsWorkspace: effectiveKmsWorkspace, faqWorkspace: effectiveFaqWorkspace } = resolveEffectiveWorkspaceScope({
+  const {
+    tenantId: effectiveTenantId,
+    tenantName: effectiveTenantName,
+    kmsWorkspace: effectiveKmsWorkspace,
+    faqWorkspace: effectiveFaqWorkspace
+  } = resolveEffectiveWorkspaceScope({
     role: user?.role,
+    selectedTenantId: tenantId,
+    selectedTenantName: tenantName,
     selectedKmsWorkspace: kmsWorkspace,
     selectedFaqWorkspace: faqWorkspace,
+    userTenantId: user?.tenant_id,
+    userTenantName: user?.tenant_name,
     userKmsWorkspace: user?.kms_workspace,
     userFaqWorkspace: user?.faq_workspace
   })
 
   useEffect(() => {
-    api.get('/api/categories').then((response) => setCategories(response.data.categories || []))
-  }, [])
-
-  useEffect(() => {
-    if (effectiveKmsWorkspace !== kmsWorkspace) setKmsWorkspace(effectiveKmsWorkspace)
-    if (effectiveFaqWorkspace !== faqWorkspace) setFaqWorkspace(effectiveFaqWorkspace)
-  }, [effectiveFaqWorkspace, effectiveKmsWorkspace, faqWorkspace, kmsWorkspace, setFaqWorkspace, setKmsWorkspace])
+    setCategoryIds([])
+    api
+      .get('/api/categories', { params: { tenant_id: effectiveTenantId } })
+      .then((response) => setCategories(response.data.categories || []))
+  }, [effectiveTenantId])
 
   const categoryMap = useMemo(
     () => new Map(categories.map((category) => [category.category_id, category])),
@@ -1249,6 +1405,7 @@ export default function IntegratedSearch() {
       const response = await api.post('/api/search/integrated', {
         query,
         category_ids: categoryIds,
+        tenant_id: effectiveTenantId,
         include_generative: includeGenerative,
         include_faq: includeFaq,
         kms_workspace: effectiveKmsWorkspace,
@@ -1257,6 +1414,11 @@ export default function IntegratedSearch() {
           ...kmsOptions,
           top_k: Number(kmsOptions.top_k) || DEFAULT_KMS_OPTIONS.top_k,
           chunk_top_k: Number(kmsOptions.chunk_top_k) || DEFAULT_KMS_OPTIONS.chunk_top_k
+        },
+        faq_options: {
+          ...faqOptions,
+          top_k: Number(faqOptions.top_k) || DEFAULT_FAQ_OPTIONS.top_k,
+          min_score: Number(faqOptions.min_score)
         }
       })
       setResult(response.data)
@@ -1266,6 +1428,8 @@ export default function IntegratedSearch() {
   }
 
   const faqResults = result?.faq_results || []
+  const faqMetadata = result?.faq_metadata || {}
+  const aliasExpansions = Array.isArray(faqMetadata.alias_expansions) ? faqMetadata.alias_expansions : []
   const hasResult = Boolean(result)
   const elapsedSeconds = result ? (Number(result.latency_ms || 0) / 1000).toFixed(2) : '0.00'
   const eligibilityNotice = <EligibilityNotice result={result} />
@@ -1276,7 +1440,72 @@ export default function IntegratedSearch() {
         <BookOpenIcon className="size-4" style={{ color: 'var(--fg-secondary)' }} />
         <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-primary)' }}>FAQ 답변</span>
         <span className="badge gray">{faqResults.length}건</span>
+        {faqMetadata.effective_retrieval_mode && (
+          <span className="badge outline">
+            실제 적용 {faqRetrievalModeLabel(faqMetadata.effective_retrieval_mode)}
+          </span>
+        )}
       </div>
+      {faqMetadata.clarification_question && (
+        <div
+          className="row"
+          style={{
+            gap: 10,
+            alignItems: 'flex-start',
+            padding: '11px 12px',
+            border: '1px solid var(--warning)',
+            borderRadius: 'var(--radius-md)',
+            background: 'var(--warning-soft)',
+            color: 'var(--fg-primary)'
+          }}
+        >
+          <CircleHelpIcon className="size-4" style={{ flex: '0 0 auto', marginTop: 1, color: 'var(--warning)' }} />
+          <div style={{ minWidth: 0 }}>
+            <strong style={{ display: 'block', marginBottom: 3, fontSize: 12 }}>
+              답변을 정확히 찾으려면 확인이 필요합니다
+            </strong>
+            <span style={{ fontSize: 13, lineHeight: 1.5 }}>{faqMetadata.clarification_question}</span>
+          </div>
+        </div>
+      )}
+      {faqMetadata.retrieval_fallback_reason && (
+        <div
+          className="row"
+          style={{
+            gap: 8,
+            padding: '9px 11px',
+            border: '1px solid var(--warning)',
+            borderRadius: 'var(--radius-md)',
+            background: 'var(--warning-soft)',
+            color: 'var(--fg-primary)',
+            fontSize: 12.5
+          }}
+        >
+          <InfoIcon className="size-4" style={{ color: 'var(--warning)' }} />
+          그래프를 사용할 수 없어 키워드+벡터 검색으로 처리했습니다.{' '}
+          ({faqFallbackReasonLabel(faqMetadata.retrieval_fallback_reason)})
+        </div>
+      )}
+      {aliasExpansions.length > 0 && (
+        <div
+          className="row wrap"
+          style={{
+            gap: 7,
+            padding: '10px 12px',
+            border: '1px solid var(--accent)',
+            borderRadius: 'var(--radius-md)',
+            background: 'var(--accent-soft)'
+          }}
+        >
+          <LanguagesIcon className="size-4" style={{ color: 'var(--accent)' }} />
+          <strong style={{ fontSize: 12 }}>적용된 공통 용어</strong>
+          {aliasExpansions.map((expansion: any, index: number) => (
+            <span key={`${expansion.matched_term}-${index}`} className="badge blue">
+              {expansion.matched_term} → {expansion.canonical_term}
+            </span>
+          ))}
+        </div>
+      )}
       {faqResults.length ? (
         faqResults.map((item: any, index: number) => (
           <FaqResult key={item.answer_id || item.id || index} item={item} rank={index + 1} />
@@ -1330,28 +1559,21 @@ export default function IntegratedSearch() {
           </div>
         </div>
         <div className="card-b">
-          <div className="col" style={{ gap: 10 }}>
-            <label className="field">
-              <span>KMS 워크스페이스</span>
-              <WorkspaceSelect
-                value={effectiveKmsWorkspace}
-                mode="kms"
-                onChange={setKmsWorkspace}
-                placeholder="KMS 워크스페이스"
-                disabled={!canChooseWorkspaceForUser}
-              />
-            </label>
-            <label className="field">
-              <span>FAQ 워크스페이스</span>
-              <WorkspaceSelect
-                value={effectiveFaqWorkspace}
-                mode="answer_catalog"
-                onChange={setFaqWorkspace}
-                placeholder="FAQ 워크스페이스"
-                disabled={!canChooseWorkspaceForUser}
-              />
-            </label>
-          </div>
+          <WorkspaceScopeSelect
+            role={user?.role}
+            tenantId={effectiveTenantId}
+            tenantName={effectiveTenantName}
+            kmsWorkspace={effectiveKmsWorkspace}
+            faqWorkspace={effectiveFaqWorkspace}
+            onChange={(scope) =>
+              setTenantScope({
+                tenantId: scope.tenant_id,
+                tenantName: scope.name,
+                kmsWorkspace: scope.kms_workspace,
+                faqWorkspace: scope.faq_workspace
+              })
+            }
+          />
         </div>
       </div>
 
@@ -1460,7 +1682,15 @@ export default function IntegratedSearch() {
           <p>질문 하나로 생성형 AI 답변과 FAQ 답변을 함께 조회합니다.</p>
         </div>
         <div className="sp" />
-        <RelatedHelp topicIds={['HELP-SEARCH-001', 'HELP-SEARCH-002', 'HELP-SEARCH-003', 'HELP-SEARCH-004']} />
+        <RelatedHelp
+          topicIds={[
+            'HELP-SEARCH-001',
+            'HELP-SEARCH-002',
+            'HELP-SEARCH-003',
+            'HELP-SEARCH-004',
+            'HELP-SEARCH-005'
+          ]}
+        />
         <div className="seg">
           {[
             ['rail', '출처 패널'],
@@ -1615,6 +1845,11 @@ export default function IntegratedSearch() {
           <span className={kmsOptions.enable_rerank ? 'badge green' : 'badge gray'}>
             <span className="d" /> 리랭크
           </span>
+          {includeFaq && (
+            <span className="badge blue">
+              FAQ {faqOptions.retrieval_mode === 'graph_hybrid' ? '그래프 결합' : faqOptions.retrieval_mode}
+            </span>
+          )}
         </div>
 
         {showSearchSettings && (
@@ -1674,6 +1909,71 @@ export default function IntegratedSearch() {
                 onChange={(event) => updateKmsOption('chunk_top_k', Number(event.target.value))}
               />
             </label>
+            <label className="field">
+              <span>FAQ 조회 방식</span>
+              <select
+                className="select"
+                value={faqOptions.retrieval_mode}
+                onChange={(event) => setFaqOptions((current) => ({
+                  ...current,
+                  retrieval_mode: event.target.value as FaqRetrievalMode
+                }))}
+                disabled={!includeFaq}
+              >
+                <option value="graph_hybrid">그래프 결합 · 권장</option>
+                <option value="hybrid">키워드+벡터</option>
+                <option value="keyword">키워드</option>
+                <option value="vector">벡터</option>
+                <option value="llm_rerank">LLM 최종 선택</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>FAQ 답변 선택 기준</span>
+              <select
+                className="select"
+                value={faqOptions.selection_policy}
+                onChange={(event) => setFaqOptions((current) => ({
+                  ...current,
+                  selection_policy: event.target.value as FaqSearchOptions['selection_policy']
+                }))}
+                disabled={!includeFaq}
+              >
+                <option value="workspace">워크스페이스 설정</option>
+                <option value="precision">확실한 경우만 답변</option>
+                <option value="coverage">답변 제공 우선</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>FAQ 후보 수</span>
+              <input
+                className="input"
+                type="number"
+                min={1}
+                max={20}
+                value={faqOptions.top_k}
+                onChange={(event) => setFaqOptions((current) => ({
+                  ...current,
+                  top_k: Number(event.target.value)
+                }))}
+                disabled={!includeFaq}
+              />
+            </label>
+            <label className="field">
+              <span>FAQ 최소 점수</span>
+              <input
+                className="input"
+                type="number"
+                min={0}
+                max={1}
+                step={0.01}
+                value={faqOptions.min_score}
+                onChange={(event) => setFaqOptions((current) => ({
+                  ...current,
+                  min_score: Number(event.target.value)
+                }))}
+                disabled={!includeFaq}
+              />
+            </label>
             <label className="check" style={{ minHeight: 38 }}>
               <input
                 type="checkbox"
@@ -1709,7 +2009,10 @@ export default function IntegratedSearch() {
                 리랭크 활성화
               </label>
               <div className="grow" />
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setKmsOptions(DEFAULT_KMS_OPTIONS)}>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => {
+                setKmsOptions(DEFAULT_KMS_OPTIONS)
+                setFaqOptions(DEFAULT_FAQ_OPTIONS)
+              }}>
                 <RotateCcwIcon className="size-4" /> 기본값
               </button>
             </div>

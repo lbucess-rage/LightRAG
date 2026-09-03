@@ -64,6 +64,11 @@ export const helpTopicSummaries: Record<string, { title: string; summary: string
     title: '검색 후보 적용 내역 이해하기',
     summary: '유효기간이나 사용 여부 때문에 제외된 지식이 있는지 확인합니다.'
   },
+  'HELP-SEARCH-005': {
+    menu: '통합 검색',
+    title: 'FAQ 그래프 결합 검색과 공통 용어 이해하기',
+    summary: '기본 통합 검색에서 키워드, 벡터, FAQ 그래프와 승인된 공통 용어가 함께 적용되고 폴백 상태가 표시되는 방식을 확인합니다.'
+  },
   'HELP-KNOWLEDGE-001': {
     menu: '지식 관리',
     title: '지식 관리 화면 이해하기',
@@ -116,8 +121,8 @@ export const helpTopicSummaries: Record<string, { title: string; summary: string
   },
   'HELP-KNOWLEDGE-011': {
     menu: '지식 관리',
-    title: 'FAQ 답변 등록하기',
-    summary: '정해진 질문과 답변을 FAQ 후보로 등록합니다.'
+    title: 'FAQ 답변과 첨부 자료 등록하기',
+    summary: '정해진 질문과 답변을 등록하고 이미지, 영상, 음성, 표 또는 파일을 함께 제공합니다.'
   },
   'HELP-KNOWLEDGE-012': {
     menu: '지식 관리',
@@ -138,6 +143,21 @@ export const helpTopicSummaries: Record<string, { title: string; summary: string
     menu: '지식 관리',
     title: '지식 목록과 페이징 사용하기',
     summary: '지식 목록을 필터링하고 페이지 단위로 탐색합니다.'
+  },
+  'HELP-KNOWLEDGE-016': {
+    menu: '지식 관리',
+    title: 'Excel과 DB 표에서 FAQ 일괄 생성하기',
+    summary: '표의 각 행을 FAQ로 바꾸고 열 연결, ID 조회형 FAQ와 AI 힌트 보완을 설정합니다.'
+  },
+  'HELP-KNOWLEDGE-017': {
+    menu: '지식 관리',
+    title: 'FAQ 공통 용어와 AI 후보 관리하기',
+    summary: '동의어를 직접 등록하거나 AI가 찾은 후보를 승인해 여러 FAQ 검색에 함께 적용합니다.'
+  },
+  'HELP-KNOWLEDGE-018': {
+    menu: '지식 관리',
+    title: 'FAQ 그래프 구성과 그래프 결합 검색 사용하기',
+    summary: 'FAQ 연결 근거를 구성하고, 확실한 경우만 답변하도록 점수·근거·후보 차이 기준을 관리합니다.'
   },
   'HELP-CATEGORY-001': {
     menu: '카테고리',

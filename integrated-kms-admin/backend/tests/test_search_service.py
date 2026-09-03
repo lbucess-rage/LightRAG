@@ -12,11 +12,13 @@ from kms_admin.routers.knowledge import (
     _json_list,
     _text_file_sources,
 )
-from kms_admin.routers.search import EXTERNAL_CATEGORIES_SQL
+from kms_admin.routers import search as search_router
+from kms_admin.routers.search import EXTERNAL_CATEGORIES_SQL, IntegratedSearchRequest
 from kms_admin.search_service import (
     BRIEF_ANSWER_RESPONSE_TYPE,
     CandidateScope,
     WorkspaceScope,
+    build_faq_search_payload,
     build_kms_query_payload,
     extract_keywords,
     resolve_candidate_scope,
@@ -43,12 +45,79 @@ def test_build_kms_query_payload_uses_admin_defaults():
     assert payload["stream"] is False
 
 
+def test_build_faq_search_payload_defaults_to_graph_hybrid():
+    payload = build_faq_search_payload("카드 인증 실패")
+
+    assert payload == {
+        "query": "카드 인증 실패",
+        "include_candidates": True,
+        "retrieval_mode": "graph_hybrid",
+    }
+
+
+def test_build_faq_search_payload_preserves_caller_override():
+    payload = build_faq_search_payload(
+        "카드 인증 실패",
+        {"retrieval_mode": "hybrid", "top_k": 3},
+    )
+
+    assert payload["retrieval_mode"] == "hybrid"
+    assert payload["top_k"] == 3
+
+
 def test_external_categories_query_documents_valid_counts_and_active_filter():
     assert "valid_direct_knowledge_count" in EXTERNAL_CATEGORIES_SQL
     assert "valid_total_knowledge_count" in EXTERNAL_CATEGORIES_SQL
     assert "valid_from IS NULL OR valid_from <= NOW()" in EXTERNAL_CATEGORIES_SQL
     assert "valid_until IS NULL OR valid_until >= NOW()" in EXTERNAL_CATEGORIES_SQL
     assert "$2::boolean OR is_active = TRUE" in EXTERNAL_CATEGORIES_SQL
+
+
+def test_admin_integrated_search_resolves_registered_tenant_pair(monkeypatch):
+    class FakeDb:
+        async def fetchrow(self, query, *params):
+            assert params == ("tenant-1",)
+            return {
+                "tenant_id": "tenant-1",
+                "kms_workspace": "kms-1",
+                "faq_workspace": "faq-1",
+            }
+
+    monkeypatch.setattr(search_router, "db", FakeDb())
+    scope = asyncio.run(
+        search_router._internal_scope(
+            IntegratedSearchRequest(
+                query="문의",
+                tenant_id="tenant-1",
+                kms_workspace="stale-kms",
+                faq_workspace="stale-faq",
+            ),
+            {"role": "admin", "tenant_id": "admin-default"},
+        )
+    )
+
+    assert scope == WorkspaceScope("tenant-1", "kms-1", "faq-1")
+
+
+def test_non_admin_integrated_search_ignores_requested_workspace_override():
+    scope = asyncio.run(
+        search_router._internal_scope(
+            IntegratedSearchRequest(
+                query="문의",
+                tenant_id="other-tenant",
+                kms_workspace="other-kms",
+                faq_workspace="other-faq",
+            ),
+            {
+                "role": "manager",
+                "tenant_id": "tenant-1",
+                "kms_workspace": "kms-1",
+                "faq_workspace": "faq-1",
+            },
+        )
+    )
+
+    assert scope == WorkspaceScope("tenant-1", "kms-1", "faq-1")
 
 
 def test_admin_workspace_defaults_use_test_pair():
@@ -121,6 +190,68 @@ def test_integrated_search_trace_includes_workspace_scope(monkeypatch):
     assert result["trace"]["kms_workspace"] == "kevcs"
     assert result["trace"]["faq_workspace"] == "kevcs_faq_pair_20260609_145749"
     assert "eligibility" in result["trace"]
+
+
+def test_integrated_search_preserves_faq_alias_expansion_metadata(monkeypatch):
+    class FakeDb:
+        async def execute(self, query, *params):
+            return "INSERT 0 1"
+
+    class FakeLightRagClient:
+        async def request_json(self, method, path, *, workspace=None, json_body=None):
+            assert method == "POST"
+            assert path == "/api/answers/search"
+            assert workspace == "faq-helpdesk"
+            assert json_body["retrieval_mode"] == "graph_hybrid"
+            return {
+                "matched": True,
+                "matched_id": "ANS-TEAMS-1",
+                "confidence": 0.91,
+                "retrieval_mode": "graph_hybrid",
+                "requested_retrieval_mode": "graph_hybrid",
+                "effective_retrieval_mode": "graph_hybrid",
+                "graph_status": "graph_ready",
+                "selected_by": "graph_hybrid",
+                "alias_expansions": [
+                    {"source": "팀즈", "canonical": "Microsoft Teams"},
+                ],
+                "title": "Teams 연결 오류",
+            }
+
+    async def fake_candidate_scope(**_):
+        return CandidateScope(
+            allowed_doc_ids=[],
+            allowed_answer_ids=None,
+            eligibility={
+                "kms": {"allowed_count": 0, "excluded_count": 0, "excluded_by_reason": {}},
+                "faq": {"allowed_count": 1, "excluded_count": 0, "excluded_by_reason": {}},
+            },
+        )
+
+    monkeypatch.setattr(search_service, "db", FakeDb())
+    monkeypatch.setattr(search_service, "lightrag_client", FakeLightRagClient())
+    monkeypatch.setattr(search_service, "resolve_candidate_scope", fake_candidate_scope)
+
+    result = asyncio.run(
+        search_service.integrated_search(
+            actor_type="user",
+            actor_id="manager-1",
+            scope=WorkspaceScope("default", "kms-helpdesk", "faq-helpdesk"),
+            payload={
+                "query": "팀즈 연결이 안 돼요",
+                "include_generative": False,
+                "include_faq": True,
+            },
+        )
+    )
+
+    assert result["faq_metadata"]["matched_id"] == "ANS-TEAMS-1"
+    assert result["faq_metadata"]["effective_retrieval_mode"] == "graph_hybrid"
+    assert result["faq_metadata"]["graph_status"] == "graph_ready"
+    assert result["faq_metadata"]["alias_expansions"] == [
+        {"source": "팀즈", "canonical": "Microsoft Teams"}
+    ]
+    assert result["faq_results"][0]["title"] == "Teams 연결 오류"
 
 
 def test_integrated_search_stream_metadata_includes_workspace_scope(monkeypatch):
@@ -207,10 +338,20 @@ def test_resolve_allowed_refs_filters_by_category(monkeypatch):
 def test_resolve_candidate_scope_reports_expired_exclusions(monkeypatch):
     now = datetime.now(timezone.utc)
 
+    async def fake_descendants(tenant_id, category_ids):
+        assert tenant_id == "default"
+        assert category_ids == ["cat-filter"]
+        return ["cat-filter"]
+
     class FakeDb:
         async def fetch(self, query, *params):
-            assert "i.category_id" not in query
-            assert params == ("kevcs", "kevcs_faq_pair_20260609_145749", "default")
+            assert "i.category_id = ANY($4::text[])" in query
+            assert params == (
+                "kevcs",
+                "kevcs_faq_pair_20260609_145749",
+                "default",
+                ["cat-filter"],
+            )
             return [
                 {
                     "item_id": "item-valid-doc",
@@ -254,12 +395,13 @@ def test_resolve_candidate_scope_reports_expired_exclusions(monkeypatch):
                 },
             ]
 
+    monkeypatch.setattr(search_service, "_category_descendants", fake_descendants)
     monkeypatch.setattr(search_service, "db", FakeDb())
 
     scope = asyncio.run(
         resolve_candidate_scope(
             scope=WorkspaceScope("default", "kevcs", "kevcs_faq_pair_20260609_145749"),
-            category_ids=[],
+            category_ids=["cat-filter"],
         )
     )
 
@@ -269,6 +411,27 @@ def test_resolve_candidate_scope_reports_expired_exclusions(monkeypatch):
     assert scope.eligibility["faq"]["excluded_by_reason"]["inactive"] == 1
     assert scope.eligibility["faq"]["excluded_by_reason"]["not_started"] == 1
     assert scope.eligibility["kms"]["excluded_items"][0]["title"] == "만료 문서"
+
+
+def test_resolve_candidate_scope_uses_full_workspace_without_category(monkeypatch):
+    class FailDb:
+        async def fetch(self, query, *params):
+            raise AssertionError("workspace-wide scope must not require mapped knowledge refs")
+
+    monkeypatch.setattr(search_service, "db", FailDb())
+
+    scope = asyncio.run(
+        resolve_candidate_scope(
+            scope=WorkspaceScope("tenant-1", "base", "faq-helpdesk"),
+            category_ids=[],
+        )
+    )
+
+    assert scope.allowed_doc_ids is None
+    assert scope.allowed_answer_ids is None
+    assert scope.eligibility["scope_mode"] == "workspace"
+    assert scope.eligibility["kms"]["allowed_count"] is None
+    assert scope.eligibility["faq"]["allowed_count"] is None
 
 
 def test_query_param_allowed_doc_ids_is_optional_and_backward_compatible():

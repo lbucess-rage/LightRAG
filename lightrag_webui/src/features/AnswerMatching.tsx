@@ -2,33 +2,48 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import {
+  CheckIcon,
   ChevronDownIcon,
   ChevronUpIcon,
   GitBranchIcon,
   DatabaseIcon,
+  LanguagesIcon,
   Loader2Icon,
   PlusIcon,
   RefreshCwIcon,
   SearchIcon,
   SparklesIcon,
   Trash2Icon,
+  XIcon,
 } from 'lucide-react'
 
 import {
   AnswerGuidance,
   AnswerGuidanceType,
+  AnswerAliasGroup,
   AnswerItem,
   AnswerResolveResponse,
+  AnswerTermCandidate,
+  AnswerTermCandidateStatus,
   addAnswerGuidance,
+  analyzeAnswerTerms,
+  approveAnswerTermCandidate,
+  createAnswerAlias,
   deleteAnswerGuidance,
+  deleteAnswerAlias,
+  listAnswerAliases,
   listAnswerGuidance,
+  listAnswerTermCandidates,
   listAnswers,
   rebuildAnswerVectors,
+  rejectAnswerTermCandidate,
   resolveAnswer,
   suggestAnswerGuidance,
 } from '@/api/lightrag'
 import AnswerContentPreview from '@/components/answers/AnswerContentPreview'
+import AnswerAssetGallery from '@/components/answers/AnswerAssetGallery'
 import AnswerHelpButton from '@/components/answers/AnswerHelpButton'
+import TaskProgressPanel from '@/components/documents/TaskProgressPanel'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
 import Checkbox from '@/components/ui/Checkbox'
@@ -88,7 +103,7 @@ const getGuidanceHealth = (items: AnswerGuidance[] = []) => {
   return { level: 'ready', className: 'border-emerald-200 bg-emerald-50 text-emerald-700', labelKey: 'readyHints' }
 }
 
-export default function AnswerMatching() {
+export default function AnswerMatching({ embedded = false }: { embedded?: boolean }) {
   const { t } = useTranslation()
   const currentWorkspaceId = useWorkspaceStore.use.currentWorkspaceId()
   const resolveRequestIdRef = useRef(0)
@@ -105,11 +120,12 @@ export default function AnswerMatching() {
   const [weight, setWeight] = useState('1')
   const [filterType, setFilterType] = useState<'all' | AnswerGuidanceType>('all')
   const [onlyUnguided, setOnlyUnguided] = useState(false)
-  const [detailView, setDetailView] = useState<'selected' | 'all' | 'unguided'>('selected')
+  const [detailView, setDetailView] = useState<'selected' | 'all' | 'unguided' | 'aliases'>('selected')
   const [query, setQuery] = useState('')
   const [includeDrafts, setIncludeDrafts] = useState(true)
   const [minScore, setMinScore] = useState('0.18')
-  const [retrievalMode, setRetrievalMode] = useState<'keyword' | 'hybrid' | 'llm_rerank'>('keyword')
+  const [retrievalMode, setRetrievalMode] = useState<'keyword' | 'hybrid' | 'graph_hybrid' | 'llm_rerank'>('hybrid')
+  const [selectionPolicy, setSelectionPolicy] = useState<'workspace' | 'coverage' | 'precision'>('workspace')
   const [result, setResult] = useState<AnswerResolveResponse | null>(null)
   const [isTestResultOpen, setIsTestResultOpen] = useState(false)
   const [showSelectedAnswerContent, setShowSelectedAnswerContent] = useState(false)
@@ -120,6 +136,29 @@ export default function AnswerMatching() {
   const [isTesting, setIsTesting] = useState(false)
   const [isSuggesting, setIsSuggesting] = useState(false)
   const [isRebuildingVectors, setIsRebuildingVectors] = useState(false)
+  const [aliasGroups, setAliasGroups] = useState<AnswerAliasGroup[]>([])
+  const [canonicalTerm, setCanonicalTerm] = useState('')
+  const [aliasText, setAliasText] = useState('')
+  const [isSavingAlias, setIsSavingAlias] = useState(false)
+  const [termCandidates, setTermCandidates] = useState<AnswerTermCandidate[]>([])
+  const [termCandidateStatus, setTermCandidateStatus] = useState<AnswerTermCandidateStatus>('suggested')
+  const [termDiscoveryTaskId, setTermDiscoveryTaskId] = useState('')
+  const [isStartingTermDiscovery, setIsStartingTermDiscovery] = useState(false)
+  const [candidateActionId, setCandidateActionId] = useState('')
+
+  const fetchTermCandidates = useCallback(async () => {
+    const workspaceId = currentWorkspaceId
+    try {
+      const candidates = await listAnswerTermCandidates({
+        status: termCandidateStatus,
+        limit: 500,
+      })
+      if (workspaceId !== useWorkspaceStore.getState().currentWorkspaceId) return
+      setTermCandidates(candidates)
+    } catch (err) {
+      toast.error(localizedErrorMessage(err, t))
+    }
+  }, [currentWorkspaceId, t, termCandidateStatus])
 
   const fetchData = useCallback(async () => {
     const workspaceId = currentWorkspaceId
@@ -150,6 +189,7 @@ export default function AnswerMatching() {
       )
       if (workspaceId !== useWorkspaceStore.getState().currentWorkspaceId) return
       setGuidanceByAnswer(Object.fromEntries(entries))
+      setAliasGroups(await listAnswerAliases())
     } catch (err) {
       toast.error(localizedErrorMessage(err, t))
     } finally {
@@ -168,11 +208,22 @@ export default function AnswerMatching() {
     setResult(null)
     setIsTestResultOpen(false)
     setShowSelectedAnswerContent(false)
+    setAliasGroups([])
+    setCanonicalTerm('')
+    setAliasText('')
+    setTermCandidates([])
+    setTermCandidateStatus('suggested')
+    setTermDiscoveryTaskId('')
+    setCandidateActionId('')
   }, [currentWorkspaceId])
 
   useEffect(() => {
     fetchData()
   }, [fetchData])
+
+  useEffect(() => {
+    fetchTermCandidates()
+  }, [fetchTermCandidates])
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(totalAnswers / pageSize)), [pageSize, totalAnswers])
 
@@ -196,7 +247,10 @@ export default function AnswerMatching() {
     [answers]
   )
   const selectedAnswer = selectedAnswerId ? answersById[selectedAnswerId] : undefined
-  const selectedGuidance = selectedAnswerId ? guidanceByAnswer[selectedAnswerId] || [] : []
+  const selectedGuidance = useMemo(
+    () => (selectedAnswerId ? guidanceByAnswer[selectedAnswerId] || [] : []),
+    [guidanceByAnswer, selectedAnswerId]
+  )
   const selectedGuidanceSummary = useMemo(() => getGuidanceSummary(selectedGuidance), [selectedGuidance])
   const selectedGuidanceHealth = useMemo(() => getGuidanceHealth(selectedGuidance), [selectedGuidance])
   const selectedGuidanceRows = useMemo(
@@ -293,16 +347,128 @@ export default function AnswerMatching() {
   const handleRebuildVectors = async () => {
     setIsRebuildingVectors(true)
     try {
-      const response = await rebuildAnswerVectors({ status: status === 'all' ? undefined : status, limit: 500 })
+      const response = await rebuildAnswerVectors({
+        status: status === 'all' ? undefined : status,
+        limit: 500,
+        only_missing: true,
+      })
       toast.success(
-        t('answerCatalog.matching.vectorRebuilt', '{{count}} answer vectors were rebuilt.', {
+        t('answerCatalog.matching.vectorRebuilt', '{{count}} answer vectors were rebuilt. {{remaining}} remain.', {
           count: response.rebuilt,
+          remaining: response.remaining,
         })
       )
     } catch (err) {
       toast.error(localizedErrorMessage(err, t))
     } finally {
       setIsRebuildingVectors(false)
+    }
+  }
+
+  const handleCreateAlias = async () => {
+    const aliases = aliasText
+      .split(/[,;|\n]+/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+    if (!canonicalTerm.trim() || aliases.length === 0) {
+      toast.error(t('answerCatalog.matching.aliasRequired', 'Enter a standard term and at least one alias.'))
+      return
+    }
+    setIsSavingAlias(true)
+    try {
+      await createAnswerAlias({
+        canonical_term: canonicalTerm.trim(),
+        aliases,
+        metadata: { created_from: 'quality_management' },
+      })
+      setCanonicalTerm('')
+      setAliasText('')
+      setAliasGroups(await listAnswerAliases())
+      toast.success(t('answerCatalog.matching.aliasCreated', 'Term alias group added.'))
+    } catch (err) {
+      toast.error(localizedErrorMessage(err, t))
+    } finally {
+      setIsSavingAlias(false)
+    }
+  }
+
+  const handleDeleteAlias = async (aliasId: string) => {
+    try {
+      await deleteAnswerAlias(aliasId)
+      setAliasGroups((items) => items.filter((item) => item.alias_id !== aliasId))
+      toast.success(t('answerCatalog.matching.aliasDeleted', 'Term alias group deleted.'))
+    } catch (err) {
+      toast.error(localizedErrorMessage(err, t))
+    }
+  }
+
+  const handleAnalyzeTerms = async () => {
+    setIsStartingTermDiscovery(true)
+    try {
+      const response = await analyzeAnswerTerms({
+        include_drafts: true,
+        include_no_match_queries: true,
+        answer_limit: 1000,
+        event_limit: 300,
+        batch_size: 20,
+      })
+      setTermCandidateStatus('suggested')
+      setTermDiscoveryTaskId(response.task_id)
+      toast.success(
+        t(
+          'answerCatalog.matching.termDiscoveryStarted',
+          'AI term discovery started. Review candidates when the analysis is complete.'
+        )
+      )
+    } catch (err) {
+      toast.error(localizedErrorMessage(err, t))
+    } finally {
+      setIsStartingTermDiscovery(false)
+    }
+  }
+
+  const refreshTermManagement = async () => {
+    const [groups, candidates] = await Promise.all([
+      listAnswerAliases(),
+      listAnswerTermCandidates({ status: termCandidateStatus, limit: 500 }),
+    ])
+    setAliasGroups(groups)
+    setTermCandidates(candidates)
+  }
+
+  const handleApproveTermCandidate = async (candidateId: string) => {
+    setCandidateActionId(candidateId)
+    try {
+      await approveAnswerTermCandidate(candidateId)
+      await refreshTermManagement()
+      toast.success(
+        t(
+          'answerCatalog.matching.termCandidateApproved',
+          'The approved term group is now used for FAQ search.'
+        )
+      )
+    } catch (err) {
+      toast.error(localizedErrorMessage(err, t))
+    } finally {
+      setCandidateActionId('')
+    }
+  }
+
+  const handleRejectTermCandidate = async (candidateId: string) => {
+    setCandidateActionId(candidateId)
+    try {
+      await rejectAnswerTermCandidate(candidateId)
+      await refreshTermManagement()
+      toast.success(
+        t(
+          'answerCatalog.matching.termCandidateRejected',
+          'The term candidate was excluded.'
+        )
+      )
+    } catch (err) {
+      toast.error(localizedErrorMessage(err, t))
+    } finally {
+      setCandidateActionId('')
     }
   }
 
@@ -337,6 +503,7 @@ export default function AnswerMatching() {
         vector_top_k: 8,
         llm_candidate_count: 5,
         include_drafts: includeDrafts,
+        selection_policy: selectionPolicy,
       })
       if (requestId !== resolveRequestIdRef.current) return
       setResult(response)
@@ -353,7 +520,8 @@ export default function AnswerMatching() {
   }
 
   return (
-    <div className="relative flex h-full flex-col gap-4 p-4 pb-56 xl:pb-32">
+    <div className={`relative flex h-full flex-col gap-4 ${embedded ? 'px-0 pt-0 pb-56 xl:pb-32' : 'p-4 pb-56 xl:pb-32'}`}>
+      {!embedded && (
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-start gap-3">
           <div className="rounded-md border bg-muted/40 p-2 text-muted-foreground">
@@ -393,14 +561,24 @@ export default function AnswerMatching() {
           </Button>
         </div>
       </div>
+      )}
 
       <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[460px_1fr]">
         <div className="flex min-h-0 flex-col gap-3 rounded-md border bg-card p-4">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
-              <div className="font-semibold">{t('answerCatalog.matching.answerExplorer', 'Answer Explorer')}</div>
+              <div className="font-semibold">
+                {embedded
+                  ? t('answerCatalog.matching.improvementQueue', 'FAQ to improve')
+                  : t('answerCatalog.matching.answerExplorer', 'Answer Explorer')}
+              </div>
               <div className="mt-1 text-xs text-muted-foreground">
-                {t('answerCatalog.matching.answerExplorerDesc', 'Find an answer first, then edit only that answer’s finding hints.')}
+                {embedded
+                  ? t(
+                    'answerCatalog.matching.improvementQueueDesc',
+                    'Select an FAQ that needs stronger search settings and review AI suggestions.'
+                  )
+                  : t('answerCatalog.matching.answerExplorerDesc', 'Find an answer first, then edit only that answer’s finding hints.')}
               </div>
             </div>
             <Badge variant="outline" className="bg-muted/40">
@@ -411,7 +589,9 @@ export default function AnswerMatching() {
             <Input
               value={search}
               onChange={(event) => handleSearchChange(event.target.value)}
-              placeholder={t('answerCatalog.matching.answerSearch', 'Search title, body, tag, or finding hint...')}
+              placeholder={embedded
+                ? t('answerCatalog.matching.improvementSearch', 'Search FAQ title or content...')
+                : t('answerCatalog.matching.answerSearch', 'Search title, body, tag, or finding hint...')}
             />
             <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
               <Select value={status} onValueChange={handleStatusChange}>
@@ -475,13 +655,19 @@ export default function AnswerMatching() {
                       <div className="mt-3 flex flex-wrap items-center gap-1.5">
                         <Badge variant="outline">{t(`answerCatalog.status.${answer.status}`, answer.status)}</Badge>
                         <Badge variant="outline">{t('answerCatalog.matching.hintCount', '{{count}} hints', { count: summary.total })}</Badge>
-                        <Badge variant="outline">{t('answerCatalog.matching.questionShort', 'Q')} {summary.questions}</Badge>
-                        <Badge variant="outline">{t('answerCatalog.matching.keywordShort', 'K')} {summary.keywords}</Badge>
-                        {answer.tags.slice(0, 3).map((tag) => (
-                          <Badge key={tag} variant="outline" className="bg-muted/30">{tag}</Badge>
-                        ))}
+                        {!embedded && (
+                          <>
+                            <Badge variant="outline">{t('answerCatalog.matching.questionShort', 'Q')} {summary.questions}</Badge>
+                            <Badge variant="outline">{t('answerCatalog.matching.keywordShort', 'K')} {summary.keywords}</Badge>
+                            {answer.tags.slice(0, 3).map((tag) => (
+                              <Badge key={tag} variant="outline" className="bg-muted/30">{tag}</Badge>
+                            ))}
+                          </>
+                        )}
                       </div>
-                      <div className="mt-2 truncate font-mono text-[11px] text-muted-foreground">{answer.answer_id}</div>
+                      {!embedded && (
+                        <div className="mt-2 truncate font-mono text-[11px] text-muted-foreground">{answer.answer_id}</div>
+                      )}
                     </button>
                   )
                 })}
@@ -502,24 +688,40 @@ export default function AnswerMatching() {
           />
         </div>
 
-        <Tabs value={detailView} onValueChange={(value) => setDetailView(value as 'selected' | 'all' | 'unguided')} className="flex min-h-0 flex-col rounded-md border bg-card p-4">
+        <Tabs
+          value={detailView}
+          onValueChange={(value) => setDetailView(value as 'selected' | 'all' | 'unguided' | 'aliases')}
+          className="flex min-h-0 flex-col rounded-md border bg-card p-4"
+        >
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <TabsList className="h-auto flex-wrap justify-start">
-              <TabsTrigger value="selected">{t('answerCatalog.matching.selectedAnswerTab', 'Selected Answer')}</TabsTrigger>
-              <TabsTrigger value="all">{t('answerCatalog.matching.allGuidanceTab', 'All Hints')}</TabsTrigger>
-              <TabsTrigger value="unguided">{t('answerCatalog.matching.unguidedTab', 'Needs Hints')}</TabsTrigger>
+              <TabsTrigger value="selected">
+                {t('answerCatalog.matching.selectedAnswerTab', 'Selected Answer')}
+              </TabsTrigger>
+              {!embedded && (
+                <>
+                  <TabsTrigger value="all">{t('answerCatalog.matching.allGuidanceTab', 'All Hints')}</TabsTrigger>
+                  <TabsTrigger value="unguided">{t('answerCatalog.matching.unguidedTab', 'Needs Hints')}</TabsTrigger>
+                </>
+              )}
+              <TabsTrigger value="aliases">
+                <LanguagesIcon className="mr-1 h-4 w-4" />
+                {t('answerCatalog.matching.aliasTab', 'Terms & aliases')}
+              </TabsTrigger>
             </TabsList>
-            <Select value={filterType} onValueChange={(value) => setFilterType(value as 'all' | AnswerGuidanceType)}>
-              <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{t('answerCatalog.matching.allTypes', 'All Types')}</SelectItem>
-                {guidanceTypes.map((type) => (
-                  <SelectItem key={type} value={type}>
-                    {t(`answerCatalog.guidanceTypes.${type}`, type)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {!embedded && detailView !== 'aliases' && (
+              <Select value={filterType} onValueChange={(value) => setFilterType(value as 'all' | AnswerGuidanceType)}>
+                <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t('answerCatalog.matching.allTypes', 'All Types')}</SelectItem>
+                  {guidanceTypes.map((type) => (
+                    <SelectItem key={type} value={type}>
+                      {t(`answerCatalog.guidanceTypes.${type}`, type)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
 
           <TabsContent value="selected" className="mt-0 min-h-0 flex-1 overflow-auto">
@@ -539,20 +741,32 @@ export default function AnswerMatching() {
                           {t(`answerCatalog.matching.health.${selectedGuidanceHealth.labelKey}`, selectedGuidanceHealth.level)}
                         </Badge>
                       </div>
-                      <div className="mt-1 font-mono text-xs text-muted-foreground">{selectedAnswer.answer_id}</div>
+                      {!embedded && (
+                        <div className="mt-1 font-mono text-xs text-muted-foreground">{selectedAnswer.answer_id}</div>
+                      )}
                     </div>
-                    <div className="text-right text-xs text-muted-foreground">
+                    {!embedded && <div className="text-right text-xs text-muted-foreground">
                       <div>v{selectedAnswer.version}</div>
                       <div>{selectedAnswer.update_time ? new Date(selectedAnswer.update_time).toLocaleString() : '-'}</div>
-                    </div>
+                    </div>}
                   </div>
-                  <div className="mt-4 grid gap-3 md:grid-cols-5">
+                  {embedded ? (
+                    <div className="mt-3 text-sm text-muted-foreground">
+                      {t('answerCatalog.matching.compactHintSummary', 'Search settings: {{total}} total · {{questions}} questions · {{keywords}} keywords · {{synonyms}} synonyms · {{negatives}} exclusions', {
+                        total: selectedGuidanceSummary.total,
+                        questions: selectedGuidanceSummary.questions,
+                        keywords: selectedGuidanceSummary.keywords,
+                        synonyms: selectedGuidanceSummary.synonyms,
+                        negatives: selectedGuidanceSummary.negatives,
+                      })}
+                    </div>
+                  ) : <div className="mt-4 grid gap-3 md:grid-cols-5">
                     <MiniMetric label={t('answerCatalog.matching.totalHints', 'Hints')} value={selectedGuidanceSummary.total} />
                     <MiniMetric label={t('answerCatalog.guidanceTypes.question', 'Question')} value={selectedGuidanceSummary.questions} />
                     <MiniMetric label={t('answerCatalog.guidanceTypes.keyword', 'Keyword')} value={selectedGuidanceSummary.keywords} />
                     <MiniMetric label={t('answerCatalog.guidanceTypes.synonym', 'Synonym')} value={selectedGuidanceSummary.synonyms} />
                     <MiniMetric label={t('answerCatalog.guidanceTypes.negative_keyword', 'Negative')} value={selectedGuidanceSummary.negatives} />
-                  </div>
+                  </div>}
                   <div className="mt-4 grid gap-3 lg:grid-cols-2">
                     <div className="rounded-md border bg-muted/10 p-3">
                       <div className="text-xs font-medium text-muted-foreground">{t('answerCatalog.library.summary', 'Answer Memo')}</div>
@@ -563,13 +777,13 @@ export default function AnswerMatching() {
                       <div className="mt-1 line-clamp-4 text-sm leading-6">{selectedAnswer.body}</div>
                     </div>
                   </div>
-                  <div className="mt-3 flex flex-wrap gap-1.5">
+                  {!embedded && <div className="mt-3 flex flex-wrap gap-1.5">
                     {selectedAnswer.tags.length === 0 ? (
                       <span className="text-xs text-muted-foreground">-</span>
                     ) : selectedAnswer.tags.map((tag) => (
                       <Badge key={tag} variant="outline" className="bg-muted/30">{tag}</Badge>
                     ))}
-                  </div>
+                  </div>}
                 </div>
 
                 <div className="grid gap-4 xl:grid-cols-[360px_1fr]">
@@ -710,6 +924,281 @@ export default function AnswerMatching() {
               )}
             </div>
           </TabsContent>
+
+          <TabsContent value="aliases" className="mt-0 min-h-0 flex-1 overflow-auto">
+            <div className="grid gap-4">
+              <div className="rounded-md border bg-background p-4">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-md border bg-muted/30 p-2 text-muted-foreground">
+                    <LanguagesIcon className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="font-semibold">
+                      {t('answerCatalog.matching.aliasTitle', 'Common terms and aliases')}
+                    </div>
+                    <div className="mt-1 text-sm leading-6 text-muted-foreground">
+                      {t(
+                        'answerCatalog.matching.aliasDescription',
+                        'Equivalent product names, abbreviations, and Korean-English terms are expanded before keyword and semantic search. Example: 팀즈 = Teams = Microsoft Teams.'
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-5 border-t pt-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2 font-semibold">
+                        <SparklesIcon className="h-4 w-4 text-emerald-600" />
+                        {t('answerCatalog.matching.aiTermCandidates', 'AI term candidates')}
+                      </div>
+                      <div className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
+                        {t(
+                          'answerCatalog.matching.aiTermCandidatesDescription',
+                          'AI reviews FAQs and unmatched questions to suggest synonyms, abbreviations, and new expressions. Only approved candidates affect search.'
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Select
+                        value={termCandidateStatus}
+                        onValueChange={(value) => setTermCandidateStatus(value as AnswerTermCandidateStatus)}
+                      >
+                        <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="suggested">
+                            {t('answerCatalog.matching.termStatusSuggested', 'Needs review')}
+                          </SelectItem>
+                          <SelectItem value="approved">
+                            {t('answerCatalog.matching.termStatusApproved', 'Approved')}
+                          </SelectItem>
+                          <SelectItem value="rejected">
+                            {t('answerCatalog.matching.termStatusRejected', 'Excluded')}
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        onClick={handleAnalyzeTerms}
+                        disabled={isStartingTermDiscovery || Boolean(termDiscoveryTaskId)}
+                      >
+                        {isStartingTermDiscovery || termDiscoveryTaskId
+                          ? <Loader2Icon className="h-4 w-4 animate-spin" />
+                          : <SparklesIcon className="h-4 w-4" />}
+                        {t('answerCatalog.matching.discoverTermsWithAi', 'Find terms with AI')}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {termDiscoveryTaskId && (
+                    <div className="mt-4 rounded-md border bg-muted/10 p-3">
+                      <TaskProgressPanel
+                        taskId={termDiscoveryTaskId}
+                        compact
+                        onComplete={() => {
+                          setTermDiscoveryTaskId('')
+                          fetchTermCandidates()
+                          toast.success(
+                            t(
+                              'answerCatalog.matching.termDiscoveryCompleted',
+                              'AI term analysis is complete. Review the suggested candidates.'
+                            )
+                          )
+                        }}
+                        onError={() => setTermDiscoveryTaskId('')}
+                      />
+                    </div>
+                  )}
+
+                  <div className="mt-4 overflow-hidden rounded-md border">
+                    {termCandidates.length === 0 ? (
+                      <div className="p-4 text-sm text-muted-foreground">
+                        {termCandidateStatus === 'suggested'
+                          ? t(
+                            'answerCatalog.matching.noTermCandidates',
+                            'No term candidates are waiting for review. Run AI term discovery or register a term directly.'
+                          )
+                          : t(
+                            'answerCatalog.matching.noTermCandidateHistory',
+                            'No term candidates exist for this status.'
+                          )}
+                      </div>
+                    ) : (
+                      <div className="divide-y">
+                        {termCandidates.map((candidate) => (
+                          <div key={candidate.candidate_id} className="grid gap-3 p-4">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="font-semibold">{candidate.canonical_term}</span>
+                                  <Badge variant="outline" className="bg-muted/20">
+                                    {t(
+                                      `answerCatalog.matching.termType.${candidate.term_type}`,
+                                      candidate.term_type
+                                    )}
+                                  </Badge>
+                                  <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-100">
+                                    {t('answerCatalog.matching.termConfidence', 'Confidence')} {Math.round(candidate.confidence * 100)}%
+                                  </Badge>
+                                </div>
+                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                  {candidate.aliases.map((alias) => (
+                                    <Badge key={alias} variant="outline" className="bg-background">
+                                      {alias}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              </div>
+                              {candidate.status !== 'approved' && (
+                                <div className="flex shrink-0 items-center gap-2">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleRejectTermCandidate(candidate.candidate_id)}
+                                    disabled={Boolean(candidateActionId)}
+                                  >
+                                    {candidateActionId === candidate.candidate_id
+                                      ? <Loader2Icon className="h-4 w-4 animate-spin" />
+                                      : <XIcon className="h-4 w-4" />}
+                                    {t('answerCatalog.matching.rejectTermCandidate', 'Exclude')}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleApproveTermCandidate(candidate.candidate_id)}
+                                    disabled={Boolean(candidateActionId)}
+                                  >
+                                    {candidateActionId === candidate.candidate_id
+                                      ? <Loader2Icon className="h-4 w-4 animate-spin" />
+                                      : <CheckIcon className="h-4 w-4" />}
+                                    {t('answerCatalog.matching.approveTermCandidate', 'Approve')}
+                                  </Button>
+                                </div>
+                              )}
+                            </div>
+                            {candidate.rationale && (
+                              <div className="text-sm leading-6 text-muted-foreground">
+                                <span className="font-medium text-foreground">
+                                  {t('answerCatalog.matching.termRecommendationReason', 'Why suggested')}:
+                                </span>{' '}
+                                {candidate.rationale}
+                              </div>
+                            )}
+                            {candidate.evidence.length > 0 && (
+                              <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                                <span className="font-medium">
+                                  {t('answerCatalog.matching.termEvidence', 'Evidence')}:
+                                </span>
+                                {candidate.evidence.slice(0, 4).map((evidence) => (
+                                  <span
+                                    key={evidence.ref}
+                                    className="max-w-72 truncate rounded border bg-muted/20 px-2 py-1"
+                                    title={evidence.label || evidence.ref}
+                                  >
+                                    {evidence.kind === 'unmatched_query'
+                                      ? t('answerCatalog.matching.unmatchedQuestionEvidence', 'Unmatched question')
+                                      : t('answerCatalog.matching.faqEvidence', 'FAQ')}
+                                    {' · '}
+                                    {evidence.label || evidence.ref}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-5 border-t pt-4">
+                  <div className="font-semibold">
+                    {t('answerCatalog.matching.manualTermRegistration', 'Register a term directly')}
+                  </div>
+                  <div className="mt-1 text-sm text-muted-foreground">
+                    {t(
+                      'answerCatalog.matching.manualTermRegistrationDescription',
+                      'Use this when the standard term and aliases are already known.'
+                    )}
+                  </div>
+                </div>
+                <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(180px,0.7fr)_minmax(280px,1.3fr)_auto]">
+                  <div className="grid gap-2">
+                    <Label>{t('answerCatalog.matching.canonicalTerm', 'Standard term')}</Label>
+                    <Input
+                      value={canonicalTerm}
+                      onChange={(event) => setCanonicalTerm(event.target.value)}
+                      placeholder={t('answerCatalog.matching.canonicalTermPlaceholder', 'Example: Microsoft Teams')}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>{t('answerCatalog.matching.aliases', 'Aliases')}</Label>
+                    <Input
+                      value={aliasText}
+                      onChange={(event) => setAliasText(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') handleCreateAlias()
+                      }}
+                      placeholder={t('answerCatalog.matching.aliasesPlaceholder', 'Example: Teams, MS Teams, 팀즈')}
+                    />
+                  </div>
+                  <Button
+                    className="self-end"
+                    onClick={handleCreateAlias}
+                    disabled={isSavingAlias}
+                  >
+                    {isSavingAlias ? <Loader2Icon className="h-4 w-4 animate-spin" /> : <PlusIcon className="h-4 w-4" />}
+                    {t('answerCatalog.matching.addAliasGroup', 'Add term group')}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="overflow-hidden rounded-md border bg-background">
+                <div className="grid grid-cols-[minmax(180px,0.7fr)_minmax(0,1.3fr)_110px_44px] gap-3 border-b bg-muted/30 px-4 py-3 text-xs font-medium text-muted-foreground">
+                  <span>{t('answerCatalog.matching.canonicalTerm', 'Standard term')}</span>
+                  <span>{t('answerCatalog.matching.aliases', 'Aliases')}</span>
+                  <span>{t('answerCatalog.matching.aliasSource', 'Source')}</span>
+                  <span />
+                </div>
+                {aliasGroups.length === 0 ? (
+                  <div className="p-5 text-sm text-muted-foreground">
+                    {t('answerCatalog.matching.noAliases', 'No term alias groups are registered.')}
+                  </div>
+                ) : (
+                  <div className="divide-y">
+                    {aliasGroups.map((group) => (
+                      <div
+                        key={group.alias_id}
+                        className="grid grid-cols-[minmax(180px,0.7fr)_minmax(0,1.3fr)_110px_44px] items-start gap-3 px-4 py-3"
+                      >
+                        <div className="font-medium">{group.canonical_term}</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {group.aliases.map((alias) => (
+                            <Badge key={alias} variant="outline" className="bg-muted/20">
+                              {alias}
+                            </Badge>
+                          ))}
+                        </div>
+                        <Badge variant="outline" className="w-fit">
+                          {group.source === 'builtin'
+                            ? t('answerCatalog.matching.aliasBuiltin', 'Built-in')
+                            : t('answerCatalog.matching.aliasWorkspace', 'Workspace')}
+                        </Badge>
+                        {group.source !== 'builtin' ? (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title={t('common.delete', 'Delete')}
+                            onClick={() => handleDeleteAlias(group.alias_id)}
+                          >
+                            <Trash2Icon className="h-4 w-4 text-rose-500" />
+                          </Button>
+                        ) : <span />}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </TabsContent>
         </Tabs>
       </div>
 
@@ -734,6 +1223,9 @@ export default function AnswerMatching() {
                       {Math.round(result.confidence * 100)}%
                     </Badge>
                     <Badge variant="outline" className="bg-background">{result.selected_by || retrievalMode}</Badge>
+                    <Badge variant="outline" className="bg-background">
+                      {result.selection_policy || selectionPolicy}
+                    </Badge>
                   </div>
                   <div className="mt-1 text-xs text-muted-foreground">
                     {t('answerCatalog.matching.testResultDescription', 'This panel shows how the current finding hints select an answer for the test question.')}
@@ -745,6 +1237,25 @@ export default function AnswerMatching() {
                 </Button>
               </div>
 
+              {result.alias_expansions.length > 0 && (
+                <div className="mt-3 rounded-md border border-sky-200 bg-sky-50/60 px-3 py-2 dark:border-sky-900 dark:bg-sky-950/20">
+                  <div className="text-xs font-medium text-sky-800 dark:text-sky-200">
+                    {t('answerCatalog.matching.appliedAliasExpansion', 'Applied term expansion')}
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {result.alias_expansions.map((expansion) => (
+                      <Badge
+                        key={`${expansion.canonical_term}-${expansion.matched_term}`}
+                        variant="outline"
+                        className="border-sky-200 bg-background text-sky-800 dark:border-sky-800 dark:text-sky-100"
+                      >
+                        {expansion.matched_term} → {expansion.expanded_terms.join(', ')}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(260px,360px)_1fr]">
                 <div className="rounded-md border border-emerald-200 bg-background p-3 shadow-sm dark:border-emerald-900/70">
                   <div className="flex flex-wrap items-start justify-between gap-2">
@@ -754,8 +1265,25 @@ export default function AnswerMatching() {
                         {result.selected_answer ? result.selected_answer.title : t('answerCatalog.matching.noSelectedAnswer', 'No answer selected')}
                       </div>
                       <div className="mt-1 text-sm text-muted-foreground">
-                        {result.selected_answer ? result.selected_answer.answer_id : result.rationale}
+                        {result.selected_answer
+                          ? result.selected_answer.answer_id
+                          : result.abstention_reason
+                            ? t(
+                                `answerCatalog.test.abstention.${result.abstention_reason}`,
+                                result.rationale
+                              )
+                            : result.rationale}
                       </div>
+                      {!result.selected_answer && result.clarification_question && (
+                        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-950 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-100">
+                          {t('answerCatalog.test.clarification', 'Follow-up question')}: {result.clarification_question}
+                        </div>
+                      )}
+                      {result.matched_id && (
+                        <div className="mt-2 inline-flex rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 font-mono text-xs font-semibold text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/20 dark:text-emerald-100">
+                          {t('answerCatalog.test.matchedId', 'Business ID')}: {result.matched_id}
+                        </div>
+                      )}
                     </div>
                     {result.selected_answer && (
                       <Button
@@ -793,6 +1321,14 @@ export default function AnswerMatching() {
                           className="mt-1"
                         />
                       </div>
+                      {result.selected_answer.assets.length > 0 && (
+                        <div>
+                          <div className="mb-2 text-xs font-medium text-muted-foreground">
+                            {t('answerCatalog.assets.section', 'Attachments')}
+                          </div>
+                          <AnswerAssetGallery assets={result.selected_answer.assets} />
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -831,7 +1367,7 @@ export default function AnswerMatching() {
             </div>
           )}
 
-          <div className="grid gap-3 p-3 xl:grid-cols-[220px_minmax(280px,1fr)_110px_170px_170px_auto_auto] xl:items-end">
+          <div className="grid gap-3 p-3 xl:grid-cols-[180px_minmax(240px,1fr)_100px_150px_150px_170px_auto_auto] xl:items-end">
             <div className="hidden xl:block">
               <div className="flex items-center gap-2 font-semibold">
                 <SearchIcon className="h-4 w-4 text-emerald-600" />
@@ -862,14 +1398,39 @@ export default function AnswerMatching() {
             </label>
             <div className="grid gap-2">
               <Label>{t('answerCatalog.test.retrievalMode', 'Retrieval Mode')}</Label>
-              <Select value={retrievalMode} onValueChange={(value) => setRetrievalMode(value as 'keyword' | 'hybrid' | 'llm_rerank')}>
+              <Select value={retrievalMode} onValueChange={(value) => setRetrievalMode(value as 'keyword' | 'hybrid' | 'graph_hybrid' | 'llm_rerank')}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="keyword">{t('answerCatalog.test.modeKeyword', 'Keyword')}</SelectItem>
                   <SelectItem value="hybrid">{t('answerCatalog.test.modeHybrid', 'Keyword + Vector')}</SelectItem>
+                  <SelectItem value="graph_hybrid">{t('answerCatalog.test.modeGraphHybrid', 'Keyword + Vector + Graph')}</SelectItem>
                   <SelectItem value="llm_rerank">{t('answerCatalog.test.modeLlm', 'LLM ID Select')}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label>{t('answerCatalog.test.selectionPolicy', 'Answer Policy')}</Label>
+              <Select
+                value={selectionPolicy}
+                onValueChange={(value) =>
+                  setSelectionPolicy(value as 'workspace' | 'coverage' | 'precision')
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="workspace">
+                    {t('answerCatalog.test.policyWorkspace', 'Workspace setting')}
+                  </SelectItem>
+                  <SelectItem value="precision">
+                    {t('answerCatalog.test.policyPrecision', 'Answer only when certain')}
+                  </SelectItem>
+                  <SelectItem value="coverage">
+                    {t('answerCatalog.test.policyCoverage', 'Prefer an answer')}
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>

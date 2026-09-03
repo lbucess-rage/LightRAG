@@ -2,24 +2,33 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import hashlib
 import io
 import json
+import mimetypes
+import os
 import re
+import tempfile
 import time
 import traceback
+import unicodedata
 import uuid
 from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Any, Literal, Optional
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
 from lightrag.kg.shared_storage import get_default_workspace
 from lightrag.utils import logger
 
 from ..utils_api import decode_workspace_header, get_combined_auth_dependency
+from ..utils_s3 import get_s3_client
 
 router = APIRouter(prefix="/api/answers", tags=["answers"])
 
@@ -31,19 +40,86 @@ DisplayPolicy = Literal["summary", "full", "both"]
 ContentFormat = Literal["plain", "markdown", "html"]
 GuidanceType = Literal["keyword", "question", "synonym", "negative_keyword", "note"]
 ResolveStrategy = Literal["fast", "balanced"]
-RetrievalMode = Literal["keyword", "hybrid", "llm_rerank"]
+RetrievalMode = Literal["keyword", "hybrid", "graph_hybrid", "llm_rerank"]
+SelectionPolicy = Literal["workspace", "coverage", "precision"]
 StructuredOperator = Literal["contains", "equals", "starts_with", "ends_with"]
 StructuredSourceType = Literal["csv", "json"]
 StructuredMaterializationMode = Literal["table_as_dataset", "row_per_answer"]
+StructuredConversionPurpose = Literal["faq", "id_lookup"]
+GuidanceEnrichmentScope = Literal["missing_or_weak", "coverage", "all"]
+TermCandidateType = Literal["synonym", "abbreviation", "neologism"]
+TermCandidateStatus = Literal["suggested", "approved", "rejected"]
 SourceConnectorType = Literal["manual_table", "db_table", "multi_table", "nosql_collection", "web"]
 SourceConnectorStatus = Literal["draft", "active", "paused", "error"]
+AnswerAssetType = Literal["image", "video", "audio", "table", "file"]
+AnswerAssetStorageType = Literal["external", "s3", "local", "inline"]
 
 VALID_WORKSPACE_MODES = {"kms", "answer_catalog", "hybrid"}
 ANSWER_WORKSPACE_MODES = {"answer_catalog", "hybrid"}
 MAX_EXCEL_UPLOAD_BYTES = 200 * 1024 * 1024
+MAX_ANSWER_ASSET_UPLOAD_BYTES = 100 * 1024 * 1024
+SUPPORTED_ANSWER_ASSET_EXTENSIONS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".mp4",
+    ".webm",
+    ".mov",
+    ".mp3",
+    ".wav",
+    ".ogg",
+    ".pdf",
+    ".csv",
+    ".xlsx",
+    ".xls",
+    ".docx",
+    ".pptx",
+    ".txt",
+    ".md",
+}
 MAX_EXCEL_ROWS_PER_PREVIEW = 1000
 MAX_EXCEL_COLUMNS_PER_PREVIEW = 300
 MAX_STRUCTURED_ROWS_PER_ANSWER_BATCH = 1000
+MAX_KEYWORD_SEARCH_CANDIDATES = 5000
+ANSWER_VECTOR_PROJECTION_VERSION = 2
+ANSWER_GRAPH_PROJECTION_VERSION = 1
+ANSWER_GRAPH_NODE_PREFIX = "FAQ"
+DEFAULT_ANSWER_GRAPH_ENTITY_TYPES = [
+    "FAQAnswer",
+    "Intent",
+    "Product",
+    "System",
+    "Symptom",
+    "ErrorCode",
+    "Procedure",
+    "Category",
+    "Term",
+]
+DEFAULT_ANSWER_GRAPH_RELATION_TYPES = [
+    "REPRESENTS_QUESTION",
+    "HAS_TERM",
+    "HAS_SYMPTOM",
+    "APPLIES_TO",
+    "BELONGS_TO",
+    "RESOLVES",
+    "ALIAS_OF",
+    "RELATED_TO",
+]
+DEFAULT_ANSWER_GRAPH_PROMPT = """Extract a compact FAQ retrieval graph from the supplied answer.
+Return JSON only with `entities` and `relations`.
+Each entity must contain `type`, `label`, and `description`.
+Each relation must contain `source_type`, `source_label`, `target_type`,
+`target_label`, `type`, and `description`.
+Use only the configured entity and relation types. Do not create facts that are
+not supported by the FAQ title, body, tags, metadata, or finding hints.
+Always connect the FAQAnswer to an Intent with REPRESENTS_QUESTION.
+Use HAS_TERM for at most four important domain terms, HAS_SYMPTOM only for an
+explicit symptom, APPLIES_TO only for a named product or system, BELONGS_TO for
+categories, and RESOLVES when the answer contains a procedure or action.
+Prefer three to eight useful relations spanning at least two relation types when
+the supplied content supports them. Do not use APPLIES_TO for procedures."""
 TOKEN_RE = re.compile(r"[0-9A-Za-z가-힣_]+")
 GUIDANCE_TYPE_MULTIPLIER = {
     "question": 1.25,
@@ -52,6 +128,38 @@ GUIDANCE_TYPE_MULTIPLIER = {
     "note": 0.55,
     "negative_keyword": -1.4,
 }
+BUILTIN_ANSWER_ALIAS_GROUPS = [
+    {
+        "alias_id": "builtin-microsoft-teams",
+        "canonical_term": "Microsoft Teams",
+        "aliases": ["Teams", "MS Teams", "팀즈", "마이크로소프트 팀즈"],
+    },
+    {
+        "alias_id": "builtin-microsoft-outlook",
+        "canonical_term": "Microsoft Outlook",
+        "aliases": ["Outlook", "MS Outlook", "아웃룩", "마이크로소프트 아웃룩"],
+    },
+    {
+        "alias_id": "builtin-microsoft-onedrive",
+        "canonical_term": "Microsoft OneDrive",
+        "aliases": ["OneDrive", "원드라이브", "마이크로소프트 원드라이브"],
+    },
+    {
+        "alias_id": "builtin-wifi",
+        "canonical_term": "Wi-Fi",
+        "aliases": ["WiFi", "와이파이", "무선랜", "무선 네트워크"],
+    },
+    {
+        "alias_id": "builtin-bluetooth",
+        "canonical_term": "Bluetooth",
+        "aliases": ["블루투스", "BT"],
+    },
+    {
+        "alias_id": "builtin-vpn",
+        "canonical_term": "VPN",
+        "aliases": ["가상 사설망", "가상사설망", "사내 VPN"],
+    },
+]
 
 
 def set_rag_workspace_getter(getter_func):
@@ -160,6 +268,7 @@ async def _ensure_tables(db) -> None:
         return
 
     statements = [
+        "CREATE EXTENSION IF NOT EXISTS vector",
         """
         CREATE TABLE IF NOT EXISTS LIGHTRAG_ANSWER_ITEMS (
             workspace TEXT NOT NULL,
@@ -193,6 +302,33 @@ async def _ensure_tables(db) -> None:
         )
         """,
         """
+        CREATE TABLE IF NOT EXISTS LIGHTRAG_ANSWER_ASSETS (
+            asset_id TEXT PRIMARY KEY,
+            workspace TEXT NOT NULL,
+            answer_id TEXT NOT NULL,
+            answer_version INTEGER NOT NULL DEFAULT 1,
+            asset_type TEXT NOT NULL,
+            storage_type TEXT NOT NULL,
+            storage_uri TEXT,
+            file_name TEXT,
+            mime_type TEXT,
+            file_size BIGINT NOT NULL DEFAULT 0,
+            caption TEXT,
+            alt_text TEXT,
+            search_text TEXT,
+            content_text TEXT,
+            display_order INTEGER NOT NULL DEFAULT 0,
+            is_active BOOLEAN NOT NULL DEFAULT TRUE,
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            create_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            update_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_answer_assets_workspace_answer
+        ON LIGHTRAG_ANSWER_ASSETS (workspace, answer_id, is_active, display_order)
+        """,
+        """
         CREATE TABLE IF NOT EXISTS LIGHTRAG_ANSWER_GUIDANCE (
             guidance_id TEXT PRIMARY KEY,
             workspace TEXT NOT NULL,
@@ -202,6 +338,37 @@ async def _ensure_tables(db) -> None:
             weight DOUBLE PRECISION NOT NULL DEFAULT 1.0,
             metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
             create_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS LIGHTRAG_ANSWER_TERM_ALIASES (
+            alias_id TEXT PRIMARY KEY,
+            workspace TEXT NOT NULL,
+            canonical_term TEXT NOT NULL,
+            aliases JSONB NOT NULL DEFAULT '[]'::jsonb,
+            enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            source TEXT NOT NULL DEFAULT 'workspace',
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            create_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            update_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS LIGHTRAG_ANSWER_TERM_CANDIDATES (
+            candidate_id TEXT PRIMARY KEY,
+            workspace TEXT NOT NULL,
+            candidate_key TEXT NOT NULL,
+            canonical_term TEXT NOT NULL,
+            aliases JSONB NOT NULL DEFAULT '[]'::jsonb,
+            term_type TEXT NOT NULL DEFAULT 'synonym',
+            status TEXT NOT NULL DEFAULT 'suggested',
+            confidence DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+            rationale TEXT,
+            evidence JSONB NOT NULL DEFAULT '[]'::jsonb,
+            source TEXT NOT NULL DEFAULT 'llm',
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            create_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            update_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
         """,
         """
@@ -227,10 +394,116 @@ async def _ensure_tables(db) -> None:
             content_hash TEXT NOT NULL,
             content TEXT NOT NULL,
             embedding JSONB NOT NULL,
+            embedding_vector vector,
             metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
             create_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             update_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS LIGHTRAG_ANSWER_GRAPH_CONFIG (
+            workspace TEXT PRIMARY KEY,
+            enabled BOOLEAN NOT NULL DEFAULT FALSE,
+            auto_sync BOOLEAN NOT NULL DEFAULT FALSE,
+            graph_weight DOUBLE PRECISION NOT NULL DEFAULT 0.35,
+            min_similarity DOUBLE PRECISION NOT NULL DEFAULT 0.60,
+            max_hops INTEGER NOT NULL DEFAULT 2,
+            precision_mode BOOLEAN NOT NULL DEFAULT FALSE,
+            precision_min_score DOUBLE PRECISION NOT NULL DEFAULT 0.35,
+            min_score_margin DOUBLE PRECISION NOT NULL DEFAULT 0.08,
+            min_category_margin DOUBLE PRECISION NOT NULL DEFAULT 0.05,
+            min_evidence_sources INTEGER NOT NULL DEFAULT 2,
+            llm_min_confidence DOUBLE PRECISION NOT NULL DEFAULT 0.80,
+            entity_types JSONB NOT NULL DEFAULT '[]'::jsonb,
+            relation_types JSONB NOT NULL DEFAULT '[]'::jsonb,
+            extraction_prompt TEXT NOT NULL DEFAULT '',
+            ai_extraction_strategy TEXT NOT NULL DEFAULT 'fast',
+            ai_retry_max_tokens INTEGER NOT NULL DEFAULT 8192,
+            ai_min_relations INTEGER NOT NULL DEFAULT 4,
+            ai_min_relation_types INTEGER NOT NULL DEFAULT 3,
+            schema_version INTEGER NOT NULL DEFAULT 1,
+            create_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            update_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        """
+        ALTER TABLE LIGHTRAG_ANSWER_GRAPH_CONFIG
+        ADD COLUMN IF NOT EXISTS min_similarity DOUBLE PRECISION NOT NULL DEFAULT 0.60
+        """,
+        """
+        ALTER TABLE LIGHTRAG_ANSWER_GRAPH_CONFIG
+        ALTER COLUMN min_similarity SET DEFAULT 0.60
+        """,
+        """
+        ALTER TABLE LIGHTRAG_ANSWER_GRAPH_CONFIG
+        ADD COLUMN IF NOT EXISTS precision_mode BOOLEAN NOT NULL DEFAULT FALSE
+        """,
+        """
+        ALTER TABLE LIGHTRAG_ANSWER_GRAPH_CONFIG
+        ADD COLUMN IF NOT EXISTS precision_min_score DOUBLE PRECISION NOT NULL DEFAULT 0.35
+        """,
+        """
+        ALTER TABLE LIGHTRAG_ANSWER_GRAPH_CONFIG
+        ADD COLUMN IF NOT EXISTS min_score_margin DOUBLE PRECISION NOT NULL DEFAULT 0.08
+        """,
+        """
+        ALTER TABLE LIGHTRAG_ANSWER_GRAPH_CONFIG
+        ADD COLUMN IF NOT EXISTS min_category_margin DOUBLE PRECISION NOT NULL DEFAULT 0.05
+        """,
+        """
+        ALTER TABLE LIGHTRAG_ANSWER_GRAPH_CONFIG
+        ADD COLUMN IF NOT EXISTS min_evidence_sources INTEGER NOT NULL DEFAULT 2
+        """,
+        """
+        ALTER TABLE LIGHTRAG_ANSWER_GRAPH_CONFIG
+        ADD COLUMN IF NOT EXISTS llm_min_confidence DOUBLE PRECISION NOT NULL DEFAULT 0.80
+        """,
+        """
+        ALTER TABLE LIGHTRAG_ANSWER_GRAPH_CONFIG
+        ADD COLUMN IF NOT EXISTS ai_extraction_strategy TEXT NOT NULL DEFAULT 'fast'
+        """,
+        """
+        ALTER TABLE LIGHTRAG_ANSWER_GRAPH_CONFIG
+        ADD COLUMN IF NOT EXISTS ai_retry_max_tokens INTEGER NOT NULL DEFAULT 8192
+        """,
+        """
+        ALTER TABLE LIGHTRAG_ANSWER_GRAPH_CONFIG
+        ADD COLUMN IF NOT EXISTS ai_min_relations INTEGER NOT NULL DEFAULT 4
+        """,
+        """
+        ALTER TABLE LIGHTRAG_ANSWER_GRAPH_CONFIG
+        ALTER COLUMN ai_min_relations SET DEFAULT 4
+        """,
+        """
+        ALTER TABLE LIGHTRAG_ANSWER_GRAPH_CONFIG
+        ADD COLUMN IF NOT EXISTS ai_min_relation_types INTEGER NOT NULL DEFAULT 3
+        """,
+        """
+        ALTER TABLE LIGHTRAG_ANSWER_GRAPH_CONFIG
+        ALTER COLUMN ai_min_relation_types SET DEFAULT 3
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS LIGHTRAG_ANSWER_GRAPH_PROJECTIONS (
+            workspace TEXT NOT NULL,
+            answer_id TEXT NOT NULL,
+            answer_version INTEGER NOT NULL DEFAULT 1,
+            schema_version INTEGER NOT NULL DEFAULT 1,
+            status TEXT NOT NULL DEFAULT 'pending',
+            content_hash TEXT NOT NULL DEFAULT '',
+            nodes JSONB NOT NULL DEFAULT '[]'::jsonb,
+            relations JSONB NOT NULL DEFAULT '[]'::jsonb,
+            error TEXT,
+            built_at TIMESTAMPTZ,
+            create_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            update_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (workspace, answer_id)
+        )
+        """,
+        "ALTER TABLE LIGHTRAG_ANSWER_VECTORS ADD COLUMN IF NOT EXISTS embedding_vector vector",
+        """
+        UPDATE LIGHTRAG_ANSWER_VECTORS
+        SET embedding_vector = (embedding::text)::vector
+        WHERE embedding_vector IS NULL
         """,
         """
         CREATE TABLE IF NOT EXISTS LIGHTRAG_ANSWER_SOURCE_SNAPSHOTS (
@@ -297,9 +570,14 @@ async def _ensure_tables(db) -> None:
         "CREATE INDEX IF NOT EXISTS IDX_ANSWERS_WORKSPACE_STATUS ON LIGHTRAG_ANSWER_ITEMS(workspace, status)",
         "CREATE INDEX IF NOT EXISTS IDX_ANSWERS_WORKSPACE_UPDATE ON LIGHTRAG_ANSWER_ITEMS(workspace, update_time DESC)",
         "CREATE INDEX IF NOT EXISTS IDX_ANSWER_GUIDANCE_WORKSPACE_ANSWER ON LIGHTRAG_ANSWER_GUIDANCE(workspace, answer_id)",
+        "CREATE INDEX IF NOT EXISTS IDX_ANSWER_TERM_ALIASES_WORKSPACE ON LIGHTRAG_ANSWER_TERM_ALIASES(workspace, enabled)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS UIDX_ANSWER_TERM_ALIASES_WORKSPACE_CANONICAL ON LIGHTRAG_ANSWER_TERM_ALIASES(workspace, LOWER(canonical_term))",
+        "CREATE INDEX IF NOT EXISTS IDX_ANSWER_TERM_CANDIDATES_WORKSPACE_STATUS ON LIGHTRAG_ANSWER_TERM_CANDIDATES(workspace, status, update_time DESC)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS UIDX_ANSWER_TERM_CANDIDATES_WORKSPACE_KEY ON LIGHTRAG_ANSWER_TERM_CANDIDATES(workspace, candidate_key)",
         "CREATE INDEX IF NOT EXISTS IDX_ANSWER_EVENTS_WORKSPACE_TIME ON LIGHTRAG_ANSWER_EVENTS(workspace, create_time DESC)",
         "CREATE UNIQUE INDEX IF NOT EXISTS UIDX_ANSWER_VECTORS_WORKSPACE_ANSWER_KIND ON LIGHTRAG_ANSWER_VECTORS(workspace, answer_id, vector_kind)",
         "CREATE INDEX IF NOT EXISTS IDX_ANSWER_VECTORS_WORKSPACE_UPDATE ON LIGHTRAG_ANSWER_VECTORS(workspace, update_time DESC)",
+        "CREATE INDEX IF NOT EXISTS IDX_ANSWER_GRAPH_PROJECTIONS_WORKSPACE_STATUS ON LIGHTRAG_ANSWER_GRAPH_PROJECTIONS(workspace, status, update_time DESC)",
         "CREATE INDEX IF NOT EXISTS IDX_ANSWER_SOURCE_SNAPSHOTS_WORKSPACE_TIME ON LIGHTRAG_ANSWER_SOURCE_SNAPSHOTS(workspace, create_time DESC)",
         "CREATE INDEX IF NOT EXISTS IDX_ANSWER_SOURCE_SNAPSHOTS_WORKSPACE_HASH ON LIGHTRAG_ANSWER_SOURCE_SNAPSHOTS(workspace, content_hash)",
         "CREATE INDEX IF NOT EXISTS IDX_ANSWER_SOURCE_LINKS_WORKSPACE_ANSWER ON LIGHTRAG_ANSWER_SOURCE_LINKS(workspace, answer_id)",
@@ -312,6 +590,51 @@ async def _ensure_tables(db) -> None:
     for statement in statements:
         await db.execute(statement)
     _ensured_dbs.add(db_key)
+
+
+class AnswerAsset(BaseModel):
+    asset_id: str
+    workspace: str
+    answer_id: str
+    answer_version: int = 1
+    asset_type: AnswerAssetType
+    storage_type: AnswerAssetStorageType
+    storage_uri: Optional[str] = None
+    content_url: Optional[str] = None
+    file_name: Optional[str] = None
+    mime_type: Optional[str] = None
+    file_size: int = 0
+    caption: Optional[str] = None
+    alt_text: Optional[str] = None
+    search_text: Optional[str] = None
+    content_text: Optional[str] = None
+    display_order: int = 0
+    is_active: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    create_time: Optional[str] = None
+    update_time: Optional[str] = None
+
+
+class AnswerAssetCreateRequest(BaseModel):
+    asset_type: AnswerAssetType
+    external_url: Optional[str] = None
+    file_name: Optional[str] = None
+    mime_type: Optional[str] = None
+    caption: Optional[str] = None
+    alt_text: Optional[str] = None
+    search_text: Optional[str] = None
+    content_text: Optional[str] = None
+    display_order: int = 0
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AnswerAssetUpdateRequest(BaseModel):
+    caption: Optional[str] = None
+    alt_text: Optional[str] = None
+    search_text: Optional[str] = None
+    content_text: Optional[str] = None
+    display_order: Optional[int] = None
+    metadata: Optional[dict[str, Any]] = None
 
 
 class AnswerItem(BaseModel):
@@ -329,6 +652,7 @@ class AnswerItem(BaseModel):
     priority: int = 0
     tags: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    assets: list[AnswerAsset] = Field(default_factory=list)
     publish_time: Optional[str] = None
     create_time: Optional[str] = None
     update_time: Optional[str] = None
@@ -343,6 +667,306 @@ class AnswerGuidance(BaseModel):
     weight: float = 1.0
     metadata: dict[str, Any] = Field(default_factory=dict)
     create_time: Optional[str] = None
+
+
+class AnswerAliasGroup(BaseModel):
+    alias_id: str
+    workspace: str
+    canonical_term: str
+    aliases: list[str] = Field(default_factory=list)
+    enabled: bool = True
+    source: str = "workspace"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    create_time: Optional[str] = None
+    update_time: Optional[str] = None
+
+
+class AnswerGraphConfig(BaseModel):
+    workspace: str
+    enabled: bool = False
+    auto_sync: bool = False
+    graph_weight: float = Field(default=0.35, ge=0.0, le=1.0)
+    min_similarity: float = Field(default=0.60, ge=0.0, le=1.0)
+    max_hops: int = Field(default=2, ge=1, le=3)
+    precision_mode: bool = False
+    precision_min_score: float = Field(default=0.35, ge=0.0, le=1.0)
+    min_score_margin: float = Field(default=0.08, ge=0.0, le=1.0)
+    min_category_margin: float = Field(default=0.05, ge=0.0, le=1.0)
+    min_evidence_sources: int = Field(default=2, ge=1, le=3)
+    llm_min_confidence: float = Field(default=0.80, ge=0.0, le=1.0)
+    entity_types: list[str] = Field(
+        default_factory=lambda: list(DEFAULT_ANSWER_GRAPH_ENTITY_TYPES)
+    )
+    relation_types: list[str] = Field(
+        default_factory=lambda: list(DEFAULT_ANSWER_GRAPH_RELATION_TYPES)
+    )
+    extraction_prompt: str = DEFAULT_ANSWER_GRAPH_PROMPT
+    ai_extraction_strategy: Literal["fast", "adaptive", "deep"] = "fast"
+    ai_retry_max_tokens: int = Field(default=8192, ge=1024, le=32768)
+    ai_min_relations: int = Field(default=4, ge=1, le=12)
+    ai_min_relation_types: int = Field(default=3, ge=1, le=8)
+    schema_version: int = 1
+    create_time: Optional[str] = None
+    update_time: Optional[str] = None
+
+
+class AnswerGraphConfigUpdate(BaseModel):
+    enabled: Optional[bool] = Field(
+        default=None,
+        description="Allow graph_hybrid retrieval in this FAQ workspace.",
+        examples=[True],
+    )
+    auto_sync: Optional[bool] = Field(
+        default=None,
+        description="Rebuild an affected FAQ projection after FAQ, hint, or alias changes.",
+        examples=[False],
+    )
+    graph_weight: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Graph contribution to the graph_hybrid candidate score.",
+        examples=[0.35],
+    )
+    min_similarity: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Minimum semantic similarity required before a graph node can "
+            "contribute to an FAQ candidate."
+        ),
+        examples=[0.60],
+    )
+    max_hops: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=3,
+        description="Maximum graph relations traversed from a matched term.",
+        examples=[2],
+    )
+    precision_mode: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Answer only when minimum score and evidence checks are strong enough. "
+            "Close candidates are recorded for diagnostics, but the highest-ranked "
+            "eligible candidate is still selected."
+        ),
+        examples=[True],
+    )
+    precision_min_score: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Minimum candidate score used by precision mode.",
+        examples=[0.35],
+    )
+    min_score_margin: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Score-gap threshold used to flag close FAQ candidates in diagnostics. "
+            "It does not suppress the highest-ranked eligible answer."
+        ),
+        examples=[0.08],
+    )
+    min_category_margin: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Score-gap threshold used to flag close FAQ categories in diagnostics. "
+            "It does not suppress the highest-ranked eligible answer."
+        ),
+        examples=[0.05],
+    )
+    min_evidence_sources: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=3,
+        description="Required count of keyword, vector, and graph evidence sources.",
+        examples=[2],
+    )
+    llm_min_confidence: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Minimum confidence accepted from the constrained LLM ID selector.",
+        examples=[0.8],
+    )
+    entity_types: Optional[list[str]] = Field(
+        default=None,
+        description="Allowed FAQ graph entity types. FAQAnswer is always retained.",
+        examples=[["FAQAnswer", "Intent", "Product", "Symptom", "Term"]],
+    )
+    relation_types: Optional[list[str]] = Field(
+        default=None,
+        description="Allowed FAQ graph relation types.",
+        examples=[["HAS_TERM", "HAS_SYMPTOM", "APPLIES_TO", "ALIAS_OF"]],
+    )
+    extraction_prompt: Optional[str] = Field(
+        default=None,
+        description="Optional LLM extraction prompt. Deterministic projection runs first.",
+    )
+    ai_extraction_strategy: Optional[Literal["fast", "adaptive", "deep"]] = Field(
+        default=None,
+        description=(
+            "fast disables thinking, adaptive retries weak projections with thinking, "
+            "and deep enables thinking for every FAQ."
+        ),
+        examples=["fast"],
+    )
+    ai_retry_max_tokens: Optional[int] = Field(default=None, ge=1024, le=32768)
+    ai_min_relations: Optional[int] = Field(default=None, ge=1, le=12)
+    ai_min_relation_types: Optional[int] = Field(default=None, ge=1, le=8)
+
+
+class AnswerGraphNode(BaseModel):
+    node_id: str
+    entity_type: str
+    label: str
+    description: str = ""
+    source: str = "deterministic"
+
+
+class AnswerGraphRelation(BaseModel):
+    source_id: str
+    target_id: str
+    relation_type: str
+    description: str = ""
+    weight: float = 1.0
+    source: str = "deterministic"
+
+
+class AnswerGraphProjection(BaseModel):
+    workspace: str
+    answer_id: str
+    answer_version: int
+    schema_version: int
+    status: str
+    content_hash: str = ""
+    nodes: list[AnswerGraphNode] = Field(default_factory=list)
+    relations: list[AnswerGraphRelation] = Field(default_factory=list)
+    error: Optional[str] = None
+    built_at: Optional[str] = None
+    update_time: Optional[str] = None
+
+
+class AnswerGraphPreviewRequest(BaseModel):
+    answer_id: str = Field(
+        description="FAQ answer ID to project without saving.",
+        examples=["ANS-IT-OFFICE-007"],
+    )
+    use_llm: bool = Field(
+        default=True,
+        description="Build the deterministic projection, then extend it with bounded AI extraction.",
+        examples=[True],
+    )
+
+
+class AnswerGraphRebuildRequest(BaseModel):
+    answer_ids: Optional[list[str]] = Field(
+        default=None,
+        description="Optional FAQ IDs. Omit to select from the whole workspace.",
+        examples=[["ANS-IT-OFFICE-007", "ANS-IT-OFFICE-008"]],
+    )
+    include_drafts: bool = Field(
+        default=False,
+        description="Include draft FAQs in addition to published FAQs.",
+    )
+    only_stale: bool = Field(
+        default=True,
+        description="Build only missing, stale, pending, or failed projections.",
+    )
+    use_llm: bool = Field(
+        default=True,
+        description="Build deterministic projections, then extend them with bounded AI extraction.",
+    )
+    limit: int = Field(
+        default=500,
+        ge=1,
+        le=1000,
+        description="Maximum FAQs selected for this asynchronous rebuild.",
+        examples=[500],
+    )
+
+
+class AnswerGraphRebuildResponse(BaseModel):
+    task_id: str
+    stream_url: str
+    answer_count: int
+    message: str
+    reused: bool = False
+
+
+class AnswerGraphStatusResponse(BaseModel):
+    workspace: str
+    enabled: bool
+    total_answers: int
+    ready: int
+    stale: int
+    pending: int
+    failed: int
+    missing: int
+    last_built_at: Optional[str] = None
+
+
+class AnswerGraphEvidence(BaseModel):
+    answer_id: str
+    score: float
+    start_node: str
+    path: list[str] = Field(default_factory=list)
+    relation_types: list[str] = Field(default_factory=list)
+
+
+class AnswerAliasCreateRequest(BaseModel):
+    canonical_term: str = Field(..., min_length=2, max_length=200)
+    aliases: list[str] = Field(default_factory=list, max_length=30)
+    enabled: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AnswerAliasExpansion(BaseModel):
+    canonical_term: str
+    matched_term: str
+    expanded_terms: list[str] = Field(default_factory=list)
+    source: str = "workspace"
+
+
+class AnswerTermCandidate(BaseModel):
+    candidate_id: str
+    workspace: str
+    canonical_term: str
+    aliases: list[str] = Field(default_factory=list)
+    term_type: TermCandidateType = "synonym"
+    status: TermCandidateStatus = "suggested"
+    confidence: float = 0.0
+    rationale: Optional[str] = None
+    evidence: list[dict[str, Any]] = Field(default_factory=list)
+    source: str = "llm"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    create_time: Optional[str] = None
+    update_time: Optional[str] = None
+
+
+class AnswerTermDiscoveryRequest(BaseModel):
+    include_drafts: bool = True
+    include_no_match_queries: bool = True
+    answer_limit: int = Field(default=1000, ge=1, le=5000)
+    event_limit: int = Field(default=300, ge=0, le=2000)
+    batch_size: int = Field(default=20, ge=5, le=40)
+
+
+class AnswerTermDiscoveryResponse(BaseModel):
+    task_id: str
+    stream_url: str
+    message: str
+
+
+class AnswerTermCandidateActionResponse(BaseModel):
+    candidate: AnswerTermCandidate
+    alias_group: Optional[AnswerAliasGroup] = None
 
 
 class AnswerRevision(BaseModel):
@@ -445,14 +1069,22 @@ class ResolveRequest(BaseModel):
     include_drafts: bool = False
     strategy: ResolveStrategy = "balanced"
     retrieval_mode: RetrievalMode = Field(
-        default="keyword",
-        description="keyword keeps the current deterministic scorer, hybrid adds optional answer vectors, llm_rerank lets the LLM choose only from candidate IDs.",
+        default="hybrid",
+        description="keyword keeps the deterministic scorer, hybrid adds answer vectors, graph_hybrid also uses FAQ graph paths, and llm_rerank lets the LLM choose only from candidate IDs.",
     )
     vector_top_k: int = Field(default=8, ge=1, le=50)
     llm_candidate_count: int = Field(default=5, ge=1, le=10)
     allowed_answer_ids: Optional[list[str]] = Field(
         default=None,
         description="Optional answer IDs allowed for candidate selection. Omitted means unrestricted.",
+    )
+    selection_policy: SelectionPolicy = Field(
+        default="workspace",
+        description=(
+            "workspace follows the workspace precision setting, coverage keeps the "
+            "legacy highest-score behavior, and precision may abstain on weak or "
+            "ambiguous evidence."
+        ),
     )
 
 
@@ -463,16 +1095,47 @@ class ResolveCandidate(BaseModel):
     reason: str
     score_details: dict[str, float] = Field(default_factory=dict)
     selected_by: str = "keyword"
+    graph_evidence: list[AnswerGraphEvidence] = Field(default_factory=list)
 
 
 class ResolveResponse(BaseModel):
     selected_answer: Optional[AnswerItem]
+    matched_id: Optional[str] = Field(
+        default=None,
+        description="Business ID returned by an ID-lookup FAQ. This is separate from the internal answer_id.",
+    )
     confidence: float
     candidates: list[ResolveCandidate]
     trace_id: str
     rationale: str
-    retrieval_mode: RetrievalMode = "keyword"
+    retrieval_mode: RetrievalMode = Field(
+        default="hybrid",
+        description="Compatibility alias for requested_retrieval_mode.",
+    )
+    requested_retrieval_mode: RetrievalMode = Field(
+        default="hybrid",
+        description="Retrieval mode requested by the caller.",
+    )
+    effective_retrieval_mode: RetrievalMode = Field(
+        default="hybrid",
+        description="Retrieval mode actually used after graph availability checks.",
+    )
+    graph_status: str = Field(
+        default="not_requested",
+        description="Graph lookup outcome such as graph_ready or graph_below_similarity.",
+    )
+    retrieval_fallback_reason: Optional[str] = Field(
+        default=None,
+        description="Reason graph_hybrid fell back to hybrid; null when no fallback occurred.",
+    )
     selected_by: str = "keyword"
+    alias_expansions: list[AnswerAliasExpansion] = Field(default_factory=list)
+    selection_policy: Literal["coverage", "precision"] = "coverage"
+    abstention_reason: Optional[str] = None
+    clarification_question: Optional[str] = Field(
+        default=None,
+        description="A concise follow-up question when the FAQ intent is ambiguous.",
+    )
 
 
 class AnswerSearchRequest(BaseModel):
@@ -481,10 +1144,14 @@ class AnswerSearchRequest(BaseModel):
     min_score: float = Field(default=0.18, ge=0.0, le=1.0)
     include_drafts: bool = False
     strategy: ResolveStrategy = "balanced"
-    retrieval_mode: RetrievalMode = "keyword"
+    retrieval_mode: RetrievalMode = Field(
+        default="hybrid",
+        description="Direct API default remains hybrid; products can request graph_hybrid explicitly.",
+    )
     vector_top_k: int = Field(default=8, ge=1, le=50)
     llm_candidate_count: int = Field(default=5, ge=1, le=10)
     allowed_answer_ids: Optional[list[str]] = None
+    selection_policy: SelectionPolicy = "workspace"
     response_policy: Optional[DisplayPolicy] = None
     include_candidates: bool = True
 
@@ -492,6 +1159,10 @@ class AnswerSearchRequest(BaseModel):
 class AnswerSearchResponse(BaseModel):
     matched: bool
     answer_id: Optional[str] = None
+    matched_id: Optional[str] = Field(
+        default=None,
+        description="Business ID returned by an ID-lookup FAQ. This is separate from the internal answer_id.",
+    )
     title: Optional[str] = None
     response: Optional[str] = None
     summary: Optional[str] = None
@@ -504,13 +1175,37 @@ class AnswerSearchResponse(BaseModel):
     valid_until: Optional[str] = None
     confidence: float = 0.0
     tags: list[str] = Field(default_factory=list)
+    assets: list[AnswerAsset] = Field(default_factory=list)
     source_type: Optional[str] = None
     source_uri: Optional[str] = None
     candidates: list[ResolveCandidate] = Field(default_factory=list)
     trace_id: str
     rationale: str
-    retrieval_mode: RetrievalMode = "keyword"
+    retrieval_mode: RetrievalMode = Field(
+        default="hybrid",
+        description="Compatibility alias for requested_retrieval_mode.",
+    )
+    requested_retrieval_mode: RetrievalMode = Field(
+        default="hybrid",
+        description="Retrieval mode requested by the caller.",
+    )
+    effective_retrieval_mode: RetrievalMode = Field(
+        default="hybrid",
+        description="Retrieval mode actually used after graph availability checks.",
+    )
+    graph_status: str = Field(
+        default="not_requested",
+        description="Graph lookup outcome such as graph_ready or graph_below_similarity.",
+    )
+    retrieval_fallback_reason: Optional[str] = Field(
+        default=None,
+        description="Reason graph_hybrid fell back to hybrid; null when no fallback occurred.",
+    )
     selected_by: str = "keyword"
+    alias_expansions: list[AnswerAliasExpansion] = Field(default_factory=list)
+    selection_policy: Literal["coverage", "precision"] = "coverage"
+    abstention_reason: Optional[str] = None
+    clarification_question: Optional[str] = None
 
 
 class AnswerViewRequest(BaseModel):
@@ -679,11 +1374,43 @@ class ExcelPreviewResponse(BaseModel):
     header_row: int
     data_start_row: int
     row_count: int
+    row_limit: int = MAX_EXCEL_ROWS_PER_PREVIEW
+    truncated: bool = False
     columns: list[str] = Field(default_factory=list)
     raw_content: str
     source_uri: str
     profile: StructuredProfileResponse
     warnings: list[str] = Field(default_factory=list)
+
+
+class BatchGuidanceEnrichmentConfig(BaseModel):
+    enabled: bool = Field(
+        default=False,
+        description=(
+            "After FAQ drafts are created, add LLM-generated representative questions, "
+            "keywords, and synonyms without changing answer content."
+        ),
+    )
+    scope: GuidanceEnrichmentScope = Field(
+        default="coverage",
+        description=(
+            "missing_or_weak enriches only answers missing a question or keyword/synonym; "
+            "coverage also checks representative-question, synonym, colloquial, and bilingual "
+            "search coverage; all enriches every generated answer."
+        ),
+    )
+    batch_size: int = Field(
+        default=10,
+        ge=1,
+        le=20,
+        description="Number of FAQ answers included in each LLM request.",
+    )
+    max_suggestions: int = Field(
+        default=5,
+        ge=1,
+        le=8,
+        description="Maximum new finding hints accepted per FAQ answer.",
+    )
 
 
 class StructuredMaterializeRequest(BaseModel):
@@ -699,7 +1426,25 @@ class StructuredMaterializeRequest(BaseModel):
     mapping: dict[str, str] = Field(default_factory=dict)
     guidance_columns: list[str] = Field(default_factory=list)
     materialization_mode: StructuredMaterializationMode = "table_as_dataset"
+    conversion_purpose: StructuredConversionPurpose = "faq"
+    source_truncated: bool = False
+    llm_guidance_enrichment: BatchGuidanceEnrichmentConfig = Field(
+        default_factory=BatchGuidanceEnrichmentConfig
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class StructuredIdLookupValidation(BaseModel):
+    enabled: bool = False
+    ready: bool = True
+    id_column: Optional[str] = None
+    searchable_columns: list[str] = Field(default_factory=list)
+    row_count: int = 0
+    valid_id_count: int = 0
+    blank_id_rows: list[int] = Field(default_factory=list)
+    duplicate_ids: list[str] = Field(default_factory=list)
+    ambiguous_detail_groups: list[dict[str, Any]] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class StructuredMaterializeResponse(BaseModel):
@@ -707,10 +1452,19 @@ class StructuredMaterializeResponse(BaseModel):
     dataset: StructuredDataset
     answers: list[AnswerItem] = Field(default_factory=list)
     datasets: list[StructuredDataset] = Field(default_factory=list)
+    answer_count: int = 0
+    answers_truncated: bool = False
     profile: StructuredProfileResponse
     guidance: list[AnswerGuidance] = Field(default_factory=list)
+    guidance_count: int = 0
+    guidance_truncated: bool = False
     snapshot: Optional[AnswerSourceSnapshot] = None
     source_link: Optional[AnswerSourceLink] = None
+    validation: StructuredIdLookupValidation = Field(default_factory=StructuredIdLookupValidation)
+    guidance_enrichment_task_id: Optional[str] = None
+    guidance_enrichment_stream_url: Optional[str] = None
+    vector_rebuild_task_id: Optional[str] = None
+    vector_rebuild_stream_url: Optional[str] = None
 
 
 class StructuredLookupLog(BaseModel):
@@ -777,12 +1531,16 @@ class SourceConnectorSampleResponse(BaseModel):
     rows: list[dict[str, Any]] = Field(default_factory=list)
     columns: list[str] = Field(default_factory=list)
     row_count: int = 0
+    row_limit: int = 1000
+    truncated: bool = False
     warnings: list[str] = Field(default_factory=list)
 
 
 class SourceConnectorMappingPreviewRequest(BaseModel):
     mapping: dict[str, str] = Field(default_factory=dict)
+    guidance_columns: list[str] = Field(default_factory=list)
     materialization_mode: StructuredMaterializationMode = "table_as_dataset"
+    conversion_purpose: StructuredConversionPurpose = "faq"
 
 
 class SourceConnectorMappingPreviewResponse(BaseModel):
@@ -792,6 +1550,7 @@ class SourceConnectorMappingPreviewResponse(BaseModel):
     mapping: dict[str, str] = Field(default_factory=dict)
     guidance_columns: list[str] = Field(default_factory=list)
     materialization_modes: list[StructuredMaterializationMode] = Field(default_factory=list)
+    validation: StructuredIdLookupValidation = Field(default_factory=StructuredIdLookupValidation)
 
 
 class SourceConnectorMaterializeRequest(BaseModel):
@@ -799,8 +1558,12 @@ class SourceConnectorMaterializeRequest(BaseModel):
     mapping: dict[str, str] = Field(default_factory=dict)
     guidance_columns: list[str] = Field(default_factory=list)
     materialization_mode: StructuredMaterializationMode = "table_as_dataset"
+    conversion_purpose: StructuredConversionPurpose = "faq"
     status: AnswerStatus = "draft"
     tags: list[str] = Field(default_factory=list)
+    llm_guidance_enrichment: BatchGuidanceEnrichmentConfig = Field(
+        default_factory=BatchGuidanceEnrichmentConfig
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -808,6 +1571,110 @@ class SourceConnectorMaterializeResponse(BaseModel):
     connector: SourceConnector
     sample: SourceConnectorSampleResponse
     materialized: StructuredMaterializeResponse
+
+
+def _answer_asset_content_url(row: dict[str, Any]) -> Optional[str]:
+    storage_type = str(row.get("storage_type") or "")
+    storage_uri = str(row.get("storage_uri") or "").strip()
+    if storage_type in {"external", "s3"}:
+        return storage_uri or None
+    if storage_type == "local":
+        return (
+            f"/api/answers/{str(row['answer_id'])}/assets/"
+            f"{str(row['asset_id'])}/content"
+        )
+    return None
+
+
+def _answer_asset_from_row(row: dict[str, Any]) -> AnswerAsset:
+    metadata = _coerce_json(row.get("metadata"), {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+    return AnswerAsset(
+        asset_id=str(row["asset_id"]),
+        workspace=str(row["workspace"]),
+        answer_id=str(row["answer_id"]),
+        answer_version=int(row.get("answer_version") or 1),
+        asset_type=row.get("asset_type") or "file",
+        storage_type=row.get("storage_type") or "external",
+        storage_uri=row.get("storage_uri"),
+        content_url=_answer_asset_content_url(row),
+        file_name=row.get("file_name"),
+        mime_type=row.get("mime_type"),
+        file_size=int(row.get("file_size") or 0),
+        caption=row.get("caption"),
+        alt_text=row.get("alt_text"),
+        search_text=row.get("search_text"),
+        content_text=row.get("content_text"),
+        display_order=int(row.get("display_order") or 0),
+        is_active=bool(row.get("is_active", True)),
+        metadata=metadata,
+        create_time=_iso(row.get("create_time")),
+        update_time=_iso(row.get("update_time")),
+    )
+
+
+def _answer_asset_search_content(assets: list[AnswerAsset]) -> str:
+    return "\n".join(
+        " ".join(
+            part.strip()
+            for part in [
+                asset.caption or "",
+                asset.alt_text or "",
+                asset.search_text or "",
+                asset.content_text or "",
+            ]
+            if part and part.strip()
+        )
+        for asset in assets
+        if asset.is_active
+    ).strip()
+
+
+async def _answer_assets_by_answer(
+    db,
+    workspace: str,
+    answer_ids: list[str],
+    *,
+    include_inactive: bool = False,
+) -> dict[str, list[AnswerAsset]]:
+    if not answer_ids:
+        return {}
+    active_filter = "" if include_inactive else "AND is_active = TRUE"
+    rows = await db.query(
+        f"""
+        SELECT asset_id, workspace, answer_id, answer_version, asset_type,
+               storage_type, storage_uri, file_name, mime_type, file_size,
+               caption, alt_text, search_text, content_text, display_order,
+               is_active, metadata, create_time, update_time
+        FROM LIGHTRAG_ANSWER_ASSETS
+        WHERE workspace = $1 AND answer_id = ANY($2::text[])
+          {active_filter}
+        ORDER BY answer_id, display_order, create_time, asset_id
+        """,
+        [workspace, answer_ids],
+        multirows=True,
+    )
+    result: dict[str, list[AnswerAsset]] = {}
+    for row in rows or []:
+        asset = _answer_asset_from_row(dict(row))
+        result.setdefault(asset.answer_id, []).append(asset)
+    return result
+
+
+async def _hydrate_answer_assets(
+    db,
+    workspace: str,
+    answers: list[AnswerItem],
+) -> list[AnswerItem]:
+    assets_by_answer = await _answer_assets_by_answer(
+        db,
+        workspace,
+        [answer.answer_id for answer in answers],
+    )
+    for answer in answers:
+        answer.assets = assets_by_answer.get(answer.answer_id, [])
+    return answers
 
 
 def _answer_from_row(row: dict[str, Any]) -> AnswerItem:
@@ -834,6 +1701,10 @@ def _answer_from_row(row: dict[str, Any]) -> AnswerItem:
         priority=int(row.get("priority") or 0),
         tags=tags,
         metadata=metadata,
+        assets=[
+            item if isinstance(item, AnswerAsset) else AnswerAsset.model_validate(item)
+            for item in (row.get("assets") or [])
+        ],
         publish_time=_iso(row.get("publish_time")),
         create_time=_iso(row.get("create_time")),
         update_time=_iso(row.get("update_time")),
@@ -853,6 +1724,53 @@ def _guidance_from_row(row: dict[str, Any]) -> AnswerGuidance:
         weight=float(row.get("weight") or 1.0),
         metadata=metadata,
         create_time=_iso(row.get("create_time")),
+    )
+
+
+def _alias_group_from_row(row: dict[str, Any]) -> AnswerAliasGroup:
+    aliases = _coerce_json(row.get("aliases"), [])
+    if not isinstance(aliases, list):
+        aliases = []
+    metadata = _coerce_json(row.get("metadata"), {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+    return AnswerAliasGroup(
+        alias_id=str(row["alias_id"]),
+        workspace=str(row["workspace"]),
+        canonical_term=str(row["canonical_term"]),
+        aliases=[str(item) for item in aliases if str(item).strip()],
+        enabled=bool(row.get("enabled", True)),
+        source=str(row.get("source") or "workspace"),
+        metadata=metadata,
+        create_time=_iso(row.get("create_time")),
+        update_time=_iso(row.get("update_time")),
+    )
+
+
+def _term_candidate_from_row(row: dict[str, Any]) -> AnswerTermCandidate:
+    aliases = _coerce_json(row.get("aliases"), [])
+    evidence = _coerce_json(row.get("evidence"), [])
+    metadata = _coerce_json(row.get("metadata"), {})
+    return AnswerTermCandidate(
+        candidate_id=str(row["candidate_id"]),
+        workspace=str(row["workspace"]),
+        canonical_term=str(row["canonical_term"]),
+        aliases=[str(item) for item in aliases if str(item).strip()]
+        if isinstance(aliases, list)
+        else [],
+        term_type=str(row.get("term_type") or "synonym"),
+        status=str(row.get("status") or "suggested"),
+        confidence=_safe_float(row.get("confidence"), 0.0, 0.0, 1.0),
+        rationale=str(row.get("rationale") or "") or None,
+        evidence=[
+            dict(item) for item in evidence if isinstance(item, dict)
+        ]
+        if isinstance(evidence, list)
+        else [],
+        source=str(row.get("source") or "llm"),
+        metadata=metadata if isinstance(metadata, dict) else {},
+        create_time=_iso(row.get("create_time")),
+        update_time=_iso(row.get("update_time")),
     )
 
 
@@ -1158,6 +2076,20 @@ def _row_value(value: Any) -> Any:
     return json.dumps(value, ensure_ascii=False)
 
 
+def _excel_cell_value(cell: Any) -> Any:
+    value = cell.value
+    if isinstance(value, datetime) and getattr(cell, "is_date", False):
+        number_format = str(getattr(cell, "number_format", "") or "").lower()
+        has_time_format = (
+            "am/pm" in number_format
+            or "a/p" in number_format
+            or bool(re.search(r"[hs]", number_format))
+        )
+        if not has_time_format:
+            return value.date().isoformat()
+    return _row_value(value)
+
+
 async def _read_upload_limited(file: UploadFile, max_bytes: int) -> tuple[bytes, int]:
     total = 0
     chunks: list[bytes] = []
@@ -1173,6 +2105,90 @@ async def _read_upload_limited(file: UploadFile, max_bytes: int) -> tuple[bytes,
             )
         chunks.append(chunk)
     return b"".join(chunks), total
+
+
+async def _read_answer_asset_upload(file: UploadFile) -> tuple[bytes, int]:
+    total = 0
+    chunks: list[bytes] = []
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > MAX_ANSWER_ASSET_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    "Answer asset upload exceeds the "
+                    f"{MAX_ANSWER_ASSET_UPLOAD_BYTES // 1024 // 1024}MB limit"
+                ),
+            )
+        chunks.append(chunk)
+    return b"".join(chunks), total
+
+
+def _answer_asset_root() -> Path:
+    configured = Path(
+        os.getenv("ANSWER_ASSET_DIR", "rag_storage/answer_assets")
+    ).expanduser()
+    root = configured if configured.is_absolute() else Path.cwd() / configured
+    return root.resolve()
+
+
+def _safe_asset_segment(value: Any, fallback: str) -> str:
+    name = Path(str(value or "")).name.strip()
+    safe = re.sub(r"[^\w.\-]+", "_", name, flags=re.UNICODE).strip("._")
+    return safe[:180] or fallback
+
+
+def _local_answer_asset_path(storage_uri: str) -> Path:
+    root = _answer_asset_root()
+    candidate = (root / storage_uri).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail="Stored asset path is invalid") from exc
+    return candidate
+
+
+def _validate_external_asset_url(value: Any) -> str:
+    url = str(value or "").strip()
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise HTTPException(
+            status_code=422,
+            detail="external_url must be an absolute HTTP or HTTPS URL",
+        )
+    return url
+
+
+def _infer_answer_asset_type(
+    file_name: str,
+    mime_type: Optional[str],
+) -> AnswerAssetType:
+    mime = str(mime_type or "").lower()
+    suffix = Path(file_name).suffix.lower()
+    if mime.startswith("image/"):
+        return "image"
+    if mime.startswith("video/"):
+        return "video"
+    if mime.startswith("audio/"):
+        return "audio"
+    if suffix in {".csv", ".xlsx", ".xls"}:
+        return "table"
+    return "file"
+
+
+def _validate_answer_asset_file(file_name: str) -> str:
+    safe_name = _safe_asset_segment(file_name, f"asset-{uuid.uuid4().hex}")
+    suffix = Path(safe_name).suffix.lower()
+    if suffix not in SUPPORTED_ANSWER_ASSET_EXTENSIONS:
+        supported = ", ".join(sorted(SUPPORTED_ANSWER_ASSET_EXTENSIONS))
+        raise HTTPException(
+            status_code=415,
+            detail=f"Unsupported answer asset type. Supported extensions: {supported}",
+        )
+    return safe_name
 
 
 def _unique_excel_column_name(value: Any, index: int, seen: set[str]) -> str:
@@ -1195,9 +2211,10 @@ def _extract_excel_rows(
     header_row: int = 1,
     data_start_row: Optional[int] = None,
     max_rows: int = MAX_EXCEL_ROWS_PER_PREVIEW,
-) -> tuple[list[ExcelSheetInfo], str, int, int, list[dict[str, Any]], list[str], list[str]]:
+) -> tuple[list[ExcelSheetInfo], str, int, int, list[dict[str, Any]], list[str], list[str], bool]:
     try:
         from openpyxl import load_workbook  # type: ignore
+        from openpyxl.utils.cell import range_boundaries  # type: ignore
     except ImportError as exc:
         raise HTTPException(
             status_code=500,
@@ -1213,10 +2230,25 @@ def _extract_excel_rows(
         raise HTTPException(status_code=400, detail=f"Invalid Excel workbook: {exc}") from exc
 
     try:
-        sheets = [
-            ExcelSheetInfo(name=worksheet.title, max_row=worksheet.max_row or 0, max_column=worksheet.max_column or 0)
-            for worksheet in workbook.worksheets
-        ]
+        sheets: list[ExcelSheetInfo] = []
+        for worksheet in workbook.worksheets:
+            max_row = worksheet.max_row or 0
+            max_column = worksheet.max_column or 0
+            if not max_row or not max_column:
+                try:
+                    _, _, max_column, max_row = range_boundaries(
+                        worksheet.calculate_dimension(force=True)
+                    )
+                except (TypeError, ValueError):
+                    max_row = max_row or 0
+                    max_column = max_column or 0
+            sheets.append(
+                ExcelSheetInfo(
+                    name=worksheet.title,
+                    max_row=max_row,
+                    max_column=max_column,
+                )
+            )
         if not sheets:
             raise HTTPException(status_code=400, detail="Excel workbook has no sheets")
 
@@ -1254,17 +2286,18 @@ def _extract_excel_rows(
         rows: list[dict[str, Any]] = []
         skipped_empty = 0
         reached_limit = False
-        for values in worksheet.iter_rows(min_row=start_row, values_only=True):
+        for cells in worksheet.iter_rows(min_row=start_row, values_only=False):
             if len(rows) >= max_rows:
                 reached_limit = True
                 break
-            sliced_values = list(values[: len(columns)])
+            sliced_cells = list(cells[: len(columns)])
+            sliced_values = [cell.value for cell in sliced_cells]
             if all(_is_empty_cell(value) for value in sliced_values):
                 skipped_empty += 1
                 continue
             rows.append(
                 {
-                    column: _row_value(sliced_values[index]) if index < len(sliced_values) else ""
+                    column: _excel_cell_value(sliced_cells[index]) if index < len(sliced_cells) else ""
                     for index, column in enumerate(columns)
                 }
             )
@@ -1276,7 +2309,7 @@ def _extract_excel_rows(
         if not rows:
             raise HTTPException(status_code=400, detail="Excel sheet must include at least one data row")
 
-        return sheets, selected_sheet, header_row, start_row, rows, columns, warnings
+        return sheets, selected_sheet, header_row, start_row, rows, columns, warnings, reached_limit
     finally:
         workbook.close()
 
@@ -1385,6 +2418,8 @@ def _parse_db_table_ref(source_uri: Any) -> tuple[str, str]:
     table_ref = table_ref.split("?", 1)[0].strip().strip("/")
     table_ref = table_ref.replace("/", ".")
     parts = [part for part in table_ref.split(".") if part]
+    for part in parts:
+        _quote_pg_identifier(part)
     if len(parts) == 1:
         return "public", parts[0]
     if len(parts) == 2:
@@ -1399,7 +2434,7 @@ async def _connector_raw_content_from_db(
     db: Any,
     connector: SourceConnector,
     limit: int,
-) -> tuple[StructuredSourceType, str, Optional[str], list[str]]:
+) -> tuple[StructuredSourceType, str, Optional[str], list[str], bool]:
     config = connector.config
     if connector.connector_type != "db_table" or _connector_has_inline_sample(config):
         return _connector_raw_content(connector, limit)
@@ -1411,28 +2446,85 @@ async def _connector_raw_content_from_db(
     schema, table = _parse_db_table_ref(source_uri)
     row_limit = max(1, min(int(limit or 100), 1000))
     qualified_table = f"{_quote_pg_identifier(schema)}.{_quote_pg_identifier(table)}"
-    rows = await db.query(
-        f"SELECT * FROM {qualified_table} LIMIT {row_limit}",
-        multirows=True,
-    )
+    if connector.auth_ref:
+        auth_ref = connector.auth_ref.strip()
+        if not re.fullmatch(r"[A-Z][A-Z0-9_]{1,127}", auth_ref):
+            raise HTTPException(
+                status_code=400,
+                detail="DB connector auth_ref must be an environment variable name such as FAQ_SOURCE_DATABASE_URL.",
+            )
+        connection_url = os.getenv(auth_ref)
+        if not connection_url:
+            raise HTTPException(
+                status_code=400,
+                detail=f"DB connector environment variable '{auth_ref}' is not configured.",
+            )
+        try:
+            import asyncpg  # type: ignore
+
+            connection = await asyncpg.connect(
+                dsn=connection_url,
+                timeout=10,
+                command_timeout=30,
+            )
+            try:
+                async with connection.transaction(readonly=True):
+                    rows = await connection.fetch(
+                        f"SELECT * FROM {qualified_table} LIMIT $1",
+                        row_limit + 1,
+                    )
+            finally:
+                await connection.close()
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "[Answers] Failed to read external DB connector %s using %s: %s",
+                connector.connector_id,
+                auth_ref,
+                exc,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to read DB connector '{connector.name}'. Check its connection environment and table.",
+            ) from exc
+    else:
+        rows = await db.query(
+            f"SELECT * FROM {qualified_table} LIMIT {row_limit + 1}",
+            multirows=True,
+        )
+    truncated = len(rows or []) > row_limit
+    rows = list(rows or [])[:row_limit]
     object_rows = [
         {str(key): _row_value(value) for key, value in row.items()}
-        for row in rows or []
+        for row in rows
     ]
     if not object_rows:
         raise HTTPException(
             status_code=400,
             detail=f"DB table '{schema}.{table}' returned no rows.",
         )
+    warnings = [
+        f"Loaded {len(object_rows)} row(s) from "
+        f"{'external ' if connector.auth_ref else ''}DB table {schema}.{table}"
+    ]
+    if truncated:
+        warnings.append(
+            f"DB table contains more than {row_limit} rows; additional rows were not loaded"
+        )
     return (
         "json",
         json.dumps(object_rows, ensure_ascii=False),
         str(source_uri),
-        [f"Loaded {len(object_rows)} row(s) from DB table {schema}.{table}"],
+        warnings,
+        truncated,
     )
 
 
-def _connector_raw_content(connector: SourceConnector, limit: int) -> tuple[StructuredSourceType, str, Optional[str], list[str]]:
+def _connector_raw_content(
+    connector: SourceConnector,
+    limit: int,
+) -> tuple[StructuredSourceType, str, Optional[str], list[str], bool]:
     config = connector.config
     warnings: list[str] = []
     source_uri = config.get("source_uri") or config.get("uri") or config.get("url") or config.get("table") or config.get("collection")
@@ -1442,7 +2534,7 @@ def _connector_raw_content(connector: SourceConnector, limit: int) -> tuple[Stru
         source_type = str(config.get("source_type") or "").lower()
         if source_type not in {"csv", "json"}:
             source_type = "json" if raw_content.startswith(("{", "[")) else "csv"
-        return source_type, raw_content, source_uri, warnings
+        return source_type, raw_content, source_uri, warnings, False
 
     rows = config.get("sample_rows") or config.get("rows") or config.get("documents")
     if isinstance(rows, dict):
@@ -1453,7 +2545,7 @@ def _connector_raw_content(connector: SourceConnector, limit: int) -> tuple[Stru
             sliced_rows = [{str(key): _row_value(value) for key, value in row.items()} for row in object_rows[:limit]]
             if len(object_rows) > limit:
                 warnings.append(f"Only the first {limit} connector rows were sampled")
-            return "json", json.dumps(sliced_rows, ensure_ascii=False), source_uri, warnings
+            return "json", json.dumps(sliced_rows, ensure_ascii=False), source_uri, warnings, len(object_rows) > limit
         array_rows = [row for row in rows if isinstance(row, list)]
         columns = config.get("columns")
         if array_rows and isinstance(columns, list) and columns:
@@ -1461,7 +2553,7 @@ def _connector_raw_content(connector: SourceConnector, limit: int) -> tuple[Stru
                 {str(column): _row_value(row[index]) if index < len(row) else "" for index, column in enumerate(columns)}
                 for row in array_rows[:limit]
             ]
-            return "csv", _rows_to_csv(dict_rows, [str(column) for column in columns]), source_uri, warnings
+            return "csv", _rows_to_csv(dict_rows, [str(column) for column in columns]), source_uri, warnings, len(array_rows) > limit
 
     tables = config.get("tables")
     if isinstance(tables, list) and tables:
@@ -1477,7 +2569,7 @@ def _connector_raw_content(connector: SourceConnector, limit: int) -> tuple[Stru
                 if isinstance(row, dict):
                     flattened.append({"table": table_name, **{str(key): _row_value(value) for key, value in row.items()}})
         if flattened:
-            return "json", json.dumps(flattened[:limit], ensure_ascii=False), source_uri, warnings
+            return "json", json.dumps(flattened[:limit], ensure_ascii=False), source_uri, warnings, len(flattened) > limit
 
     if connector.connector_type == "web":
         row = {
@@ -1485,7 +2577,7 @@ def _connector_raw_content(connector: SourceConnector, limit: int) -> tuple[Stru
             "url": config.get("url") or source_uri or "",
             "content": config.get("content") or config.get("summary") or "",
         }
-        return "json", json.dumps([row], ensure_ascii=False), source_uri, warnings
+        return "json", json.dumps([row], ensure_ascii=False), source_uri, warnings, False
 
     row = {
         "name": connector.name,
@@ -1494,7 +2586,7 @@ def _connector_raw_content(connector: SourceConnector, limit: int) -> tuple[Stru
         "description": config.get("description") or connector.metadata.get("description") or "",
     }
     warnings.append("Connector has no raw_content or sample_rows; generated a metadata sample row")
-    return "json", json.dumps([row], ensure_ascii=False), source_uri, warnings
+    return "json", json.dumps([row], ensure_ascii=False), source_uri, warnings, False
 
 
 def _connector_sample_response_from_raw(
@@ -1503,6 +2595,7 @@ def _connector_sample_response_from_raw(
     raw_content: str,
     source_uri: Optional[str],
     warnings: list[str],
+    truncated: bool,
     limit: int = 1000,
 ) -> SourceConnectorSampleResponse:
     rows, _, parse_warnings = _parse_structured_rows(source_type, raw_content, max_rows=limit)
@@ -1516,7 +2609,35 @@ def _connector_sample_response_from_raw(
         rows=rows,
         columns=_column_order_from_rows(rows),
         row_count=len(rows),
+        row_limit=limit,
+        truncated=truncated,
         warnings=warnings,
+    )
+
+
+def _compact_connector_materialization_sample(
+    sample: SourceConnectorSampleResponse,
+    profile: StructuredProfileResponse,
+    *,
+    limit: int = 20,
+) -> SourceConnectorSampleResponse:
+    rows = profile.sample_rows[:limit]
+    if sample.source_type == "csv":
+        raw_content = _rows_to_csv(rows, profile.columns)
+    else:
+        raw_content = json.dumps(rows, ensure_ascii=False)
+    warnings = list(sample.warnings)
+    if sample.row_count > len(rows):
+        warnings.append(
+            f"Materialization response includes {len(rows)} of {sample.row_count} sample rows. "
+            "Use the connector sample or mapping preview API to inspect source rows."
+        )
+    return sample.model_copy(
+        update={
+            "raw_content": raw_content,
+            "rows": rows,
+            "warnings": warnings,
+        }
     )
 
 
@@ -1712,6 +2833,7 @@ def _guidance_from_structured_profile(
     rows: list[dict[str, Any]],
     mapping: dict[str, str],
     guidance_columns: list[str],
+    conversion_purpose: StructuredConversionPurpose = "faq",
 ) -> list[SourceGuidanceCandidate]:
     candidates: list[SourceGuidanceCandidate] = []
     seen: set[tuple[str, str]] = set()
@@ -1738,7 +2860,17 @@ def _guidance_from_structured_profile(
     title_column = mapping.get("title")
     category_column = mapping.get("category")
     answer_column = mapping.get("answer")
+    lookup_columns = _id_lookup_searchable_columns(mapping, guidance_columns)
     for row in rows[:100]:
+        if conversion_purpose == "id_lookup":
+            combined_details = " ".join(
+                dict.fromkeys(
+                    str(row.get(column) or "").strip()
+                    for column in lookup_columns
+                    if str(row.get(column) or "").strip()
+                )
+            )
+            add("question", combined_details, 1.35, "id_lookup_details")
         if question_column:
             add("question", row.get(question_column), 1.25, question_column)
         if title_column:
@@ -1748,10 +2880,146 @@ def _guidance_from_structured_profile(
         if answer_column:
             add("note", row.get(answer_column), 0.45, answer_column)
         for column in guidance_columns:
-            add("keyword", row.get(column), 0.75, column)
+            column_name = _normalise_text(column)
+            if any(
+                marker in column_name
+                for marker in ("synonym", "alias", "동의어", "유사어", "별칭")
+            ):
+                guidance_type: GuidanceType = "synonym"
+                weight = 1.2
+            elif any(
+                marker in column_name
+                for marker in (
+                    "negative",
+                    "exclude",
+                    "block",
+                    "제외어",
+                    "금지어",
+                    "차단어",
+                )
+            ):
+                guidance_type = "negative_keyword"
+                weight = 1.0
+            else:
+                guidance_type = "keyword"
+                weight = 1.0
+
+            raw_guidance = str(row.get(column) or "").strip()
+            split_values = [
+                value.strip()
+                for value in re.split(r"[,;|\n]+", raw_guidance)
+                if value.strip()
+            ]
+            for value in split_values or [raw_guidance]:
+                add(guidance_type, value, weight, column)
         if len(candidates) >= 80:
             break
     return candidates[:80]
+
+
+def _id_lookup_searchable_columns(
+    mapping: dict[str, str],
+    guidance_columns: list[str],
+) -> list[str]:
+    id_column = mapping.get("id")
+    columns: list[str] = []
+    for role in ("question", "title", "category", "answer"):
+        column = mapping.get(role)
+        if column and column != id_column and column not in columns:
+            columns.append(column)
+    for column in guidance_columns:
+        if column and column != id_column and column not in columns:
+            columns.append(column)
+    return columns
+
+
+def _validate_id_lookup_rows(
+    rows: list[dict[str, Any]],
+    mapping: dict[str, str],
+    guidance_columns: list[str],
+    conversion_purpose: StructuredConversionPurpose,
+) -> StructuredIdLookupValidation:
+    if conversion_purpose != "id_lookup":
+        return StructuredIdLookupValidation()
+
+    id_column = mapping.get("id")
+    searchable_columns = _id_lookup_searchable_columns(mapping, guidance_columns)
+    blank_id_rows: list[int] = []
+    id_rows: dict[str, list[int]] = {}
+    detail_groups: dict[tuple[str, ...], dict[str, Any]] = {}
+
+    if id_column:
+        for row_index, row in enumerate(rows, start=1):
+            source_id = str(row.get(id_column) or "").strip()
+            if not source_id:
+                blank_id_rows.append(row_index)
+                continue
+            id_rows.setdefault(source_id, []).append(row_index)
+            fingerprint = tuple(
+                _normalise_text(str(row.get(column) or ""))
+                for column in searchable_columns
+            )
+            if any(fingerprint):
+                group = detail_groups.setdefault(
+                    fingerprint,
+                    {
+                        "values": {
+                            column: str(row.get(column) or "").strip()
+                            for column in searchable_columns
+                        },
+                        "ids": set(),
+                        "rows": [],
+                    },
+                )
+                group["ids"].add(source_id)
+                group["rows"].append(row_index)
+
+    duplicate_ids = sorted(
+        source_id
+        for source_id, source_rows in id_rows.items()
+        if len(source_rows) > 1
+    )
+    ambiguous_detail_groups = [
+        {
+            "values": group["values"],
+            "ids": sorted(group["ids"]),
+            "rows": group["rows"][:20],
+        }
+        for group in detail_groups.values()
+        if len(group["ids"]) > 1
+    ][:20]
+
+    warnings: list[str] = []
+    if not id_column:
+        warnings.append("Select the business ID column to return.")
+    if not searchable_columns:
+        warnings.append("Select at least one detail column to search.")
+    if blank_id_rows:
+        warnings.append(f"{len(blank_id_rows)} rows have an empty business ID.")
+    if duplicate_ids:
+        warnings.append(
+            f"{len(duplicate_ids)} business IDs appear in more than one row. "
+            "They can be created, but duplicate FAQ candidates may be returned."
+        )
+    if ambiguous_detail_groups:
+        warnings.append(
+            f"{len(ambiguous_detail_groups)} detail combinations point to different business IDs."
+        )
+
+    return StructuredIdLookupValidation(
+        enabled=True,
+        ready=bool(id_column and searchable_columns)
+        and not blank_id_rows
+        and not ambiguous_detail_groups,
+        id_column=id_column,
+        searchable_columns=searchable_columns,
+        row_count=len(rows),
+        valid_id_count=sum(len(source_rows) for source_rows in id_rows.values()),
+        blank_id_rows=blank_id_rows[:100],
+        duplicate_ids=duplicate_ids[:100],
+        ambiguous_detail_groups=ambiguous_detail_groups,
+        warnings=warnings,
+    )
 
 
 def _structured_row_text(row: dict[str, Any], column: Optional[str]) -> str:
@@ -1773,7 +3041,13 @@ def _title_for_structured_row(
     return f"{base_title} #{row_index + 1}"
 
 
-def _body_for_structured_row(row: dict[str, Any], mapping: dict[str, str]) -> str:
+def _body_for_structured_row(
+    row: dict[str, Any],
+    mapping: dict[str, str],
+    conversion_purpose: StructuredConversionPurpose = "faq",
+) -> str:
+    if conversion_purpose == "id_lookup":
+        return _structured_row_text(row, mapping.get("id"))
     body = _structured_row_text(row, mapping.get("answer"))
     if body:
         return body
@@ -1784,7 +3058,10 @@ def _summary_for_structured_row(
     row: dict[str, Any],
     mapping: dict[str, str],
     fallback: Optional[str],
+    conversion_purpose: StructuredConversionPurpose = "faq",
 ) -> Optional[str]:
+    if conversion_purpose == "id_lookup":
+        return None
     summary = _structured_row_text(row, mapping.get("answer"))
     return summary or fallback
 
@@ -1969,15 +3246,141 @@ def _normalise_answer_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     metadata = _coerce_json(snapshot.get("metadata"), {})
     snapshot["tags"] = tags if isinstance(tags, list) else []
     snapshot["metadata"] = metadata if isinstance(metadata, dict) else {}
+    if "assets" in snapshot:
+        assets = _coerce_json(snapshot.get("assets"), [])
+        snapshot["assets"] = assets if isinstance(assets, list) else []
     return snapshot
 
 
 def _normalise_text(value: Any) -> str:
-    return " ".join(str(value or "").lower().split())
+    normalized = unicodedata.normalize("NFKC", str(value or ""))
+    return " ".join(normalized.lower().split())
 
 
 def _tokens(value: Any) -> list[str]:
     return [token for token in TOKEN_RE.findall(_normalise_text(value)) if len(token) >= 2]
+
+
+def _candidate_query_terms(value: Any) -> list[str]:
+    terms: list[str] = []
+    for token in _tokens(value):
+        variants = [token]
+        if len(token) >= 4 and re.fullmatch(r"[가-힣]+", token):
+            variants.extend([token[:-1], token[:-2]])
+        for variant in variants:
+            if len(variant) >= 2 and variant not in terms:
+                terms.append(variant)
+    return terms[:64]
+
+
+def _builtin_alias_groups() -> list[AnswerAliasGroup]:
+    return [
+        AnswerAliasGroup(
+            alias_id=str(item["alias_id"]),
+            workspace="*",
+            canonical_term=str(item["canonical_term"]),
+            aliases=[str(alias) for alias in item["aliases"]],
+            enabled=True,
+            source="builtin",
+            metadata={"read_only": True},
+        )
+        for item in BUILTIN_ANSWER_ALIAS_GROUPS
+    ]
+
+
+def _alias_member_matches_query(normalized_query: str, member: str) -> bool:
+    normalized_member = _normalise_text(member)
+    if len(normalized_member) < 2:
+        return False
+    if re.search(r"[가-힣]", normalized_member):
+        return normalized_member in normalized_query
+    pattern = rf"(?<![0-9a-z_]){re.escape(normalized_member)}(?![0-9a-z_])"
+    return re.search(pattern, normalized_query) is not None
+
+
+async def _answer_alias_groups(db, workspace: str) -> list[AnswerAliasGroup]:
+    rows = await db.query(
+        """
+        SELECT alias_id, workspace, canonical_term, aliases, enabled, source,
+               metadata, create_time, update_time
+        FROM LIGHTRAG_ANSWER_TERM_ALIASES
+        WHERE workspace = $1 AND enabled = TRUE
+        ORDER BY LOWER(canonical_term), alias_id
+        """,
+        [workspace],
+        multirows=True,
+    )
+    return [*_builtin_alias_groups(), *[_alias_group_from_row(dict(row)) for row in rows or []]]
+
+
+async def _expand_query_aliases(
+    db,
+    workspace: str,
+    query: str,
+) -> list[AnswerAliasExpansion]:
+    normalized_query = _normalise_text(query)
+    expansions: list[AnswerAliasExpansion] = []
+    seen_canonical: set[str] = set()
+    for group in await _answer_alias_groups(db, workspace):
+        members = [group.canonical_term, *group.aliases]
+        matched_term = next(
+            (
+                member
+                for member in members
+                if _alias_member_matches_query(normalized_query, member)
+            ),
+            None,
+        )
+        canonical_key = _normalise_text(group.canonical_term)
+        if not matched_term or canonical_key in seen_canonical:
+            continue
+        seen_canonical.add(canonical_key)
+        expanded_terms: list[str] = []
+        for member in members:
+            value = " ".join(str(member or "").split())
+            if value and _normalise_text(value) not in {
+                _normalise_text(item) for item in expanded_terms
+            }:
+                expanded_terms.append(value)
+        expansions.append(
+            AnswerAliasExpansion(
+                canonical_term=group.canonical_term,
+                matched_term=matched_term,
+                expanded_terms=expanded_terms,
+                source=group.source,
+            )
+        )
+    return expansions
+
+
+def _alias_query_variants(
+    query: str,
+    alias_expansions: Optional[list[AnswerAliasExpansion]] = None,
+) -> list[str]:
+    variants = [_normalise_text(query)]
+    for expansion in alias_expansions or []:
+        matched_term = _normalise_text(expansion.matched_term)
+        if not matched_term:
+            continue
+        current_variants = list(variants)
+        for current in current_variants:
+            if not _alias_member_matches_query(current, matched_term):
+                continue
+            for expanded_term in expansion.expanded_terms:
+                replacement = _normalise_text(expanded_term)
+                if not replacement:
+                    continue
+                if re.search(r"[가-힣]", matched_term):
+                    candidate = current.replace(matched_term, replacement)
+                else:
+                    pattern = rf"(?<![0-9a-z_]){re.escape(matched_term)}(?![0-9a-z_])"
+                    candidate = re.sub(pattern, replacement, current)
+                candidate = " ".join(candidate.split())
+                if candidate and candidate not in variants:
+                    variants.append(candidate)
+                if len(variants) >= 32:
+                    return variants
+    return variants
 
 
 def _partial_overlap(query_tokens: list[str], text: str) -> float:
@@ -2013,6 +3416,33 @@ def _safe_float(value: Any, default: float, minimum: Optional[float] = None, max
     return number
 
 
+def _compact_answer_metadata(metadata: Any) -> dict[str, Any]:
+    if not isinstance(metadata, dict):
+        return {}
+    return {
+        key: value
+        for key, value in metadata.items()
+        if key not in {"source_profile", "raw_content"}
+    }
+
+
+def _search_answer_view(answer: AnswerItem) -> AnswerItem:
+    compact_metadata = _compact_answer_metadata(answer.metadata)
+    if hasattr(answer, "model_copy"):
+        return answer.model_copy(update={"metadata": compact_metadata})
+    return answer.copy(update={"metadata": compact_metadata})
+
+
+def _matched_business_id(answer: Optional[AnswerItem]) -> Optional[str]:
+    if answer is None or not isinstance(answer.metadata, dict):
+        return None
+    if answer.metadata.get("conversion_purpose") != "id_lookup":
+        return None
+    matched_id = answer.metadata.get("matched_id") or answer.metadata.get("source_id")
+    text = str(matched_id or "").strip()
+    return text or None
+
+
 def _embedding_func_from_rag(rag):
     if hasattr(rag, "embedding_func") and rag.embedding_func:
         return rag.embedding_func
@@ -2039,18 +3469,1255 @@ def _embedding_to_list(value: Any) -> list[float]:
     return converted
 
 
-def _cosine_similarity(left: list[float], right: list[float]) -> float:
-    if not left or not right:
-        return 0.0
-    pairs = list(zip(left, right))
-    if not pairs:
-        return 0.0
-    dot = sum(a * b for a, b in pairs)
-    left_norm = sum(a * a for a, _ in pairs) ** 0.5
-    right_norm = sum(b * b for _, b in pairs) ** 0.5
-    if left_norm == 0 or right_norm == 0:
-        return 0.0
-    return max(0.0, min(1.0, dot / (left_norm * right_norm)))
+def _embedding_to_pgvector(value: list[float]) -> str:
+    return json.dumps(value, ensure_ascii=True, separators=(",", ":"))
+
+
+def _graph_config_from_row(workspace: str, row: Optional[dict[str, Any]]) -> AnswerGraphConfig:
+    if not row:
+        return AnswerGraphConfig(workspace=workspace)
+    entity_types = _coerce_json(row.get("entity_types"), [])
+    relation_types = _coerce_json(row.get("relation_types"), [])
+    return AnswerGraphConfig(
+        workspace=workspace,
+        enabled=bool(row.get("enabled")),
+        auto_sync=bool(row.get("auto_sync")),
+        graph_weight=_safe_float(row.get("graph_weight"), 0.35, 0.0, 1.0),
+        min_similarity=_safe_float(row.get("min_similarity"), 0.60, 0.0, 1.0),
+        max_hops=max(1, min(3, int(row.get("max_hops") or 2))),
+        precision_mode=bool(row.get("precision_mode")),
+        precision_min_score=_safe_float(
+            row.get("precision_min_score"), 0.35, 0.0, 1.0
+        ),
+        min_score_margin=_safe_float(
+            row.get("min_score_margin"), 0.08, 0.0, 1.0
+        ),
+        min_category_margin=_safe_float(
+            row.get("min_category_margin"), 0.05, 0.0, 1.0
+        ),
+        min_evidence_sources=max(
+            1, min(3, int(row.get("min_evidence_sources") or 2))
+        ),
+        llm_min_confidence=_safe_float(
+            row.get("llm_min_confidence"), 0.80, 0.0, 1.0
+        ),
+        entity_types=(
+            [str(item) for item in entity_types if str(item).strip()]
+            if isinstance(entity_types, list) and entity_types
+            else list(DEFAULT_ANSWER_GRAPH_ENTITY_TYPES)
+        ),
+        relation_types=(
+            [str(item) for item in relation_types if str(item).strip()]
+            if isinstance(relation_types, list) and relation_types
+            else list(DEFAULT_ANSWER_GRAPH_RELATION_TYPES)
+        ),
+        extraction_prompt=str(row.get("extraction_prompt") or DEFAULT_ANSWER_GRAPH_PROMPT),
+        ai_extraction_strategy=(
+            str(row.get("ai_extraction_strategy"))
+            if str(row.get("ai_extraction_strategy")) in {"fast", "adaptive", "deep"}
+            else "fast"
+        ),
+        ai_retry_max_tokens=max(
+            1024, min(32768, int(row.get("ai_retry_max_tokens") or 8192))
+        ),
+        ai_min_relations=max(
+            1, min(12, int(row.get("ai_min_relations") or 4))
+        ),
+        ai_min_relation_types=max(
+            1, min(8, int(row.get("ai_min_relation_types") or 3))
+        ),
+        schema_version=int(row.get("schema_version") or 1),
+        create_time=_iso(row.get("create_time")),
+        update_time=_iso(row.get("update_time")),
+    )
+
+
+async def _get_answer_graph_config(db, workspace: str) -> AnswerGraphConfig:
+    row = await db.query(
+        """
+        SELECT workspace, enabled, auto_sync, graph_weight, min_similarity, max_hops,
+               precision_mode, precision_min_score, min_score_margin,
+               min_category_margin, min_evidence_sources, llm_min_confidence,
+               entity_types, relation_types, extraction_prompt,
+               ai_extraction_strategy, ai_retry_max_tokens, ai_min_relations,
+               ai_min_relation_types, schema_version,
+               create_time, update_time
+        FROM LIGHTRAG_ANSWER_GRAPH_CONFIG
+        WHERE workspace = $1
+        """,
+        [workspace],
+    )
+    return _graph_config_from_row(workspace, dict(row) if row else None)
+
+
+def _graph_projection_from_row(row: dict[str, Any]) -> AnswerGraphProjection:
+    raw_nodes = _coerce_json(row.get("nodes"), [])
+    raw_relations = _coerce_json(row.get("relations"), [])
+    return AnswerGraphProjection(
+        workspace=str(row["workspace"]),
+        answer_id=str(row["answer_id"]),
+        answer_version=int(row.get("answer_version") or 1),
+        schema_version=int(row.get("schema_version") or 1),
+        status=str(row.get("status") or "pending"),
+        content_hash=str(row.get("content_hash") or ""),
+        nodes=[
+            AnswerGraphNode.model_validate(item)
+            for item in raw_nodes
+            if isinstance(item, dict)
+        ],
+        relations=[
+            AnswerGraphRelation.model_validate(item)
+            for item in raw_relations
+            if isinstance(item, dict)
+        ],
+        error=row.get("error"),
+        built_at=_iso(row.get("built_at")),
+        update_time=_iso(row.get("update_time")),
+    )
+
+
+def _graph_clean_label(value: Any, max_length: int = 160) -> str:
+    label = " ".join(str(value or "").replace("::", " ").split()).strip()
+    return label[:max_length]
+
+
+def _graph_node_id(entity_type: str, label: str) -> str:
+    safe_type = re.sub(r"[^0-9A-Za-z_]", "", entity_type) or "Term"
+    safe_label = _graph_clean_label(label)
+    return f"{ANSWER_GRAPH_NODE_PREFIX}::{safe_type.upper()}::{safe_label}"
+
+
+def _answer_graph_node_id(answer_id: str) -> str:
+    return _graph_node_id("FAQAnswer", answer_id)
+
+
+def _answer_id_from_graph_node(node_id: str) -> Optional[str]:
+    prefix = f"{ANSWER_GRAPH_NODE_PREFIX}::FAQANSWER::"
+    return node_id[len(prefix) :] if node_id.startswith(prefix) else None
+
+
+def _graph_label_from_node_id(node_id: str) -> str:
+    return node_id.split("::", 2)[-1]
+
+
+def _graph_values(value: Any) -> list[str]:
+    if isinstance(value, list):
+        values = value
+    elif isinstance(value, (str, int, float)):
+        values = re.split(r"[,|;/\n]+", str(value))
+    else:
+        values = []
+    unique: list[str] = []
+    for item in values:
+        label = _graph_clean_label(item)
+        if len(label) >= 2 and _normalise_text(label) not in {
+            _normalise_text(existing) for existing in unique
+        }:
+            unique.append(label)
+    return unique[:20]
+
+
+def _graph_content_hash(
+    answer: AnswerItem,
+    guidance: list[AnswerGuidance],
+    config: AnswerGraphConfig,
+) -> str:
+    source = {
+        "answer_id": answer.answer_id,
+        "version": answer.version,
+        "title": answer.title,
+        "body": answer.body,
+        "tags": answer.tags,
+        "metadata": answer.metadata,
+        "assets": [
+            {
+                "asset_id": asset.asset_id,
+                "type": asset.asset_type,
+                "caption": asset.caption,
+                "alt_text": asset.alt_text,
+                "search_text": asset.search_text,
+                "content_text": asset.content_text,
+            }
+            for asset in answer.assets
+            if asset.is_active
+        ],
+        "guidance": [
+            {
+                "type": item.guidance_type,
+                "text": item.text,
+                "weight": item.weight,
+            }
+            for item in guidance
+        ],
+        "schema_version": config.schema_version,
+        "entity_types": config.entity_types,
+        "relation_types": config.relation_types,
+    }
+    return hashlib.sha256(
+        json.dumps(source, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
+def _deterministic_answer_graph_projection(
+    answer: AnswerItem,
+    guidance: list[AnswerGuidance],
+    alias_groups: list[AnswerAliasGroup],
+    config: AnswerGraphConfig,
+) -> tuple[list[AnswerGraphNode], list[AnswerGraphRelation]]:
+    allowed_entities = set(config.entity_types)
+    allowed_relations = set(config.relation_types)
+    answer_node_id = _answer_graph_node_id(answer.answer_id)
+    nodes: dict[str, AnswerGraphNode] = {
+        answer_node_id: AnswerGraphNode(
+            node_id=answer_node_id,
+            entity_type="FAQAnswer",
+            label=answer.title,
+            description="\n".join(
+                part
+                for part in [
+                    answer.title,
+                    answer.body[:1800],
+                    f"Tags: {', '.join(answer.tags)}" if answer.tags else "",
+                    (
+                        f"Attached media: {_answer_asset_search_content(answer.assets)[:1200]}"
+                        if _answer_asset_search_content(answer.assets)
+                        else ""
+                    ),
+                ]
+                if part
+            ),
+        )
+    }
+    relations: dict[tuple[str, str], AnswerGraphRelation] = {}
+
+    def add_concept(
+        entity_type: str,
+        label: str,
+        relation_type: str,
+        description: str,
+        *,
+        source: str = "deterministic",
+        weight: float = 1.0,
+    ) -> Optional[str]:
+        clean_label = _graph_clean_label(label)
+        if (
+            entity_type not in allowed_entities
+            or relation_type not in allowed_relations
+            or len(clean_label) < 2
+        ):
+            return None
+        node_id = _graph_node_id(entity_type, clean_label)
+        nodes.setdefault(
+            node_id,
+            AnswerGraphNode(
+                node_id=node_id,
+                entity_type=entity_type,
+                label=clean_label,
+                description=description,
+                source=source,
+            ),
+        )
+        key = tuple(sorted((answer_node_id, node_id)))
+        relations[key] = AnswerGraphRelation(
+            source_id=answer_node_id,
+            target_id=node_id,
+            relation_type=relation_type,
+            description=description,
+            weight=weight,
+            source=source,
+        )
+        return node_id
+
+    guidance_relation_map = {
+        "question": ("Intent", "REPRESENTS_QUESTION"),
+        "keyword": ("Term", "HAS_TERM"),
+        "synonym": ("Term", "HAS_TERM"),
+        "note": ("Procedure", "RESOLVES"),
+    }
+    for item in guidance:
+        if item.guidance_type == "negative_keyword":
+            continue
+        entity_type, relation_type = guidance_relation_map.get(
+            item.guidance_type, ("Term", "HAS_TERM")
+        )
+        add_concept(
+            entity_type,
+            item.text,
+            relation_type,
+            f"{item.guidance_type} finding hint for {answer.title}",
+            weight=max(0.1, min(float(item.weight), 3.0)),
+        )
+
+    for tag in answer.tags:
+        add_concept(
+            "Category",
+            tag,
+            "BELONGS_TO",
+            f"Category tag for {answer.title}",
+        )
+
+    metadata_fields = {
+        "category": ("Category", "BELONGS_TO"),
+        "service_area": ("System", "APPLIES_TO"),
+        "system": ("System", "APPLIES_TO"),
+        "product": ("Product", "APPLIES_TO"),
+        "application": ("Product", "APPLIES_TO"),
+        "symptom": ("Symptom", "HAS_SYMPTOM"),
+        "symptoms": ("Symptom", "HAS_SYMPTOM"),
+        "error_code": ("ErrorCode", "HAS_TERM"),
+        "code": ("ErrorCode", "HAS_TERM"),
+        "procedure": ("Procedure", "RESOLVES"),
+    }
+    for key, (entity_type, relation_type) in metadata_fields.items():
+        for value in _graph_values(answer.metadata.get(key)):
+            add_concept(
+                entity_type,
+                value,
+                relation_type,
+                f"{key} metadata for {answer.title}",
+            )
+
+    searchable_text = _normalise_text(
+        " ".join(
+            [
+                answer.title,
+                answer.body,
+                *answer.tags,
+                *(item.text for item in guidance if item.guidance_type != "negative_keyword"),
+            ]
+        )
+    )
+    for group in alias_groups:
+        members = [group.canonical_term, *group.aliases]
+        if not any(
+            _alias_member_matches_query(searchable_text, member) for member in members
+        ):
+            continue
+        canonical_id = add_concept(
+            "Term",
+            group.canonical_term,
+            "HAS_TERM",
+            f"Standard term for {answer.title}",
+            source=group.source,
+        )
+        if not canonical_id or "ALIAS_OF" not in allowed_relations:
+            continue
+        for alias in group.aliases:
+            alias_label = _graph_clean_label(alias)
+            if len(alias_label) < 2:
+                continue
+            alias_id = _graph_node_id("Term", alias_label)
+            nodes.setdefault(
+                alias_id,
+                AnswerGraphNode(
+                    node_id=alias_id,
+                    entity_type="Term",
+                    label=alias_label,
+                    description=f"Alias of {group.canonical_term}",
+                    source=group.source,
+                ),
+            )
+            key = tuple(sorted((alias_id, canonical_id)))
+            relations[key] = AnswerGraphRelation(
+                source_id=alias_id,
+                target_id=canonical_id,
+                relation_type="ALIAS_OF",
+                description=f"{alias_label} is an alias of {group.canonical_term}",
+                weight=1.0,
+                source=group.source,
+            )
+
+    return list(nodes.values()), list(relations.values())
+
+
+def _parse_answer_graph_llm_result(
+    raw: str,
+    config: AnswerGraphConfig,
+    *,
+    source: str = "llm",
+) -> tuple[list[AnswerGraphNode], list[AnswerGraphRelation]]:
+    parsed = _coerce_json(raw.strip().removeprefix("```json").removesuffix("```").strip(), {})
+    if not isinstance(parsed, dict):
+        return [], []
+    allowed_entities = set(config.entity_types)
+    allowed_relations = set(config.relation_types)
+    nodes: dict[tuple[str, str], AnswerGraphNode] = {}
+    for item in parsed.get("entities", [])[:40]:
+        if not isinstance(item, dict):
+            continue
+        entity_type = str(item.get("type") or "")
+        label = _graph_clean_label(item.get("label"))
+        if entity_type not in allowed_entities or entity_type == "FAQAnswer" or len(label) < 2:
+            continue
+        node = AnswerGraphNode(
+            node_id=_graph_node_id(entity_type, label),
+            entity_type=entity_type,
+            label=label,
+            description=_graph_clean_label(item.get("description"), 500),
+            source=source,
+        )
+        nodes[(entity_type, _normalise_text(label))] = node
+
+    relations: list[AnswerGraphRelation] = []
+    for item in parsed.get("relations", [])[:60]:
+        if not isinstance(item, dict):
+            continue
+        relation_type = str(item.get("type") or "")
+        source_type = str(item.get("source_type") or "")
+        target_type = str(item.get("target_type") or "")
+        source_label = _graph_clean_label(item.get("source_label"))
+        target_label = _graph_clean_label(item.get("target_label"))
+        if (
+            relation_type not in allowed_relations
+            or source_type not in allowed_entities
+            or target_type not in allowed_entities
+            or len(source_label) < 2
+            or len(target_label) < 2
+        ):
+            continue
+        source_id = _graph_node_id(source_type, source_label)
+        target_id = _graph_node_id(target_type, target_label)
+        if source_type != "FAQAnswer":
+            nodes.setdefault(
+                (source_type, _normalise_text(source_label)),
+                AnswerGraphNode(
+                    node_id=source_id,
+                    entity_type=source_type,
+                    label=source_label,
+                    source=source,
+                ),
+            )
+        if target_type != "FAQAnswer":
+            nodes.setdefault(
+                (target_type, _normalise_text(target_label)),
+                AnswerGraphNode(
+                    node_id=target_id,
+                    entity_type=target_type,
+                    label=target_label,
+                    source=source,
+                ),
+            )
+        relations.append(
+            AnswerGraphRelation(
+                source_id=source_id,
+                target_id=target_id,
+                relation_type=relation_type,
+                description=_graph_clean_label(item.get("description"), 500),
+                source=source,
+            )
+        )
+    return list(nodes.values()), relations
+
+
+def _answer_graph_llm_quality(
+    answer_node_id: str,
+    nodes: list[AnswerGraphNode],
+    relations: list[AnswerGraphRelation],
+    config: AnswerGraphConfig,
+    expected_relation_types: set[str] | None = None,
+) -> tuple[bool, tuple[int, int, int, int, int], list[str]]:
+    connected = [
+        relation
+        for relation in relations
+        if answer_node_id in {relation.source_id, relation.target_id}
+    ]
+    relation_types = {relation.relation_type for relation in connected}
+    expected = expected_relation_types or set()
+    satisfied_expected = expected.intersection(relation_types)
+    reasons: list[str] = []
+    if len(connected) < config.ai_min_relations:
+        reasons.append(
+            f"answer_relations={len(connected)}<{config.ai_min_relations}"
+        )
+    if len(relation_types) < config.ai_min_relation_types:
+        reasons.append(
+            f"relation_types={len(relation_types)}<{config.ai_min_relation_types}"
+        )
+    missing_expected = sorted(expected - relation_types)
+    if missing_expected:
+        reasons.append(f"missing_expected={','.join(missing_expected)}")
+    score = (
+        1 if not reasons else 0,
+        len(satisfied_expected),
+        len(relation_types),
+        len(connected),
+        len(nodes) + len(relations),
+    )
+    return not reasons, score, reasons
+
+
+def _expected_answer_graph_relation_types(
+    answer: AnswerItem,
+    config: AnswerGraphConfig,
+) -> set[str]:
+    allowed = set(config.relation_types)
+    expected = {"REPRESENTS_QUESTION"}.intersection(allowed)
+    title = _normalise_text(answer.title)
+    if "HAS_SYMPTOM" in allowed and re.search(
+        r"(안\s|않|오류|실패|불가|끊|느리|없|분실|잠김|인식|신호|소진|부족|못|문제)",
+        title,
+    ):
+        expected.add("HAS_SYMPTOM")
+    if "RESOLVES" in allowed and re.search(
+        r"(방법|싶|신청|변경|교체|발급|해지|정지|차단|환불|등록|전환|확인|조회|납부|설정)",
+        title,
+    ):
+        expected.add("RESOLVES")
+    return expected
+
+
+async def _llm_answer_graph_projection(
+    rag,
+    answer: AnswerItem,
+    guidance: list[AnswerGuidance],
+    config: AnswerGraphConfig,
+) -> tuple[list[AnswerGraphNode], list[AnswerGraphRelation]]:
+    llm_func = getattr(rag, "llm_model_func", None)
+    if llm_func is None:
+        return [], []
+    answer_node_id = _answer_graph_node_id(answer.answer_id)
+    expected_relation_types = _expected_answer_graph_relation_types(answer, config)
+    payload = {
+        "answer_node": {
+            "type": "FAQAnswer",
+            "label": answer.answer_id,
+            "node_id": answer_node_id,
+        },
+        "title": answer.title,
+        "body": answer.body[:4000],
+        "tags": answer.tags,
+        "metadata": answer.metadata,
+        "assets": [
+            {
+                "type": asset.asset_type,
+                "caption": asset.caption,
+                "alt_text": asset.alt_text,
+                "search_text": asset.search_text,
+                "content_text": asset.content_text,
+            }
+            for asset in answer.assets
+            if asset.is_active
+        ],
+        "finding_hints": [
+            {"type": item.guidance_type, "text": item.text}
+            for item in guidance
+            if item.guidance_type != "negative_keyword"
+        ],
+        "allowed_entity_types": config.entity_types,
+        "allowed_relation_types": config.relation_types,
+    }
+    base_prompt = (
+        f"{config.extraction_prompt}\n\n"
+        "Use the supplied FAQAnswer label exactly for every relation connected to the answer.\n"
+        "Relation rules: REPRESENTS_QUESTION connects the FAQAnswer to its intent; "
+        "HAS_TERM connects important domain terms; HAS_SYMPTOM is only for an explicit "
+        "symptom; APPLIES_TO is only for a named product or system; BELONGS_TO is for "
+        "categories; RESOLVES is for procedures or actions in the answer. Prefer three "
+        "to eight supported relations and at least two relation types.\n"
+        f"INPUT:\n{json.dumps(payload, ensure_ascii=False)}"
+    )
+
+    async def extract(*, deep: bool) -> tuple[list[AnswerGraphNode], list[AnswerGraphRelation]]:
+        prompt = base_prompt
+        source = "llm"
+        options: dict[str, Any] = {"_llm_thinking_override": deep}
+        if deep:
+            source = "llm_deep"
+            options["max_tokens"] = config.ai_retry_max_tokens
+            prompt = (
+                f"{base_prompt}\n\n"
+                "Review the FAQ carefully before returning the final JSON. Check that "
+                "the FAQAnswer is connected to its intent and, when supported, its "
+                "terms, symptoms, product/system, category, and resolution procedure. "
+                "The following relation types are expected for this FAQ when supported "
+                f"by its title: {', '.join(sorted(expected_relation_types))}."
+            )
+        raw = await llm_func(
+            prompt,
+            system_prompt="You build bounded FAQ retrieval graphs and return valid JSON only.",
+            _llm_purpose="knowledge_structure",
+            **options,
+        )
+        return _parse_answer_graph_llm_result(str(raw), config, source=source)
+
+    strategy = config.ai_extraction_strategy
+    if strategy == "deep":
+        try:
+            return await extract(deep=True)
+        except Exception as exc:
+            logger.warning(
+                "[Answers] Deep FAQ graph extraction failed for %s; retrying fast: %s",
+                answer.answer_id,
+                exc,
+            )
+            try:
+                return await extract(deep=False)
+            except Exception as fallback_exc:
+                logger.warning(
+                    "[Answers] FAQ graph fallback extraction failed for %s: %s",
+                    answer.answer_id,
+                    fallback_exc,
+                )
+                return [], []
+
+    try:
+        fast_nodes, fast_relations = await extract(deep=False)
+    except Exception as exc:
+        logger.warning(
+            "[Answers] FAQ graph LLM extraction failed for %s: %s",
+            answer.answer_id,
+            exc,
+        )
+        fast_nodes, fast_relations = [], []
+    if strategy == "fast":
+        return fast_nodes, fast_relations
+
+    fast_valid, fast_score, reasons = _answer_graph_llm_quality(
+        answer_node_id,
+        fast_nodes,
+        fast_relations,
+        config,
+        expected_relation_types,
+    )
+    if fast_valid:
+        return fast_nodes, fast_relations
+
+    logger.info(
+        "[Answers] Adaptive FAQ graph retry answer=%s reasons=%s",
+        answer.answer_id,
+        ",".join(reasons),
+    )
+    try:
+        deep_nodes, deep_relations = await extract(deep=True)
+    except Exception as exc:
+        logger.warning(
+            "[Answers] Adaptive FAQ graph retry failed for %s; keeping fast result: %s",
+            answer.answer_id,
+            exc,
+        )
+        return fast_nodes, fast_relations
+    _, deep_score, _ = _answer_graph_llm_quality(
+        answer_node_id,
+        deep_nodes,
+        deep_relations,
+        config,
+        expected_relation_types,
+    )
+    if deep_score > fast_score:
+        return deep_nodes, deep_relations
+    return fast_nodes, fast_relations
+
+
+async def _build_answer_graph_preview(
+    db,
+    workspace: str,
+    rag,
+    answer: AnswerItem,
+    guidance: list[AnswerGuidance],
+    config: AnswerGraphConfig,
+    *,
+    use_llm: bool,
+) -> AnswerGraphProjection:
+    aliases = await _answer_alias_groups(db, workspace)
+    nodes, relations = _deterministic_answer_graph_projection(
+        answer, guidance, aliases, config
+    )
+    if use_llm:
+        llm_nodes, llm_relations = await _llm_answer_graph_projection(
+            rag, answer, guidance, config
+        )
+        node_map = {node.node_id: node for node in nodes}
+        node_map.update({node.node_id: node for node in llm_nodes})
+        relation_map = {
+            (
+                relation.source_id,
+                relation.target_id,
+                relation.relation_type,
+            ): relation
+            for relation in relations
+        }
+        relation_map.update(
+            {
+                (
+                    relation.source_id,
+                    relation.target_id,
+                    relation.relation_type,
+                ): relation
+                for relation in llm_relations
+            }
+        )
+        nodes = list(node_map.values())
+        relations = list(relation_map.values())
+    return AnswerGraphProjection(
+        workspace=workspace,
+        answer_id=answer.answer_id,
+        answer_version=answer.version,
+        schema_version=config.schema_version,
+        status="preview",
+        content_hash=_graph_content_hash(answer, guidance, config),
+        nodes=nodes,
+        relations=relations,
+    )
+
+
+async def _mark_answer_graph_stale(
+    db,
+    workspace: str,
+    answer_id: str,
+    answer_version: int,
+) -> None:
+    config = await _get_answer_graph_config(db, workspace)
+    await db.query(
+        """
+        INSERT INTO LIGHTRAG_ANSWER_GRAPH_PROJECTIONS
+            (
+                workspace, answer_id, answer_version, schema_version,
+                status, content_hash, nodes, relations
+            )
+        VALUES ($1, $2, $3, $4, 'stale', '', '[]'::jsonb, '[]'::jsonb)
+        ON CONFLICT (workspace, answer_id)
+        DO UPDATE SET
+            answer_version = EXCLUDED.answer_version,
+            schema_version = EXCLUDED.schema_version,
+            status = 'stale',
+            error = NULL,
+            update_time = NOW()
+        """,
+        [workspace, answer_id, answer_version, config.schema_version],
+    )
+
+
+async def _mark_all_answer_graph_stale(db, workspace: str) -> None:
+    await db.execute(
+        """
+        UPDATE LIGHTRAG_ANSWER_GRAPH_PROJECTIONS
+        SET status = 'stale', error = NULL, update_time = NOW()
+        WHERE workspace = $1
+        """,
+        {"workspace": workspace},
+    )
+
+
+async def _upsert_graph_entity(rag, node: AnswerGraphNode, source_id: str) -> None:
+    storage = rag.chunk_entity_relation_graph
+    if await storage.has_node(node.node_id):
+        if node.entity_type == "FAQAnswer":
+            await rag.aedit_entity(
+                node.node_id,
+                {
+                    "entity_type": node.entity_type,
+                    "description": node.description,
+                    "source_id": source_id,
+                    "file_path": "faq_graph",
+                },
+                allow_rename=False,
+            )
+        return
+    await rag.acreate_entity(
+        node.node_id,
+        {
+            "entity_type": node.entity_type,
+            "description": node.description,
+            "source_id": source_id,
+            "file_path": "faq_graph",
+        },
+    )
+
+
+async def _upsert_graph_relation(
+    rag,
+    relation: AnswerGraphRelation,
+    source_id: str,
+) -> None:
+    storage = rag.chunk_entity_relation_graph
+    data = {
+        "description": relation.description,
+        "keywords": relation.relation_type,
+        "source_id": source_id,
+        "weight": relation.weight,
+        "file_path": "faq_graph",
+    }
+    if await storage.has_edge(relation.source_id, relation.target_id):
+        await rag.aedit_relation(relation.source_id, relation.target_id, data)
+    else:
+        await rag.acreate_relation(relation.source_id, relation.target_id, data)
+
+
+async def _persist_answer_graph_projection(
+    *,
+    db,
+    workspace: str,
+    rag,
+    projection: AnswerGraphProjection,
+) -> AnswerGraphProjection:
+    answer_node_id = _answer_graph_node_id(projection.answer_id)
+    source_id = (
+        f"faq-graph:{projection.answer_id}:v{projection.answer_version}:"
+        f"s{projection.schema_version}"
+    )
+    try:
+        if await rag.chunk_entity_relation_graph.has_node(answer_node_id):
+            await rag.adelete_by_entity(answer_node_id)
+        for node in projection.nodes:
+            await _upsert_graph_entity(rag, node, source_id)
+        for relation in projection.relations:
+            if not await rag.chunk_entity_relation_graph.has_node(relation.source_id):
+                continue
+            if not await rag.chunk_entity_relation_graph.has_node(relation.target_id):
+                continue
+            await _upsert_graph_relation(rag, relation, source_id)
+
+        projection.status = "ready"
+        projection.built_at = _iso(_now())
+        projection.error = None
+        await db.query(
+            """
+            INSERT INTO LIGHTRAG_ANSWER_GRAPH_PROJECTIONS
+                (
+                    workspace, answer_id, answer_version, schema_version,
+                    status, content_hash, nodes, relations, error, built_at
+                )
+            VALUES ($1, $2, $3, $4, 'ready', $5, $6::jsonb, $7::jsonb, NULL, NOW())
+            ON CONFLICT (workspace, answer_id)
+            DO UPDATE SET
+                answer_version = EXCLUDED.answer_version,
+                schema_version = EXCLUDED.schema_version,
+                status = 'ready',
+                content_hash = EXCLUDED.content_hash,
+                nodes = EXCLUDED.nodes,
+                relations = EXCLUDED.relations,
+                error = NULL,
+                built_at = NOW(),
+                update_time = NOW()
+            """,
+            [
+                workspace,
+                projection.answer_id,
+                projection.answer_version,
+                projection.schema_version,
+                projection.content_hash,
+                _json_list([item.model_dump() for item in projection.nodes]),
+                _json_list([item.model_dump() for item in projection.relations]),
+            ],
+        )
+        return projection
+    except Exception as exc:
+        projection.status = "failed"
+        projection.error = str(exc)
+        await db.query(
+            """
+            INSERT INTO LIGHTRAG_ANSWER_GRAPH_PROJECTIONS
+                (
+                    workspace, answer_id, answer_version, schema_version,
+                    status, content_hash, nodes, relations, error
+                )
+            VALUES ($1, $2, $3, $4, 'failed', $5, $6::jsonb, $7::jsonb, $8)
+            ON CONFLICT (workspace, answer_id)
+            DO UPDATE SET
+                answer_version = EXCLUDED.answer_version,
+                schema_version = EXCLUDED.schema_version,
+                status = 'failed',
+                content_hash = EXCLUDED.content_hash,
+                nodes = EXCLUDED.nodes,
+                relations = EXCLUDED.relations,
+                error = EXCLUDED.error,
+                update_time = NOW()
+            """,
+            [
+                workspace,
+                projection.answer_id,
+                projection.answer_version,
+                projection.schema_version,
+                projection.content_hash,
+                _json_list([item.model_dump() for item in projection.nodes]),
+                _json_list([item.model_dump() for item in projection.relations]),
+                str(exc),
+            ],
+        )
+        raise
+
+
+async def _answer_rows_and_guidance(
+    db,
+    workspace: str,
+    answer_ids: list[str],
+) -> tuple[list[AnswerItem], dict[str, list[AnswerGuidance]]]:
+    if not answer_ids:
+        return [], {}
+    rows = await db.query(
+        """
+        SELECT workspace, answer_id, title, body, approved_summary, content_format,
+               display_policy, status, version, valid_from, valid_until, priority,
+               tags, metadata, publish_time, create_time, update_time
+        FROM LIGHTRAG_ANSWER_ITEMS
+        WHERE workspace = $1 AND answer_id = ANY($2::text[])
+        ORDER BY update_time DESC, answer_id
+        """,
+        [workspace, answer_ids],
+        multirows=True,
+    )
+    guidance_rows = await db.query(
+        """
+        SELECT guidance_id, workspace, answer_id, guidance_type, text, weight,
+               metadata, create_time
+        FROM LIGHTRAG_ANSWER_GUIDANCE
+        WHERE workspace = $1 AND answer_id = ANY($2::text[])
+        """,
+        [workspace, answer_ids],
+        multirows=True,
+    )
+    guidance_by_answer: dict[str, list[AnswerGuidance]] = {}
+    for row in guidance_rows or []:
+        guidance = _guidance_from_row(dict(row))
+        guidance_by_answer.setdefault(guidance.answer_id, []).append(guidance)
+    answers = [_answer_from_row(dict(row)) for row in rows or []]
+    await _hydrate_answer_assets(db, workspace, answers)
+    return answers, guidance_by_answer
+
+
+async def _rebuild_answer_graph_for_ids(
+    *,
+    db,
+    workspace: str,
+    rag,
+    answer_ids: list[str],
+    use_llm: bool,
+    task_id: Optional[str] = None,
+    trigger_source: str = "manual_api",
+) -> dict[str, Any]:
+    config = await _get_answer_graph_config(db, workspace)
+    answers, guidance_by_answer = await _answer_rows_and_guidance(
+        db, workspace, answer_ids
+    )
+    service = None
+    if task_id:
+        from lightrag.api.task_manager import TaskStatus, get_task_service
+
+        service = get_task_service()
+    rebuilt: list[str] = []
+    failed: dict[str, str] = {}
+    total = len(answers)
+    processed = 0
+    cancelled = False
+    logger.info(
+        "[Answers] FAQ graph rebuild started workspace=%s trigger=%s task=%s "
+        "answers=%d schema_version=%d use_llm=%s",
+        workspace,
+        trigger_source,
+        task_id or "-",
+        total,
+        config.schema_version,
+        use_llm,
+    )
+    try:
+        rebuild_concurrency = int(os.getenv("FAQ_GRAPH_REBUILD_CONCURRENCY", "4"))
+    except ValueError:
+        rebuild_concurrency = 4
+    rebuild_concurrency = max(1, min(rebuild_concurrency, 16))
+    semaphore = asyncio.Semaphore(rebuild_concurrency)
+    logger.info(
+        "[Answers] FAQ graph rebuild concurrency workspace=%s task=%s concurrency=%d",
+        workspace,
+        task_id or "-",
+        rebuild_concurrency,
+    )
+
+    async def build_one(answer: AnswerItem) -> tuple[str, Optional[str], bool]:
+        async with semaphore:
+            if service and task_id:
+                current_task = service.get_task(task_id)
+                if current_task and current_task.status == TaskStatus.CANCELLED:
+                    return answer.answer_id, None, True
+            for attempt in range(2):
+                try:
+                    projection = await _build_answer_graph_preview(
+                        db,
+                        workspace,
+                        rag,
+                        answer,
+                        guidance_by_answer.get(answer.answer_id, []),
+                        config,
+                        use_llm=use_llm,
+                    )
+                    await _persist_answer_graph_projection(
+                        db=db,
+                        workspace=workspace,
+                        rag=rag,
+                        projection=projection,
+                    )
+                    return answer.answer_id, None, False
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    duplicate_race = "already exists" in str(exc).lower()
+                    if attempt == 0 and duplicate_race:
+                        logger.warning(
+                            "[Answers] Retrying FAQ graph projection after a concurrent "
+                            "entity write workspace=%s answer=%s: %s",
+                            workspace,
+                            answer.answer_id,
+                            exc,
+                        )
+                        await asyncio.sleep(0.25)
+                        continue
+                    logger.error(
+                        "[Answers] FAQ graph projection failed workspace=%s answer=%s: %s",
+                        workspace,
+                        answer.answer_id,
+                        exc,
+                    )
+                    return answer.answer_id, str(exc), False
+            return answer.answer_id, "FAQ graph projection retry exhausted", False
+
+    build_tasks = [asyncio.create_task(build_one(answer)) for answer in answers]
+    try:
+        for completed in asyncio.as_completed(build_tasks):
+            answer_id, error, task_cancelled = await completed
+            if task_cancelled:
+                cancelled = True
+                break
+            processed += 1
+            if error:
+                failed[answer_id] = error
+            else:
+                rebuilt.append(answer_id)
+            if service and task_id:
+                current_task = service.get_task(task_id)
+                if current_task and current_task.status == TaskStatus.CANCELLED:
+                    cancelled = True
+                    break
+                await service.update_progress(
+                    task_id,
+                    min(99.0, (processed / max(total, 1)) * 95.0),
+                    f"FAQ graph {processed}/{total} prepared",
+                    detail={
+                        "graph_processed": processed,
+                        "graph_rebuilt": len(rebuilt),
+                        "graph_failed": len(failed),
+                    },
+                )
+    finally:
+        if cancelled:
+            for build_task in build_tasks:
+                if not build_task.done():
+                    build_task.cancel()
+        await asyncio.gather(*build_tasks, return_exceptions=True)
+    result = {
+        "processed": processed,
+        "total": total,
+        "rebuilt": rebuilt,
+        "failed": failed,
+        "cancelled": cancelled,
+        "schema_version": config.schema_version,
+        "trigger_source": trigger_source,
+        "task_id": task_id,
+    }
+    logger.info(
+        "[Answers] FAQ graph rebuild finished workspace=%s trigger=%s task=%s "
+        "processed=%d rebuilt=%d failed=%d cancelled=%s schema_version=%d",
+        workspace,
+        trigger_source,
+        task_id or "-",
+        processed,
+        len(rebuilt),
+        len(failed),
+        cancelled,
+        config.schema_version,
+    )
+    return result
+
+
+async def _rebuild_answer_graph_background(
+    *,
+    task_id: str,
+    workspace: str,
+    db,
+    rag,
+    answer_ids: list[str],
+    use_llm: bool,
+) -> None:
+    from lightrag.api.task_manager import TaskStatus, get_task_service
+
+    service = get_task_service()
+    result = await _rebuild_answer_graph_for_ids(
+        db=db,
+        workspace=workspace,
+        rag=rag,
+        answer_ids=answer_ids,
+        use_llm=use_llm,
+        task_id=task_id,
+        trigger_source="manual_api",
+    )
+    current_task = service.get_task(task_id)
+    if result["cancelled"] or (
+        current_task and current_task.status == TaskStatus.CANCELLED
+    ):
+        return
+    await service.complete_task(task_id, result=result)
+
+
+async def _refresh_answer_graph_safely(
+    *,
+    db,
+    workspace: str,
+    answer_id: str,
+    trigger_source: str,
+) -> None:
+    try:
+        config = await _get_answer_graph_config(db, workspace)
+        if not (config.enabled and config.auto_sync):
+            return
+        rag = await get_workspace_rag(workspace)
+        if rag is None:
+            return
+        await _rebuild_answer_graph_for_ids(
+            db=db,
+            workspace=workspace,
+            rag=rag,
+            answer_ids=[answer_id],
+            use_llm=False,
+            trigger_source=trigger_source,
+        )
+    except Exception as exc:
+        logger.warning(
+            "[Answers] Automatic graph refresh failed workspace=%s answer=%s "
+            "trigger=%s: %s",
+            workspace,
+            answer_id,
+            trigger_source,
+            exc,
+        )
+
+
+def _graph_result_similarity(item: dict[str, Any]) -> float:
+    return _safe_float(
+        item.get("similarity", item.get("distance")),
+        0.0,
+        0.0,
+        1.0,
+    )
+
+
+async def _answer_graph_scores(
+    db,
+    workspace: str,
+    rag,
+    query: str,
+    top_k: int,
+    allowed_answer_ids: Optional[list[str]],
+    config: AnswerGraphConfig,
+) -> tuple[dict[str, float], dict[str, list[AnswerGraphEvidence]], str]:
+    if not config.enabled:
+        return {}, {}, "graph_disabled"
+    if rag is None or getattr(rag, "entities_vdb", None) is None:
+        return {}, {}, "graph_unavailable"
+    try:
+        results = await rag.entities_vdb.query(query, top_k=max(12, top_k))
+    except Exception as exc:
+        logger.warning("[Answers] FAQ graph query failed: %s", exc)
+        return {}, {}, "graph_query_failed"
+    faq_results = [
+        (
+            str(item.get("entity_name") or ""),
+            _graph_result_similarity(item),
+        )
+        for item in results or []
+        if str(item.get("entity_name") or "").startswith(f"{ANSWER_GRAPH_NODE_PREFIX}::")
+    ]
+    if not faq_results:
+        return {}, {}, "graph_no_nodes"
+
+    answer_scores: dict[str, float] = {}
+    evidence: dict[str, list[AnswerGraphEvidence]] = {}
+    eligible_start_nodes = 0
+    for start_node, start_score in faq_results:
+        if start_score < config.min_similarity:
+            continue
+        eligible_start_nodes += 1
+        queue: list[tuple[str, list[str], list[str], int]] = [
+            (start_node, [start_node], [], 0)
+        ]
+        visited = {start_node}
+        while queue:
+            node_id, path, relation_types, depth = queue.pop(0)
+            answer_id = _answer_id_from_graph_node(node_id)
+            if answer_id:
+                if allowed_answer_ids is None or answer_id in allowed_answer_ids:
+                    score = round(start_score * (0.86**depth), 4)
+                    if score > answer_scores.get(answer_id, 0.0):
+                        answer_scores[answer_id] = score
+                    evidence.setdefault(answer_id, []).append(
+                        AnswerGraphEvidence(
+                            answer_id=answer_id,
+                            score=score,
+                            start_node=_graph_label_from_node_id(start_node),
+                            path=[_graph_label_from_node_id(item) for item in path],
+                            relation_types=relation_types,
+                        )
+                    )
+                continue
+            if depth >= config.max_hops:
+                continue
+            edges = (
+                await rag.chunk_entity_relation_graph.get_node_edges(node_id) or []
+            )
+            for source_id, target_id in edges:
+                neighbour = target_id if source_id == node_id else source_id
+                if neighbour in visited or not neighbour.startswith(
+                    f"{ANSWER_GRAPH_NODE_PREFIX}::"
+                ):
+                    continue
+                edge_data = await rag.chunk_entity_relation_graph.get_edge(
+                    source_id, target_id
+                )
+                relation_type = str((edge_data or {}).get("keywords") or "RELATED_TO")
+                visited.add(neighbour)
+                queue.append(
+                    (
+                        neighbour,
+                        [*path, neighbour],
+                        [*relation_types, relation_type],
+                        depth + 1,
+                    )
+                )
+
+    if eligible_start_nodes == 0:
+        return {}, {}, "graph_below_similarity"
+    if not answer_scores:
+        return {}, {}, "graph_no_answers"
+    ready_rows = await db.query(
+        """
+        SELECT projections.answer_id
+        FROM LIGHTRAG_ANSWER_GRAPH_PROJECTIONS AS projections
+        JOIN LIGHTRAG_ANSWER_ITEMS AS answers
+          ON answers.workspace = projections.workspace
+         AND answers.answer_id = projections.answer_id
+         AND answers.version = projections.answer_version
+        WHERE projections.workspace = $1
+          AND projections.status = 'ready'
+          AND projections.schema_version = $2
+          AND projections.answer_id = ANY($3::text[])
+        """,
+        [workspace, config.schema_version, list(answer_scores)],
+        multirows=True,
+    )
+    ready_ids = {str(row["answer_id"]) for row in ready_rows or []}
+    return (
+        {answer_id: score for answer_id, score in answer_scores.items() if answer_id in ready_ids},
+        {answer_id: paths[:3] for answer_id, paths in evidence.items() if answer_id in ready_ids},
+        "graph_ready" if ready_ids else "graph_stale",
+    )
+
+
+def _effective_answer_retrieval(
+    requested_mode: RetrievalMode,
+    graph_status: str,
+) -> tuple[RetrievalMode, Optional[str]]:
+    if requested_mode != "graph_hybrid":
+        return requested_mode, None
+    if graph_status == "graph_ready":
+        return requested_mode, None
+    return "hybrid", graph_status
 
 
 def _answer_vector_content(answer: AnswerItem, guidance: list[AnswerGuidance]) -> str:
@@ -2061,14 +4728,15 @@ def _answer_vector_content(answer: AnswerItem, guidance: list[AnswerGuidance]) -
     )
     tags = ", ".join(answer.tags)
     body_preview = answer.body[:1600]
+    asset_text = _answer_asset_search_content(answer.assets)[:1600]
     return "\n".join(
         part
         for part in [
             f"Title: {answer.title}",
-            f"Summary: {answer.approved_summary or ''}",
             f"Tags: {tags}",
             f"Matching hints:\n{guidance_text}",
             f"Answer:\n{body_preview}",
+            f"Attached media descriptions:\n{asset_text}",
         ]
         if part.strip()
     )
@@ -2100,13 +4768,18 @@ async def _ensure_answer_vector(
     content_hash = _answer_vector_hash(answer, content)
     existing = await db.query(
         """
-        SELECT embedding, content_hash
+        SELECT embedding, content_hash, metadata
         FROM LIGHTRAG_ANSWER_VECTORS
         WHERE workspace = $1 AND answer_id = $2 AND vector_kind = 'combined'
         """,
         [workspace, answer.answer_id],
     )
-    if existing and existing.get("content_hash") == content_hash:
+    existing_metadata = _coerce_json(existing.get("metadata"), {}) if existing else {}
+    if (
+        existing
+        and existing.get("content_hash") == content_hash
+        and existing_metadata.get("projection_version") == ANSWER_VECTOR_PROJECTION_VERSION
+    ):
         embedding = _coerce_json(existing.get("embedding"), [])
         return _embedding_to_list(embedding)
 
@@ -2127,14 +4800,18 @@ async def _ensure_answer_vector(
     await db.query(
         """
         INSERT INTO LIGHTRAG_ANSWER_VECTORS
-            (vector_id, workspace, answer_id, answer_version, vector_kind, content_hash, content, embedding, metadata)
-        VALUES ($1, $2, $3, $4, 'combined', $5, $6, $7::jsonb, $8::jsonb)
+            (
+                vector_id, workspace, answer_id, answer_version, vector_kind,
+                content_hash, content, embedding, embedding_vector, metadata
+            )
+        VALUES ($1, $2, $3, $4, 'combined', $5, $6, $7::jsonb, $8::vector, $9::jsonb)
         ON CONFLICT (workspace, answer_id, vector_kind)
         DO UPDATE SET
             answer_version = EXCLUDED.answer_version,
             content_hash = EXCLUDED.content_hash,
             content = EXCLUDED.content,
             embedding = EXCLUDED.embedding,
+            embedding_vector = EXCLUDED.embedding_vector,
             metadata = EXCLUDED.metadata,
             update_time = NOW()
         """,
@@ -2146,10 +4823,152 @@ async def _ensure_answer_vector(
             content_hash,
             content,
             _json_list(embedding),
-            _json({"source": "answer_catalog_hybrid"}),
+            _embedding_to_pgvector(embedding),
+            _json(
+                {
+                    "source": "answer_catalog_hybrid",
+                    "projection_version": ANSWER_VECTOR_PROJECTION_VERSION,
+                }
+            ),
         ],
     )
     return embedding
+
+
+async def _rebuild_answer_vectors_for_ids(
+    *,
+    db,
+    workspace: str,
+    rag,
+    answer_ids: list[str],
+    task_id: Optional[str] = None,
+    progress_start: float = 0.0,
+    progress_span: float = 95.0,
+) -> dict[str, Any]:
+    if not answer_ids:
+        return {"processed": 0, "rebuilt": 0, "failed": []}
+    if _embedding_func_from_rag(rag) is None:
+        return {
+            "processed": 0,
+            "rebuilt": 0,
+            "failed": list(answer_ids),
+            "status": "embedding_unavailable",
+        }
+    rows = await db.query(
+        """
+        SELECT workspace, answer_id, title, body, approved_summary, content_format,
+               display_policy, status, version, valid_from, valid_until, priority,
+               tags, metadata, publish_time, create_time, update_time
+        FROM LIGHTRAG_ANSWER_ITEMS
+        WHERE workspace = $1 AND answer_id = ANY($2::text[])
+        ORDER BY update_time DESC, answer_id
+        """,
+        [workspace, answer_ids],
+        multirows=True,
+    )
+    existing_ids = [str(row["answer_id"]) for row in rows or []]
+    answers = [_answer_from_row(dict(row)) for row in rows or []]
+    await _hydrate_answer_assets(db, workspace, answers)
+    guidance_rows = await db.query(
+        """
+        SELECT guidance_id, workspace, answer_id, guidance_type, text, weight,
+               metadata, create_time
+        FROM LIGHTRAG_ANSWER_GUIDANCE
+        WHERE workspace = $1 AND answer_id = ANY($2::text[])
+        """,
+        [workspace, existing_ids],
+        multirows=True,
+    )
+    guidance_by_answer: dict[str, list[AnswerGuidance]] = {}
+    for row in guidance_rows or []:
+        guidance = _guidance_from_row(dict(row))
+        guidance_by_answer.setdefault(guidance.answer_id, []).append(guidance)
+
+    service = None
+    if task_id:
+        from lightrag.api.task_manager import get_task_service
+
+        service = get_task_service()
+    rebuilt = 0
+    failed: list[str] = []
+    total = len(answers)
+    for index, answer in enumerate(answers):
+        embedding = await _ensure_answer_vector(
+            db,
+            workspace,
+            rag,
+            answer,
+            guidance_by_answer.get(answer.answer_id, []),
+        )
+        if embedding:
+            rebuilt += 1
+        else:
+            failed.append(answer.answer_id)
+        if service and task_id:
+            await service.update_progress(
+                task_id,
+                min(
+                    99.0,
+                    progress_start + ((index + 1) / max(total, 1)) * progress_span,
+                ),
+                f"FAQ vector {index + 1}/{total} prepared",
+                detail={
+                    "vector_processed": index + 1,
+                    "vector_rebuilt": rebuilt,
+                    "vector_failed": len(failed),
+                },
+            )
+    return {
+        "processed": total,
+        "rebuilt": rebuilt,
+        "failed": failed,
+    }
+
+
+async def _rebuild_answer_vectors_background(
+    *,
+    task_id: str,
+    workspace: str,
+    db,
+    rag,
+    answer_ids: list[str],
+) -> None:
+    from lightrag.api.task_manager import get_task_service
+
+    service = get_task_service()
+    result = await _rebuild_answer_vectors_for_ids(
+        db=db,
+        workspace=workspace,
+        rag=rag,
+        answer_ids=answer_ids,
+        task_id=task_id,
+    )
+    await service.complete_task(task_id, result=result)
+
+
+async def _refresh_answer_vector_safely(
+    *,
+    db,
+    workspace: str,
+    answer_id: str,
+) -> None:
+    try:
+        workspace_rag = await get_workspace_rag(workspace)
+        if workspace_rag is None:
+            return
+        await _rebuild_answer_vectors_for_ids(
+            db=db,
+            workspace=workspace,
+            rag=workspace_rag,
+            answer_ids=[answer_id],
+        )
+    except Exception as exc:
+        logger.warning(
+            "[Answers] Automatic vector refresh failed workspace=%s answer=%s: %s",
+            workspace,
+            answer_id,
+            exc,
+        )
 
 
 async def _answer_vector_scores(
@@ -2157,9 +4976,9 @@ async def _answer_vector_scores(
     workspace: str,
     rag,
     query: str,
-    answers: list[AnswerItem],
-    guidance_by_answer: dict[str, list[AnswerGuidance]],
     top_k: int,
+    status_filter: list[str],
+    allowed_answer_ids: Optional[list[str]],
 ) -> tuple[dict[str, float], str]:
     embedding_func = _embedding_func_from_rag(rag)
     if embedding_func is None:
@@ -2174,23 +4993,51 @@ async def _answer_vector_scores(
     if not query_embedding:
         return {}, "vector_query_empty"
 
-    scores: dict[str, float] = {}
-    for answer in answers:
-        answer_embedding = await _ensure_answer_vector(
-            db,
+    vector_rows = await db.query(
+        """
+        SELECT
+            vectors.answer_id,
+            GREATEST(
+                0.0,
+                1.0 - (vectors.embedding_vector <=> $4::vector)
+            ) AS score
+        FROM LIGHTRAG_ANSWER_VECTORS AS vectors
+        JOIN LIGHTRAG_ANSWER_ITEMS AS answers
+          ON answers.workspace = vectors.workspace
+         AND answers.answer_id = vectors.answer_id
+         AND answers.version = vectors.answer_version
+        WHERE vectors.workspace = $1
+          AND vectors.vector_kind = 'combined'
+          AND answers.status = ANY($2::text[])
+          AND (answers.valid_from IS NULL OR answers.valid_from <= NOW())
+          AND (answers.valid_until IS NULL OR answers.valid_until >= NOW())
+          AND ($3::text[] IS NULL OR answers.answer_id = ANY($3::text[]))
+          AND vectors.embedding_vector IS NOT NULL
+          AND COALESCE((vectors.metadata->>'projection_version')::integer, 0) = $7
+          AND vector_dims(vectors.embedding_vector) = $5
+        ORDER BY vectors.embedding_vector <=> $4::vector
+        LIMIT $6
+        """,
+        [
             workspace,
-            rag,
-            answer,
-            guidance_by_answer.get(answer.answer_id, []),
-        )
-        if not answer_embedding:
-            continue
-        score = _cosine_similarity(query_embedding, answer_embedding)
-        if score > 0:
-            scores[answer.answer_id] = round(score, 4)
+            status_filter,
+            allowed_answer_ids,
+            _embedding_to_pgvector(query_embedding),
+            len(query_embedding),
+            top_k,
+            ANSWER_VECTOR_PROJECTION_VERSION,
+        ],
+        multirows=True,
+    )
+    if not vector_rows:
+        return {}, "vector_not_built"
 
-    top_scores = sorted(scores.items(), key=lambda item: item[1], reverse=True)[:top_k]
-    return dict(top_scores), "vector_ready"
+    scores = {
+        str(row["answer_id"]): round(float(row.get("score") or 0.0), 4)
+        for row in vector_rows
+        if float(row.get("score") or 0.0) > 0
+    }
+    return scores, "vector_ready"
 
 
 def _extract_json_object(text: str) -> Optional[dict[str, Any]]:
@@ -2221,6 +5068,396 @@ def _extract_json_array(text: str) -> list[Any]:
     return parsed if isinstance(parsed, list) else []
 
 
+def _parse_term_discovery_candidates(
+    raw: str,
+    known_groups: list[AnswerAliasGroup],
+    evidence_lookup: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    member_to_canonical: dict[str, str] = {}
+    canonical_members: dict[str, set[str]] = {}
+    for group in known_groups:
+        canonical_key = _normalise_text(group.canonical_term)
+        members = {canonical_key}
+        members.update(_normalise_text(alias) for alias in group.aliases)
+        canonical_members.setdefault(canonical_key, set()).update(members)
+        for member in members:
+            member_to_canonical.setdefault(member, group.canonical_term)
+
+    candidates_by_key: dict[str, dict[str, Any]] = {}
+    allowed_types = {"synonym", "abbreviation", "neologism"}
+    for item in _extract_json_array(raw):
+        if not isinstance(item, dict):
+            continue
+        canonical_term = " ".join(str(item.get("canonical_term") or "").split())
+        canonical_key = _normalise_text(canonical_term)
+        if len(canonical_term) < 2 or len(canonical_term) > 200:
+            continue
+
+        known_canonical = member_to_canonical.get(canonical_key)
+        if known_canonical:
+            canonical_term = known_canonical
+            canonical_key = _normalise_text(known_canonical)
+
+        aliases: list[str] = []
+        seen = {canonical_key}
+        for raw_alias in item.get("aliases") or []:
+            alias = " ".join(str(raw_alias or "").split())
+            alias_key = _normalise_text(alias)
+            if len(alias) < 2 or len(alias) > 200 or alias_key in seen:
+                continue
+            existing_canonical = member_to_canonical.get(alias_key)
+            if (
+                existing_canonical
+                and _normalise_text(existing_canonical) != canonical_key
+            ):
+                continue
+            if alias_key in canonical_members.get(canonical_key, set()):
+                continue
+            seen.add(alias_key)
+            aliases.append(alias)
+        if not aliases:
+            continue
+
+        evidence_refs = item.get("evidence_refs") or []
+        evidence = [
+            evidence_lookup[str(ref)]
+            for ref in evidence_refs
+            if str(ref) in evidence_lookup
+        ][:20]
+        term_type = str(item.get("term_type") or "synonym")
+        if term_type not in allowed_types:
+            term_type = "synonym"
+        confidence = _safe_float(item.get("confidence"), 0.5, 0.0, 1.0)
+        rationale = " ".join(str(item.get("rationale") or "").split())[:1000]
+
+        existing = candidates_by_key.get(canonical_key)
+        if existing is None:
+            candidates_by_key[canonical_key] = {
+                "candidate_key": canonical_key,
+                "canonical_term": canonical_term,
+                "aliases": aliases,
+                "term_type": term_type,
+                "confidence": confidence,
+                "rationale": rationale,
+                "evidence": evidence,
+            }
+            continue
+
+        existing_alias_keys = {
+            _normalise_text(alias) for alias in existing["aliases"]
+        }
+        existing["aliases"].extend(
+            alias
+            for alias in aliases
+            if _normalise_text(alias) not in existing_alias_keys
+        )
+        existing["confidence"] = max(existing["confidence"], confidence)
+        if len(rationale) > len(existing["rationale"]):
+            existing["rationale"] = rationale
+        existing_evidence_refs = {
+            str(entry.get("ref")) for entry in existing["evidence"]
+        }
+        existing["evidence"].extend(
+            entry
+            for entry in evidence
+            if str(entry.get("ref")) not in existing_evidence_refs
+        )
+
+    return list(candidates_by_key.values())
+
+
+async def _upsert_term_discovery_candidate(
+    *,
+    db,
+    workspace: str,
+    candidate: dict[str, Any],
+    task_id: str,
+) -> bool:
+    existing = await db.query(
+        """
+        SELECT candidate_id, status, aliases, evidence, confidence, rationale
+        FROM LIGHTRAG_ANSWER_TERM_CANDIDATES
+        WHERE workspace = $1 AND candidate_key = $2
+        """,
+        [workspace, candidate["candidate_key"]],
+    )
+    if existing and str(existing.get("status")) in {"approved", "rejected"}:
+        return False
+
+    aliases = list(candidate["aliases"])
+    evidence = list(candidate["evidence"])
+    confidence = float(candidate["confidence"])
+    rationale = str(candidate["rationale"])
+    if existing:
+        existing_aliases = _coerce_json(existing.get("aliases"), [])
+        alias_keys = {_normalise_text(alias) for alias in aliases}
+        for alias in existing_aliases if isinstance(existing_aliases, list) else []:
+            if _normalise_text(alias) not in alias_keys:
+                aliases.append(str(alias))
+                alias_keys.add(_normalise_text(alias))
+        existing_evidence = _coerce_json(existing.get("evidence"), [])
+        evidence_refs = {str(item.get("ref")) for item in evidence}
+        for item in existing_evidence if isinstance(existing_evidence, list) else []:
+            if isinstance(item, dict) and str(item.get("ref")) not in evidence_refs:
+                evidence.append(item)
+        confidence = max(
+            confidence,
+            _safe_float(existing.get("confidence"), 0.0, 0.0, 1.0),
+        )
+        if not rationale:
+            rationale = str(existing.get("rationale") or "")
+
+    await db.query(
+        """
+        INSERT INTO LIGHTRAG_ANSWER_TERM_CANDIDATES
+            (
+                candidate_id, workspace, candidate_key, canonical_term, aliases,
+                term_type, status, confidence, rationale, evidence, source, metadata
+            )
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6, 'suggested', $7, $8,
+                $9::jsonb, 'llm', $10::jsonb)
+        ON CONFLICT (workspace, candidate_key)
+        DO UPDATE SET
+            canonical_term = EXCLUDED.canonical_term,
+            aliases = EXCLUDED.aliases,
+            term_type = EXCLUDED.term_type,
+            confidence = EXCLUDED.confidence,
+            rationale = EXCLUDED.rationale,
+            evidence = EXCLUDED.evidence,
+            metadata = LIGHTRAG_ANSWER_TERM_CANDIDATES.metadata || EXCLUDED.metadata,
+            update_time = NOW()
+        """,
+        [
+            str(existing.get("candidate_id"))
+            if existing
+            else f"aterm-{uuid.uuid4().hex[:16]}",
+            workspace,
+            candidate["candidate_key"],
+            candidate["canonical_term"],
+            _json_list(aliases[:30]),
+            candidate["term_type"],
+            confidence,
+            rationale,
+            _json(evidence[:30]),
+            _json({"last_task_id": task_id}),
+        ],
+    )
+    return True
+
+
+async def _discover_answer_terms_background(
+    *,
+    task_id: str,
+    workspace: str,
+    db,
+    rag,
+    include_drafts: bool,
+    include_no_match_queries: bool,
+    answer_limit: int,
+    event_limit: int,
+    batch_size: int,
+) -> None:
+    from lightrag.api.task_manager import TaskStatus, get_task_service
+
+    service = get_task_service()
+    llm_func = getattr(rag, "llm_model_func", None)
+    if llm_func is None:
+        raise RuntimeError("LLM is not configured for this workspace")
+
+    statuses = ["published", "draft"] if include_drafts else ["published"]
+    answer_rows = await db.query(
+        """
+        SELECT answer_id, title, LEFT(body, 1200) AS body, tags
+        FROM LIGHTRAG_ANSWER_ITEMS
+        WHERE workspace = $1 AND status = ANY($2::text[])
+        ORDER BY update_time DESC, answer_id
+        LIMIT $3
+        """,
+        [workspace, statuses, answer_limit],
+        multirows=True,
+    )
+    answer_ids = [str(row["answer_id"]) for row in answer_rows or []]
+    guidance_rows = []
+    if answer_ids:
+        guidance_rows = await db.query(
+            """
+            SELECT answer_id, guidance_type, text
+            FROM LIGHTRAG_ANSWER_GUIDANCE
+            WHERE workspace = $1
+              AND answer_id = ANY($2::text[])
+              AND guidance_type IN ('question', 'keyword', 'synonym')
+            ORDER BY create_time DESC
+            """,
+            [workspace, answer_ids],
+            multirows=True,
+        )
+    guidance_by_answer: dict[str, list[str]] = {}
+    for row in guidance_rows or []:
+        guidance_by_answer.setdefault(str(row["answer_id"]), []).append(
+            str(row["text"])
+        )
+
+    discovery_items: list[dict[str, Any]] = []
+    evidence_lookup: dict[str, dict[str, Any]] = {}
+    for row in answer_rows or []:
+        ref = f"faq:{row['answer_id']}"
+        item = {
+            "ref": ref,
+            "kind": "faq",
+            "answer_id": str(row["answer_id"]),
+            "title": str(row.get("title") or ""),
+            "body": str(row.get("body") or ""),
+            "tags": _coerce_json(row.get("tags"), []),
+            "search_hints": guidance_by_answer.get(str(row["answer_id"]), [])[
+                :12
+            ],
+        }
+        discovery_items.append(item)
+        evidence_lookup[ref] = {
+            "ref": ref,
+            "kind": "faq",
+            "answer_id": str(row["answer_id"]),
+            "label": str(row.get("title") or ""),
+        }
+
+    if include_no_match_queries and event_limit > 0:
+        event_rows = await db.query(
+            """
+            SELECT event_id, query, create_time
+            FROM LIGHTRAG_ANSWER_EVENTS
+            WHERE workspace = $1
+              AND selected_answer_id IS NULL
+              AND query IS NOT NULL
+              AND LENGTH(TRIM(query)) >= 2
+            ORDER BY create_time DESC
+            LIMIT $2
+            """,
+            [workspace, event_limit],
+            multirows=True,
+        )
+        for row in event_rows or []:
+            ref = f"query:{row['event_id']}"
+            item = {
+                "ref": ref,
+                "kind": "unmatched_query",
+                "query": str(row.get("query") or ""),
+            }
+            discovery_items.append(item)
+            evidence_lookup[ref] = {
+                "ref": ref,
+                "kind": "unmatched_query",
+                "label": str(row.get("query") or ""),
+                "create_time": _iso(row.get("create_time")),
+            }
+
+    if not discovery_items:
+        await service.complete_task(
+            task_id,
+            result={
+                "analyzed_count": 0,
+                "suggested_count": 0,
+                "message": "No FAQ or unmatched queries were available.",
+            },
+        )
+        return
+
+    known_groups = await _answer_alias_groups(db, workspace)
+    known_payload = [
+        {
+            "canonical_term": group.canonical_term,
+            "aliases": group.aliases,
+        }
+        for group in known_groups
+    ]
+    batch_count = (len(discovery_items) + batch_size - 1) // batch_size
+    suggested_count = 0
+    failed_batches: list[dict[str, Any]] = []
+    for batch_index in range(batch_count):
+        task = service.get_task(task_id)
+        if task and task.status == TaskStatus.CANCELLED:
+            return
+        batch = discovery_items[
+            batch_index * batch_size : (batch_index + 1) * batch_size
+        ]
+        prompt = (
+            "Discover shared Korean FAQ search terms from the evidence below. "
+            "Return only a JSON array. Each item must be "
+            "{\"canonical_term\": string, \"aliases\": [string], "
+            "\"term_type\": \"synonym|abbreviation|neologism\", "
+            "\"confidence\": number, \"rationale\": string, "
+            "\"evidence_refs\": [string]}. "
+            "Propose only expressions that refer to the same product, service, feature, "
+            "or concept. Include useful Korean-English names, abbreviations, common spoken "
+            "forms, spacing/spelling variants, and new workplace expressions. "
+            "Every alias must be safely interchangeable with the canonical term without "
+            "changing the user's intent. Never include related actions, symptoms, causes, "
+            "resolutions, commands, components, or broad category words as aliases. "
+            "Do not repeat a known group unless the evidence contains a genuinely new alias. "
+            "Use only provided evidence_refs, do not invent product names, and write the "
+            "rationale in Korean.\n\n"
+            f"Known term groups:\n{json.dumps(known_payload, ensure_ascii=False)}\n\n"
+            f"Evidence:\n{json.dumps(batch, ensure_ascii=False)}"
+        )
+        try:
+            raw = await llm_func(
+                prompt,
+                system_prompt=(
+                    "You are a Korean enterprise terminology curator. Extract conservative "
+                    "synonym, abbreviation, and neologism candidates for FAQ retrieval. "
+                    "Return strict JSON only."
+                ),
+                _llm_purpose="knowledge_structure",
+            )
+            parsed = _parse_term_discovery_candidates(
+                str(raw),
+                known_groups,
+                evidence_lookup,
+            )
+            for candidate in parsed:
+                if await _upsert_term_discovery_candidate(
+                    db=db,
+                    workspace=workspace,
+                    candidate=candidate,
+                    task_id=task_id,
+                ):
+                    suggested_count += 1
+        except Exception as exc:
+            logger.warning(
+                "[Answers] Term discovery failed task=%s batch=%s: %s",
+                task_id,
+                batch_index + 1,
+                exc,
+            )
+            failed_batches.append(
+                {"batch": batch_index + 1, "error": str(exc)[:500]}
+            )
+
+        await service.update_progress(
+            task_id,
+            ((batch_index + 1) / batch_count) * 100.0,
+            f"AI term discovery batch {batch_index + 1}/{batch_count} completed",
+            detail={
+                "analyzed_count": min(
+                    (batch_index + 1) * batch_size, len(discovery_items)
+                ),
+                "suggested_count": suggested_count,
+                "failed_batch_count": len(failed_batches),
+            },
+        )
+
+    if failed_batches and len(failed_batches) == batch_count:
+        raise RuntimeError("All AI term discovery batches failed")
+    await service.complete_task(
+        task_id,
+        result={
+            "analyzed_count": len(discovery_items),
+            "answer_count": len(answer_rows or []),
+            "suggested_count": suggested_count,
+            "failed_batches": failed_batches,
+        },
+    )
+
+
 async def _llm_select_candidate(rag, query: str, candidates: list[ResolveCandidate]) -> tuple[Optional[str], dict[str, Any]]:
     llm_func = getattr(rag, "llm_model_func", None)
     if llm_func is None or not candidates:
@@ -2230,15 +5467,45 @@ async def _llm_select_candidate(rag, query: str, candidates: list[ResolveCandida
         {
             "answer_id": item.answer.answer_id,
             "title": item.answer.title,
-            "summary": item.answer.approved_summary,
             "score": item.score,
             "matched_guidance": item.matched_guidance,
             "reason": item.reason,
+            "category": _candidate_category(item),
+            "graph_evidence": [
+                {
+                    "score": evidence.score,
+                    "path": evidence.path,
+                    "relation_types": evidence.relation_types,
+                }
+                for evidence in item.graph_evidence[:3]
+            ],
         }
         for item in candidates
     ]
     system_prompt = (
-        "You choose one approved FAQ answer ID from provided candidates. "
+        "You are a conservative FAQ ID selector. Choose an approved FAQ answer ID "
+        "only when the user intent is directly supported by the candidate title, "
+        "finding hints, category, and graph evidence. Similar words alone are not "
+        "enough. Do not reject a query merely because it is short: a query such as "
+        "'유심 안돼' can be valid when its explicit service object maps clearly to one "
+        "candidate. However, never fill in an omitted product, service, or task from "
+        "the candidate text. Return null when an ordinary customer-support agent "
+        "would need to ask what the user means. This applies even when multiple "
+        "candidates belong to the same category: '유심 안돼' can mean recognition, "
+        "compatibility, activation, or a locked SIM, and '로밍 안돼' can mean "
+        "activation, a missing foreign signal, or a post-return network issue. "
+        "Do not pick the most general-looking candidate by default. For example, "
+        "'카드가 안 돼요' can mean "
+        "a SIM card or a payment card, and '신청이 실패했어요' can mean activation, "
+        "number portability, roaming, or eSIM registration, so both require null "
+        "unless the query itself supplies clarifying context. Return null for "
+        "out-of-scope or semantically ambiguous queries. "
+        "When answer_id is null because the query is ambiguous, set decision_reason "
+        "to 'ambiguous' and provide one concise clarification_question that helps "
+        "distinguish the candidate intents. For out-of-scope queries, set "
+        "decision_reason to 'out_of_scope' and clarification_question to null. "
+        "Write rationale and clarification_question in the same language as the "
+        "user query. "
         "Never create answer content. Return only strict JSON."
     )
     prompt = (
@@ -2246,11 +5513,17 @@ async def _llm_select_candidate(rag, query: str, candidates: list[ResolveCandida
         f"{query}\n\n"
         "Candidates:\n"
         f"{json.dumps(candidate_payload, ensure_ascii=False)}\n\n"
-        'Return {"answer_id": string|null, "confidence": number, "rationale": string}. '
+        'Return {"answer_id": string|null, "confidence": number, "rationale": string, '
+        '"decision_reason": "match"|"ambiguous"|"out_of_scope", '
+        '"clarification_question": string|null}. '
         "answer_id must be one of the candidate answer_id values, or null if none match."
     )
     try:
-        raw = await llm_func(prompt, system_prompt=system_prompt)
+        raw = await llm_func(
+            prompt,
+            system_prompt=system_prompt,
+            _llm_purpose="faq_selection",
+        )
     except Exception as exc:
         logger.warning("[Answers] LLM answer selector failed: %s", exc)
         return None, {"status": "llm_failed", "error": str(exc)}
@@ -2269,6 +5542,8 @@ async def _llm_select_candidate(rag, query: str, candidates: list[ResolveCandida
         "answer_id": answer_id,
         "confidence": parsed.get("confidence"),
         "rationale": parsed.get("rationale"),
+        "decision_reason": parsed.get("decision_reason"),
+        "clarification_question": parsed.get("clarification_question"),
     }
 
 
@@ -2311,8 +5586,6 @@ def _heuristic_guidance_suggestions(
         add("keyword", tag, 0.85, "tag")
     for example in query_examples:
         add("question", example, 1.0, "query_example")
-    for sentence in _sentence_candidates(answer.approved_summary or "", 4):
-        add("keyword", sentence, 0.75, "summary")
     for sentence in _sentence_candidates(answer.body, 4):
         add("synonym", sentence, 0.65, "body")
 
@@ -2349,6 +5622,15 @@ async def _record_revision(db, row: dict[str, Any]) -> None:
     for key, value in list(snapshot.items()):
         if isinstance(value, datetime):
             snapshot[key] = value.isoformat()
+    assets_by_answer = await _answer_assets_by_answer(
+        db,
+        str(row["workspace"]),
+        [str(row["answer_id"])],
+    )
+    snapshot["assets"] = [
+        asset.model_dump(mode="json")
+        for asset in assets_by_answer.get(str(row["answer_id"]), [])
+    ]
     snapshot = _normalise_answer_snapshot(snapshot)
     await db.execute(
         """
@@ -2364,6 +5646,174 @@ async def _record_revision(db, row: dict[str, Any]) -> None:
             "snapshot_json": _json(snapshot),
         },
     )
+
+
+async def _get_answer_asset_row(
+    db,
+    workspace: str,
+    answer_id: str,
+    asset_id: str,
+    *,
+    include_inactive: bool = False,
+) -> dict[str, Any]:
+    active_filter = "" if include_inactive else "AND is_active = TRUE"
+    row = await db.query(
+        f"""
+        SELECT asset_id, workspace, answer_id, answer_version, asset_type,
+               storage_type, storage_uri, file_name, mime_type, file_size,
+               caption, alt_text, search_text, content_text, display_order,
+               is_active, metadata, create_time, update_time
+        FROM LIGHTRAG_ANSWER_ASSETS
+        WHERE workspace = $1 AND answer_id = $2 AND asset_id = $3
+          {active_filter}
+        """,
+        [workspace, answer_id, asset_id],
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Asset '{asset_id}' not found")
+    return dict(row)
+
+
+async def _touch_answer_after_asset_change(
+    db,
+    workspace: str,
+    answer_id: str,
+) -> AnswerItem:
+    row = await db.query(
+        """
+        UPDATE LIGHTRAG_ANSWER_ITEMS
+        SET version = version + 1,
+            update_time = NOW()
+        WHERE workspace = $1 AND answer_id = $2
+        RETURNING workspace, answer_id, title, body, approved_summary, content_format,
+                  display_policy, status, version, valid_from, valid_until, priority,
+                  tags, metadata, publish_time, create_time, update_time
+        """,
+        [workspace, answer_id],
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Answer '{answer_id}' not found")
+    await db.execute(
+        """
+        UPDATE LIGHTRAG_ANSWER_ASSETS
+        SET answer_version = $3,
+            update_time = NOW()
+        WHERE workspace = $1 AND answer_id = $2 AND is_active = TRUE
+        """,
+        {
+            "workspace": workspace,
+            "answer_id": answer_id,
+            "answer_version": int(row.get("version") or 1),
+        },
+    )
+    await _record_revision(db, dict(row))
+    await _delete_answer_vectors(db, workspace, answer_id)
+    asyncio.create_task(
+        _refresh_answer_vector_safely(
+            db=db,
+            workspace=workspace,
+            answer_id=answer_id,
+        )
+    )
+    await _mark_answer_graph_stale(
+        db,
+        workspace,
+        answer_id,
+        int(row.get("version") or 1),
+    )
+    asyncio.create_task(
+        _refresh_answer_graph_safely(
+            db=db,
+            workspace=workspace,
+            answer_id=answer_id,
+            trigger_source="answer_asset_change",
+        )
+    )
+    answer = _answer_from_row(dict(row))
+    await _hydrate_answer_assets(db, workspace, [answer])
+    return answer
+
+
+async def _restore_answer_assets(
+    db,
+    workspace: str,
+    answer_id: str,
+    answer_version: int,
+    snapshot_assets: list[Any],
+) -> None:
+    await db.execute(
+        """
+        UPDATE LIGHTRAG_ANSWER_ASSETS
+        SET is_active = FALSE,
+            update_time = NOW()
+        WHERE workspace = $1 AND answer_id = $2
+        """,
+        {
+            "workspace": workspace,
+            "answer_id": answer_id,
+        },
+    )
+    for item in snapshot_assets:
+        if not isinstance(item, dict) or not str(item.get("asset_id") or "").strip():
+            continue
+        create_time = item.get("create_time")
+        if isinstance(create_time, str):
+            try:
+                create_time = datetime.fromisoformat(
+                    create_time.replace("Z", "+00:00")
+                )
+            except ValueError:
+                create_time = None
+        await db.execute(
+            """
+            INSERT INTO LIGHTRAG_ANSWER_ASSETS
+                (asset_id, workspace, answer_id, answer_version, asset_type,
+                 storage_type, storage_uri, file_name, mime_type, file_size,
+                 caption, alt_text, search_text, content_text, display_order,
+                 is_active, metadata, create_time, update_time)
+            VALUES
+                ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                 $11, $12, $13, $14, $15, TRUE, $16::jsonb,
+                 COALESCE($17::timestamptz, NOW()), NOW())
+            ON CONFLICT (asset_id) DO UPDATE
+            SET workspace = EXCLUDED.workspace,
+                answer_id = EXCLUDED.answer_id,
+                answer_version = EXCLUDED.answer_version,
+                asset_type = EXCLUDED.asset_type,
+                storage_type = EXCLUDED.storage_type,
+                storage_uri = EXCLUDED.storage_uri,
+                file_name = EXCLUDED.file_name,
+                mime_type = EXCLUDED.mime_type,
+                file_size = EXCLUDED.file_size,
+                caption = EXCLUDED.caption,
+                alt_text = EXCLUDED.alt_text,
+                search_text = EXCLUDED.search_text,
+                content_text = EXCLUDED.content_text,
+                display_order = EXCLUDED.display_order,
+                is_active = TRUE,
+                metadata = EXCLUDED.metadata,
+                update_time = NOW()
+            """,
+            {
+                "asset_id": str(item["asset_id"]),
+                "workspace": workspace,
+                "answer_id": answer_id,
+                "answer_version": answer_version,
+                "asset_type": str(item.get("asset_type") or "file"),
+                "storage_type": str(item.get("storage_type") or "external"),
+                "storage_uri": item.get("storage_uri"),
+                "file_name": item.get("file_name"),
+                "mime_type": item.get("mime_type"),
+                "file_size": int(item.get("file_size") or 0),
+                "caption": item.get("caption"),
+                "alt_text": item.get("alt_text"),
+                "search_text": item.get("search_text"),
+                "content_text": item.get("content_text"),
+                "display_order": int(item.get("display_order") or 0),
+                "metadata": _json(item.get("metadata")),
+                "create_time": create_time,
+            },
+        )
 
 
 async def _log_event(
@@ -2611,45 +6061,390 @@ async def _insert_answer_guidance(
     return created_guidance
 
 
+def _guidance_needs_llm_enrichment(guidance: list[AnswerGuidance]) -> bool:
+    positive_types = {
+        item.guidance_type
+        for item in guidance
+        if item.guidance_type not in {"note", "negative_keyword"}
+    }
+    return "question" not in positive_types or not (
+        positive_types & {"keyword", "synonym"}
+    )
+
+
+def _guidance_needs_coverage_enrichment(
+    answer: AnswerItem,
+    guidance: list[AnswerGuidance],
+) -> bool:
+    positive = [
+        item
+        for item in guidance
+        if item.guidance_type not in {"note", "negative_keyword"}
+    ]
+    question_count = sum(item.guidance_type == "question" for item in positive)
+    synonym_count = sum(item.guidance_type == "synonym" for item in positive)
+    source_text = " ".join(
+        [answer.title, *answer.tags, *(item.text for item in positive)]
+    )
+    has_latin_term = re.search(r"\b[A-Za-z][A-Za-z0-9.+-]{2,}\b", source_text) is not None
+    has_korean_synonym = any(
+        item.guidance_type == "synonym" and re.search(r"[가-힣]", item.text)
+        for item in positive
+    )
+    return (
+        len(positive) < 6
+        or question_count < 2
+        or synonym_count < 2
+        or (has_latin_term and not has_korean_synonym)
+    )
+
+
+def _parse_batch_guidance_suggestions(
+    raw: str,
+    allowed_answer_ids: set[str],
+    existing_texts: dict[str, set[str]],
+    max_suggestions: int,
+    task_id: str,
+) -> dict[str, list[SourceGuidanceCandidate]]:
+    parsed: dict[str, list[SourceGuidanceCandidate]] = {
+        answer_id: [] for answer_id in allowed_answer_ids
+    }
+    allowed_types = {"question", "keyword", "synonym"}
+    for item in _extract_json_array(raw):
+        if not isinstance(item, dict):
+            continue
+        answer_id = str(item.get("answer_id") or "").strip()
+        if answer_id not in allowed_answer_ids:
+            continue
+        suggestions = item.get("suggestions")
+        if not isinstance(suggestions, list):
+            continue
+        seen = existing_texts.setdefault(answer_id, set())
+        for suggestion in suggestions:
+            if not isinstance(suggestion, dict):
+                continue
+            guidance_type = str(
+                suggestion.get("guidance_type") or "keyword"
+            ).strip()
+            text = " ".join(str(suggestion.get("text") or "").split())
+            if guidance_type not in allowed_types or len(text) < 2:
+                continue
+            normalized = _normalise_text(text)
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            parsed[answer_id].append(
+                SourceGuidanceCandidate(
+                    guidance_type=guidance_type,
+                    text=text[:200],
+                    weight=_safe_float(
+                        suggestion.get("weight"),
+                        1.0,
+                        0.1,
+                        2.0,
+                    ),
+                    source="llm_batch",
+                    metadata={
+                        "suggested_by": "llm_batch",
+                        "task_id": task_id,
+                    },
+                )
+            )
+            if len(parsed[answer_id]) >= max_suggestions:
+                break
+    return parsed
+
+
+async def _enrich_answer_guidance_background(
+    *,
+    task_id: str,
+    workspace: str,
+    db,
+    rag,
+    answer_ids: list[str],
+    scope: GuidanceEnrichmentScope,
+    batch_size: int,
+    max_suggestions: int,
+) -> None:
+    from lightrag.api.task_manager import TaskStatus, get_task_service
+
+    service = get_task_service()
+    llm_func = getattr(rag, "llm_model_func", None)
+    if llm_func is None:
+        raise RuntimeError("LLM is not configured for this workspace")
+
+    answer_rows = await db.query(
+        """
+        SELECT workspace, answer_id, title, body, approved_summary, content_format,
+               display_policy, status, version, valid_from, valid_until, priority,
+               tags, metadata, publish_time, create_time, update_time
+        FROM LIGHTRAG_ANSWER_ITEMS
+        WHERE workspace = $1 AND answer_id = ANY($2::text[])
+        ORDER BY create_time ASC, answer_id ASC
+        """,
+        [workspace, answer_ids],
+        multirows=True,
+    )
+    guidance_rows = await db.query(
+        """
+        SELECT guidance_id, workspace, answer_id, guidance_type, text, weight,
+               metadata, create_time
+        FROM LIGHTRAG_ANSWER_GUIDANCE
+        WHERE workspace = $1 AND answer_id = ANY($2::text[])
+        ORDER BY create_time ASC
+        """,
+        [workspace, answer_ids],
+        multirows=True,
+    )
+    guidance_by_answer: dict[str, list[AnswerGuidance]] = {}
+    for row in guidance_rows or []:
+        guidance = _guidance_from_row(dict(row))
+        guidance_by_answer.setdefault(guidance.answer_id, []).append(guidance)
+
+    answers = [_answer_from_row(dict(row)) for row in answer_rows or []]
+    targets = [
+        answer
+        for answer in answers
+        if scope == "all"
+        or (
+            scope == "coverage"
+            and _guidance_needs_coverage_enrichment(
+                answer,
+                guidance_by_answer.get(answer.answer_id, []),
+            )
+        )
+        or _guidance_needs_llm_enrichment(
+            guidance_by_answer.get(answer.answer_id, [])
+        )
+    ]
+    skipped = len(answers) - len(targets)
+    if not targets:
+        vector_result = await _rebuild_answer_vectors_for_ids(
+            db=db,
+            workspace=workspace,
+            rag=rag,
+            answer_ids=answer_ids,
+            task_id=task_id,
+        )
+        await service.complete_task(
+            task_id,
+            result={
+                "answer_count": len(answers),
+                "target_count": 0,
+                "skipped_count": skipped,
+                "processed_count": 0,
+                "guidance_created": 0,
+                "failed_batches": [],
+                "vector_result": vector_result,
+            },
+        )
+        return
+
+    guidance_created = 0
+    processed_count = 0
+    failed_batches: list[dict[str, Any]] = []
+    batch_count = (len(targets) + batch_size - 1) // batch_size
+    for batch_index in range(batch_count):
+        task = service.get_task(task_id)
+        if task and task.status == TaskStatus.CANCELLED:
+            return
+        batch = targets[
+            batch_index * batch_size : (batch_index + 1) * batch_size
+        ]
+        existing_texts = {
+            answer.answer_id: {
+                _normalise_text(item.text)
+                for item in guidance_by_answer.get(answer.answer_id, [])
+            }
+            for answer in batch
+        }
+        prompt_items = [
+            {
+                "answer_id": answer.answer_id,
+                "title": answer.title,
+                "body": answer.body[:1200],
+                "tags": answer.tags[:10],
+                "existing_hints": [
+                    {
+                        "guidance_type": item.guidance_type,
+                        "text": item.text,
+                    }
+                    for item in guidance_by_answer.get(answer.answer_id, [])[:12]
+                ],
+            }
+            for answer in batch
+        ]
+        prompt = (
+            "Create short search hints for Korean users of each fixed FAQ answer below. "
+            "Return only a JSON array. Preserve each provided answer_id exactly. "
+            "For each answer return {\"answer_id\": string, \"suggestions\": "
+            "[{\"guidance_type\": \"question|keyword|synonym\", "
+            "\"text\": string, \"weight\": number}]}. "
+            f"Return at most {max_suggestions} useful, non-duplicate suggestions "
+            "per answer. Cover natural spoken questions, abbreviations, spacing or spelling "
+            "variants, and established Korean-English product aliases. When an English product "
+            "name appears, include its common Korean pronunciation or name when useful "
+            "(for example Teams and 팀즈). Do not generate answer content, negative terms, "
+            "or internal notes.\n\n"
+            f"FAQ answers:\n{json.dumps(prompt_items, ensure_ascii=False)}"
+        )
+        try:
+            raw = await llm_func(
+                prompt,
+                system_prompt=(
+                    "You improve FAQ retrieval quality by adding concise representative "
+                    "questions, keywords, colloquial expressions, and bilingual aliases for "
+                    "Korean search. Return strict JSON only."
+                ),
+                _llm_purpose="knowledge_structure",
+            )
+            parsed = _parse_batch_guidance_suggestions(
+                str(raw),
+                {answer.answer_id for answer in batch},
+                existing_texts,
+                max_suggestions,
+                task_id,
+            )
+            for answer in batch:
+                created = await _insert_answer_guidance(
+                    db,
+                    workspace,
+                    answer.answer_id,
+                    parsed.get(answer.answer_id, []),
+                )
+                guidance_created += len(created)
+                guidance_by_answer.setdefault(answer.answer_id, []).extend(created)
+            processed_count += len(batch)
+        except Exception as exc:
+            logger.warning(
+                "[Answers] Batch LLM guidance enrichment failed task=%s batch=%s: %s",
+                task_id,
+                batch_index + 1,
+                exc,
+            )
+            failed_batches.append(
+                {
+                    "batch": batch_index + 1,
+                    "answer_ids": [answer.answer_id for answer in batch],
+                    "error": str(exc)[:500],
+                }
+            )
+
+        progress = ((batch_index + 1) / batch_count) * 95.0
+        await service.update_progress(
+            task_id,
+            progress,
+            (
+                f"FAQ hint enrichment batch {batch_index + 1}/{batch_count} "
+                f"completed ({guidance_created} hints added)"
+            ),
+            detail={
+                "processed_count": processed_count,
+                "target_count": len(targets),
+                "guidance_created": guidance_created,
+                "failed_batch_count": len(failed_batches),
+            },
+        )
+
+    if failed_batches and processed_count == 0:
+        raise RuntimeError(
+            f"All {len(failed_batches)} LLM guidance enrichment batches failed"
+        )
+    vector_result = await _rebuild_answer_vectors_for_ids(
+        db=db,
+        workspace=workspace,
+        rag=rag,
+        answer_ids=answer_ids,
+        task_id=task_id,
+        progress_start=95.0,
+        progress_span=4.0,
+    )
+    await service.complete_task(
+        task_id,
+        result={
+            "answer_count": len(answers),
+            "target_count": len(targets),
+            "skipped_count": skipped,
+            "processed_count": processed_count,
+            "guidance_created": guidance_created,
+            "failed_batches": failed_batches,
+            "vector_result": vector_result,
+        },
+    )
+
+
 def _score_candidate(
     answer: AnswerItem,
     guidance: list[AnswerGuidance],
     query: str,
     strategy: ResolveStrategy = "balanced",
+    alias_expansions: Optional[list[AnswerAliasExpansion]] = None,
 ) -> tuple[float, list[str], str, dict[str, float]]:
-    normalized_query = _normalise_text(query)
-    query_tokens = _tokens(query)
+    query_variants = _alias_query_variants(query, alias_expansions)
+    query_token_variants = [_tokens(variant) for variant in query_variants]
     details: dict[str, float] = {}
     matched_guidance: list[str] = []
 
     title = _normalise_text(answer.title)
-    summary = _normalise_text(answer.approved_summary)
     body = _normalise_text(answer.body)
     tags = _normalise_text(" ".join(answer.tags))
+    asset_text = _normalise_text(_answer_asset_search_content(answer.assets))
 
-    if normalized_query and normalized_query in title:
+    if any(variant and variant in title for variant in query_variants):
         _add_score(details, "title_exact", 0.42)
-    if normalized_query and normalized_query in summary:
-        _add_score(details, "summary_exact", 0.24)
-    if normalized_query and normalized_query in body:
+    if any(variant and variant in body for variant in query_variants):
         _add_score(details, "body_exact", 0.16)
-    if normalized_query and normalized_query in tags:
+    if any(variant and variant in tags for variant in query_variants):
         _add_score(details, "tag_exact", 0.2)
+    if any(variant and variant in asset_text for variant in query_variants):
+        _add_score(details, "asset_exact", 0.18)
 
-    _add_score(details, "title_overlap", _partial_overlap(query_tokens, title) * 0.26)
-    _add_score(details, "summary_overlap", _partial_overlap(query_tokens, summary) * 0.16)
-    _add_score(details, "body_overlap", _partial_overlap(query_tokens, body) * 0.1)
-    _add_score(details, "tag_overlap", _partial_overlap(query_tokens, tags) * 0.18)
+    _add_score(
+        details,
+        "title_overlap",
+        max((_partial_overlap(tokens, title) for tokens in query_token_variants), default=0.0)
+        * 0.26,
+    )
+    _add_score(
+        details,
+        "body_overlap",
+        max((_partial_overlap(tokens, body) for tokens in query_token_variants), default=0.0)
+        * 0.1,
+    )
+    _add_score(
+        details,
+        "tag_overlap",
+        max((_partial_overlap(tokens, tags) for tokens in query_token_variants), default=0.0)
+        * 0.18,
+    )
+    _add_score(
+        details,
+        "asset_overlap",
+        max(
+            (_partial_overlap(tokens, asset_text) for tokens in query_token_variants),
+            default=0.0,
+        )
+        * 0.12,
+    )
 
     for item in guidance:
         guidance_text = _normalise_text(item.text)
         multiplier = GUIDANCE_TYPE_MULTIPLIER.get(item.guidance_type, 1.0)
         exact_match = bool(
-            normalized_query
-            and guidance_text
-            and (normalized_query in guidance_text or guidance_text in normalized_query)
+            guidance_text
+            and any(
+                variant
+                and (variant in guidance_text or guidance_text in variant)
+                for variant in query_variants
+            )
         )
-        overlap = _partial_overlap(query_tokens, guidance_text)
+        overlap = max(
+            (
+                _partial_overlap(tokens, guidance_text)
+                for tokens in query_token_variants
+            ),
+            default=0.0,
+        )
         if not exact_match and overlap <= 0:
             continue
 
@@ -2668,9 +6463,49 @@ def _score_candidate(
         prefix = "!" if item.guidance_type == "negative_keyword" else ""
         matched_guidance.append(f"{prefix}{item.text}")
 
+    positive_guidance_text = " ".join(
+        item.text
+        for item in guidance
+        if item.guidance_type not in {"negative_keyword", "note"}
+    )
+    for expansion in alias_expansions or []:
+        matched_variant: Optional[str] = None
+        for variant in expansion.expanded_terms:
+            variant_text = _normalise_text(variant)
+            if not variant_text:
+                continue
+            if (
+                variant_text in title
+                or variant_text in _normalise_text(positive_guidance_text)
+                or variant_text in tags
+                or variant_text in body
+            ):
+                matched_variant = variant
+                break
+        if matched_variant:
+            matched_guidance.append(
+                f"{expansion.matched_term} ↔ {matched_variant}"
+                if _normalise_text(expansion.matched_term)
+                != _normalise_text(matched_variant)
+                else matched_variant
+            )
+
     if strategy == "balanced":
-        metadata_text = _normalise_text(json.dumps(answer.metadata, ensure_ascii=False))
-        _add_score(details, "metadata_overlap", _partial_overlap(query_tokens, metadata_text) * 0.08)
+        metadata_text = _normalise_text(
+            json.dumps(_compact_answer_metadata(answer.metadata), ensure_ascii=False)
+        )
+        _add_score(
+            details,
+            "metadata_overlap",
+            max(
+                (
+                    _partial_overlap(tokens, metadata_text)
+                    for tokens in query_token_variants
+                ),
+                default=0.0,
+            )
+            * 0.08,
+        )
 
     _add_score(details, "priority", min(0.07, max(answer.priority, 0) * 0.01))
 
@@ -2681,6 +6516,326 @@ def _score_candidate(
     if not reason and details:
         reason = ", ".join(f"{key}:{value:.2f}" for key, value in sorted(details.items()))
     return score, matched_guidance[:8], reason or "weak_match", details
+
+
+def _candidate_category(candidate: ResolveCandidate) -> Optional[str]:
+    metadata = candidate.answer.metadata
+    if not isinstance(metadata, dict):
+        return None
+    for key in ("category", "service_area", "product_family", "domain"):
+        value = metadata.get(key)
+        if isinstance(value, (str, int, float)) and str(value).strip():
+            return f"{key}:{_normalise_text(str(value))}"
+    return None
+
+
+def _candidate_evidence_sources(candidate: ResolveCandidate) -> list[str]:
+    details = candidate.score_details
+    sources: list[str] = []
+    if _safe_float(details.get("keyword_score"), 0.0) > 0:
+        sources.append("keyword")
+    if _safe_float(details.get("vector_score"), 0.0) > 0:
+        sources.append("vector")
+    if _safe_float(details.get("graph_score"), 0.0) > 0:
+        sources.append("graph")
+    return sources
+
+
+def _precision_abstention_reason(
+    selected: Optional[ResolveCandidate],
+    candidates: list[ResolveCandidate],
+    payload: ResolveRequest,
+    config: AnswerGraphConfig,
+    llm_selection: dict[str, Any],
+) -> tuple[Optional[str], dict[str, Any]]:
+    diagnostics: dict[str, Any] = {}
+    if selected is None:
+        return "no_candidates", diagnostics
+
+    llm_status = str(llm_selection.get("status") or "")
+    llm_confidence = _safe_float(llm_selection.get("confidence"), 0.0, 0.0, 1.0)
+    confident_llm_selection = (
+        payload.retrieval_mode == "llm_rerank"
+        and selected.selected_by == "llm_id_selector"
+        and llm_status == "llm_ready"
+        and llm_selection.get("answer_id") == selected.answer.answer_id
+        and llm_confidence >= config.llm_min_confidence
+    )
+    diagnostics["llm_status"] = llm_status
+    diagnostics["llm_confidence"] = llm_confidence
+    diagnostics["confident_llm_selection"] = confident_llm_selection
+
+    effective_min_score = max(payload.min_score, config.precision_min_score)
+    if confident_llm_selection:
+        effective_min_score = payload.min_score
+    diagnostics["effective_min_score"] = effective_min_score
+    if selected.score < effective_min_score:
+        return "low_score", diagnostics
+
+    evidence_sources = _candidate_evidence_sources(selected)
+    available_sources = (
+        1
+        if payload.retrieval_mode == "keyword"
+        else (
+            3
+            if payload.retrieval_mode == "graph_hybrid"
+            or (
+                payload.retrieval_mode == "llm_rerank"
+                and config.enabled
+            )
+            else 2
+        )
+    )
+    required_sources = min(
+        config.min_evidence_sources,
+        available_sources,
+    )
+    diagnostics["evidence_sources"] = evidence_sources
+    diagnostics["required_evidence_sources"] = required_sources
+    if len(evidence_sources) < required_sources:
+        return "insufficient_evidence", diagnostics
+
+    selected_category = _candidate_category(selected)
+    category_scores: dict[str, float] = {}
+    for candidate in candidates:
+        category = _candidate_category(candidate)
+        if category:
+            category_scores[category] = max(
+                category_scores.get(category, 0.0),
+                candidate.score,
+            )
+    diagnostics["selected_category"] = selected_category
+    diagnostics["category_scores"] = category_scores
+    if selected_category and len(category_scores) > 1:
+        ranked_categories = sorted(
+            category_scores.items(),
+            key=lambda item: item[1],
+            reverse=True,
+        )
+        category_margin = ranked_categories[0][1] - ranked_categories[1][1]
+        diagnostics["category_margin"] = round(category_margin, 4)
+        diagnostics["category_competition"] = (
+            category_margin < config.min_category_margin
+        )
+        if selected_category != ranked_categories[0][0]:
+            return "category_conflict", diagnostics
+
+    same_category_competitors = [
+        candidate
+        for candidate in candidates
+        if candidate.answer.answer_id != selected.answer.answer_id
+        and (
+            not selected_category
+            or _candidate_category(candidate) == selected_category
+        )
+    ]
+    nearest_score = max(
+        (candidate.score for candidate in same_category_competitors),
+        default=0.0,
+    )
+    score_margin = selected.score - nearest_score
+    diagnostics["score_margin"] = round(score_margin, 4)
+    diagnostics["candidate_competition"] = (
+        score_margin < config.min_score_margin
+    )
+    exceptionally_strong_candidate = (
+        selected.score >= 0.75
+        and score_margin >= max(config.min_score_margin, 0.20)
+        and len(evidence_sources) >= required_sources
+    )
+    diagnostics["exceptionally_strong_candidate"] = exceptionally_strong_candidate
+
+    if payload.retrieval_mode == "llm_rerank":
+        if llm_status != "llm_ready":
+            return "llm_unavailable", diagnostics
+        if llm_selection.get("answer_id") is None:
+            if (
+                llm_selection.get("decision_reason") == "ambiguous"
+                and exceptionally_strong_candidate
+            ):
+                return None, diagnostics
+            if llm_selection.get("decision_reason") == "ambiguous":
+                return "ambiguous_intent", diagnostics
+            return "llm_no_match", diagnostics
+        if (
+            selected.selected_by == "llm_id_selector"
+            and llm_confidence < config.llm_min_confidence
+        ):
+            return "low_llm_confidence", diagnostics
+
+    return None, diagnostics
+
+
+def _clarification_question(
+    candidates: list[ResolveCandidate],
+    abstention_reason: Optional[str],
+    llm_selection: dict[str, Any],
+) -> Optional[str]:
+    if abstention_reason not in {
+        "no_candidates",
+        "low_score",
+        "ambiguous_intent",
+        "ambiguous_category",
+        "ambiguous_candidates",
+        "category_conflict",
+    }:
+        return None
+
+    if abstention_reason in {"no_candidates", "low_score"}:
+        return "어떤 서비스에서 어떤 문제가 발생했는지 조금 더 알려주세요."
+
+    llm_question = str(llm_selection.get("clarification_question") or "").strip()
+    candidate_text = " ".join(candidate.answer.title for candidate in candidates)
+    question_matches_candidate_language = (
+        not re.search(r"[가-힣]", candidate_text)
+        or bool(re.search(r"[가-힣]", llm_question))
+    )
+    if llm_question and question_matches_candidate_language:
+        return llm_question[:300]
+
+    titles: list[str] = []
+    for candidate in candidates:
+        title = candidate.answer.title.strip()
+        if title and title not in titles:
+            titles.append(title)
+        if len(titles) >= 3:
+            break
+    if not titles:
+        return "어떤 서비스에서 어떤 문제가 발생했는지 조금 더 알려주세요."
+    return (
+        "문의하신 내용이 여러 경우에 해당할 수 있습니다. "
+        f"{', '.join(titles)} 중 어느 내용인지 알려주세요."
+    )
+
+
+async def _keyword_candidate_ids(
+    db,
+    workspace: str,
+    query: str,
+    status_filter: list[str],
+    allowed_answer_ids: Optional[list[str]],
+    alias_expansions: Optional[list[AnswerAliasExpansion]] = None,
+) -> tuple[list[str], bool]:
+    normalized_query = _normalise_text(query)
+    query_terms = _candidate_query_terms(query)
+    for expansion in alias_expansions or []:
+        for term in expansion.expanded_terms:
+            for candidate in _candidate_query_terms(term):
+                if candidate not in query_terms:
+                    query_terms.append(candidate)
+    query_terms = query_terms[:64]
+    rows = await db.query(
+        """
+        WITH guidance_text AS (
+            SELECT answer_id, LOWER(STRING_AGG(text, ' ' ORDER BY guidance_id)) AS search_text
+            FROM LIGHTRAG_ANSWER_GUIDANCE
+            WHERE workspace = $1
+            GROUP BY answer_id
+        ),
+        asset_text AS (
+            SELECT
+                answer_id,
+                LOWER(
+                    STRING_AGG(
+                        CONCAT_WS(
+                            ' ',
+                            caption,
+                            alt_text,
+                            search_text,
+                            content_text
+                        ),
+                        ' ' ORDER BY display_order, asset_id
+                    )
+                ) AS search_text
+            FROM LIGHTRAG_ANSWER_ASSETS
+            WHERE workspace = $1 AND is_active = TRUE
+            GROUP BY answer_id
+        ),
+        eligible AS (
+            SELECT
+                answers.answer_id,
+                answers.priority,
+                answers.update_time,
+                LOWER(
+                    CONCAT_WS(
+                        ' ',
+                        answers.answer_id,
+                        answers.title,
+                        answers.body,
+                        answers.tags::text,
+                        (
+                            answers.metadata
+                            - 'source_profile'
+                            - 'raw_content'
+                        )::text
+                    )
+                ) AS answer_text,
+                COALESCE(guidance_text.search_text, '') AS guidance_text,
+                COALESCE(asset_text.search_text, '') AS asset_text
+            FROM LIGHTRAG_ANSWER_ITEMS AS answers
+            LEFT JOIN guidance_text ON guidance_text.answer_id = answers.answer_id
+            LEFT JOIN asset_text ON asset_text.answer_id = answers.answer_id
+            WHERE answers.workspace = $1
+              AND answers.status = ANY($2::text[])
+              AND (answers.valid_from IS NULL OR answers.valid_from <= NOW())
+              AND (answers.valid_until IS NULL OR answers.valid_until >= NOW())
+              AND ($3::text[] IS NULL OR answers.answer_id = ANY($3::text[]))
+        ),
+        ranked AS (
+            SELECT
+                answer_id,
+                priority,
+                update_time,
+                (
+                    CASE
+                        WHEN $4 <> '' AND STRPOS(answer_text, $4) > 0 THEN 30
+                        ELSE 0
+                    END
+                    + CASE
+                        WHEN $4 <> '' AND STRPOS(guidance_text, $4) > 0 THEN 40
+                        ELSE 0
+                    END
+                    + CASE
+                        WHEN $4 <> '' AND STRPOS(asset_text, $4) > 0 THEN 24
+                        ELSE 0
+                    END
+                    + (
+                        SELECT COUNT(*) * 3
+                        FROM UNNEST($5::text[]) AS term
+                        WHERE STRPOS(answer_text, term) > 0
+                    )
+                    + (
+                        SELECT COUNT(*) * 4
+                        FROM UNNEST($5::text[]) AS term
+                        WHERE STRPOS(guidance_text, term) > 0
+                    )
+                    + (
+                        SELECT COUNT(*) * 3
+                        FROM UNNEST($5::text[]) AS term
+                        WHERE STRPOS(asset_text, term) > 0
+                    )
+                ) AS prefilter_score
+            FROM eligible
+        )
+        SELECT answer_id
+        FROM ranked
+        WHERE prefilter_score > 0
+        ORDER BY prefilter_score DESC, priority DESC, update_time DESC, answer_id ASC
+        LIMIT $6
+        """,
+        [
+            workspace,
+            status_filter,
+            allowed_answer_ids,
+            normalized_query,
+            query_terms,
+            MAX_KEYWORD_SEARCH_CANDIDATES + 1,
+        ],
+        multirows=True,
+    )
+    candidate_ids = [str(row["answer_id"]) for row in rows or []]
+    truncated = len(candidate_ids) > MAX_KEYWORD_SEARCH_CANDIDATES
+    return candidate_ids[:MAX_KEYWORD_SEARCH_CANDIDATES], truncated
 
 
 def _render_answer_response(answer: AnswerItem, display_policy: Optional[DisplayPolicy] = None) -> tuple[str, DisplayPolicy]:
@@ -2731,6 +6886,397 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
         if workspace_rag is None:
             workspace_rag = rag
         return workspace_rag
+
+    @router.get(
+        "/graph/config",
+        response_model=AnswerGraphConfig,
+        dependencies=[Depends(combined_auth)],
+        summary="Get FAQ graph configuration",
+        description=(
+            "Returns workspace-scoped graph settings. Reading this endpoint does not "
+            "build or modify graph data."
+        ),
+    )
+    async def get_answer_graph_config(request: Request):
+        workspace, db = await db_for_request(request)
+        return await _get_answer_graph_config(db, workspace)
+
+    @router.put(
+        "/graph/config",
+        response_model=AnswerGraphConfig,
+        dependencies=[Depends(combined_auth)],
+        summary="Update FAQ graph configuration",
+        description=(
+            "Enables optional graph_hybrid retrieval and updates its bounded schema. "
+            "Changing entity types, relation types, or the extraction prompt increments "
+            "the schema version and marks existing projections stale; call "
+            "POST /api/answers/graph/rebuild afterward."
+        ),
+    )
+    async def update_answer_graph_config(
+        request: Request,
+        payload: AnswerGraphConfigUpdate,
+    ):
+        workspace, db = await db_for_request(request)
+        current = await _get_answer_graph_config(db, workspace)
+        updates = payload.model_dump(exclude_unset=True)
+        entity_types = updates.get("entity_types", current.entity_types)
+        relation_types = updates.get("relation_types", current.relation_types)
+        if "FAQAnswer" not in entity_types:
+            entity_types = ["FAQAnswer", *entity_types]
+        entity_types = list(dict.fromkeys(_graph_clean_label(item, 80) for item in entity_types if _graph_clean_label(item, 80)))
+        relation_types = list(
+            dict.fromkeys(
+                _graph_clean_label(item, 80)
+                for item in relation_types
+                if _graph_clean_label(item, 80)
+            )
+        )
+        schema_changed = (
+            "entity_types" in updates and entity_types != current.entity_types
+        ) or (
+            "relation_types" in updates
+            and relation_types != current.relation_types
+        ) or (
+            "extraction_prompt" in updates
+            and updates["extraction_prompt"] != current.extraction_prompt
+        ) or (
+            "ai_extraction_strategy" in updates
+            and updates["ai_extraction_strategy"] != current.ai_extraction_strategy
+        ) or (
+            "ai_retry_max_tokens" in updates
+            and updates["ai_retry_max_tokens"] != current.ai_retry_max_tokens
+        ) or (
+            "ai_min_relations" in updates
+            and updates["ai_min_relations"] != current.ai_min_relations
+        ) or (
+            "ai_min_relation_types" in updates
+            and updates["ai_min_relation_types"] != current.ai_min_relation_types
+        )
+        next_schema_version = current.schema_version + (1 if schema_changed else 0)
+        row = await db.query(
+            """
+            INSERT INTO LIGHTRAG_ANSWER_GRAPH_CONFIG
+                (
+                    workspace, enabled, auto_sync, graph_weight, min_similarity, max_hops,
+                    precision_mode, precision_min_score, min_score_margin,
+                    min_category_margin, min_evidence_sources, llm_min_confidence,
+                    entity_types, relation_types, extraction_prompt,
+                    ai_extraction_strategy, ai_retry_max_tokens, ai_min_relations,
+                    ai_min_relation_types, schema_version
+                )
+            VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+                $13::jsonb, $14::jsonb, $15, $16, $17, $18, $19, $20
+            )
+            ON CONFLICT (workspace)
+            DO UPDATE SET
+                enabled = EXCLUDED.enabled,
+                auto_sync = EXCLUDED.auto_sync,
+                graph_weight = EXCLUDED.graph_weight,
+                min_similarity = EXCLUDED.min_similarity,
+                max_hops = EXCLUDED.max_hops,
+                precision_mode = EXCLUDED.precision_mode,
+                precision_min_score = EXCLUDED.precision_min_score,
+                min_score_margin = EXCLUDED.min_score_margin,
+                min_category_margin = EXCLUDED.min_category_margin,
+                min_evidence_sources = EXCLUDED.min_evidence_sources,
+                llm_min_confidence = EXCLUDED.llm_min_confidence,
+                entity_types = EXCLUDED.entity_types,
+                relation_types = EXCLUDED.relation_types,
+                extraction_prompt = EXCLUDED.extraction_prompt,
+                ai_extraction_strategy = EXCLUDED.ai_extraction_strategy,
+                ai_retry_max_tokens = EXCLUDED.ai_retry_max_tokens,
+                ai_min_relations = EXCLUDED.ai_min_relations,
+                ai_min_relation_types = EXCLUDED.ai_min_relation_types,
+                schema_version = EXCLUDED.schema_version,
+                update_time = NOW()
+            RETURNING workspace, enabled, auto_sync, graph_weight, min_similarity, max_hops,
+                      precision_mode, precision_min_score, min_score_margin,
+                      min_category_margin, min_evidence_sources, llm_min_confidence,
+                      entity_types, relation_types, extraction_prompt,
+                      ai_extraction_strategy, ai_retry_max_tokens, ai_min_relations,
+                      ai_min_relation_types, schema_version,
+                      create_time, update_time
+            """,
+            [
+                workspace,
+                updates.get("enabled", current.enabled),
+                updates.get("auto_sync", current.auto_sync),
+                updates.get("graph_weight", current.graph_weight),
+                updates.get("min_similarity", current.min_similarity),
+                updates.get("max_hops", current.max_hops),
+                updates.get("precision_mode", current.precision_mode),
+                updates.get("precision_min_score", current.precision_min_score),
+                updates.get("min_score_margin", current.min_score_margin),
+                updates.get("min_category_margin", current.min_category_margin),
+                updates.get("min_evidence_sources", current.min_evidence_sources),
+                updates.get("llm_min_confidence", current.llm_min_confidence),
+                _json_list(entity_types),
+                _json_list(relation_types),
+                updates.get("extraction_prompt", current.extraction_prompt),
+                updates.get(
+                    "ai_extraction_strategy", current.ai_extraction_strategy
+                ),
+                updates.get("ai_retry_max_tokens", current.ai_retry_max_tokens),
+                updates.get("ai_min_relations", current.ai_min_relations),
+                updates.get(
+                    "ai_min_relation_types", current.ai_min_relation_types
+                ),
+                next_schema_version,
+            ],
+        )
+        if schema_changed:
+            await db.execute(
+                """
+                UPDATE LIGHTRAG_ANSWER_GRAPH_PROJECTIONS
+                SET status = 'stale', schema_version = $2, update_time = NOW()
+                WHERE workspace = $1
+                """,
+                {"workspace": workspace, "schema_version": next_schema_version},
+            )
+        return _graph_config_from_row(workspace, dict(row))
+
+    @router.get(
+        "/graph/status",
+        response_model=AnswerGraphStatusResponse,
+        dependencies=[Depends(combined_auth)],
+        summary="Get FAQ graph build status",
+        description=(
+            "Counts ready, stale, pending, failed, and missing FAQ projections for the "
+            "current workspace. It is safe to poll this endpoint."
+        ),
+    )
+    async def get_answer_graph_status(request: Request):
+        workspace, db = await db_for_request(request)
+        config = await _get_answer_graph_config(db, workspace)
+        row = await db.query(
+            """
+            SELECT
+                COUNT(answers.answer_id)::INT AS total_answers,
+                COUNT(*) FILTER (
+                    WHERE projections.status = 'ready'
+                      AND projections.answer_version = answers.version
+                      AND projections.schema_version = $2
+                )::INT AS ready,
+                COUNT(*) FILTER (
+                    WHERE projections.status = 'stale'
+                       OR (
+                            projections.status = 'ready'
+                            AND (
+                                projections.answer_version <> answers.version
+                                OR projections.schema_version <> $2
+                            )
+                       )
+                )::INT AS stale,
+                COUNT(*) FILTER (WHERE projections.status = 'pending')::INT AS pending,
+                COUNT(*) FILTER (WHERE projections.status = 'failed')::INT AS failed,
+                COUNT(*) FILTER (WHERE projections.answer_id IS NULL)::INT AS missing,
+                MAX(projections.built_at) AS last_built_at
+            FROM LIGHTRAG_ANSWER_ITEMS AS answers
+            LEFT JOIN LIGHTRAG_ANSWER_GRAPH_PROJECTIONS AS projections
+              ON projections.workspace = answers.workspace
+             AND projections.answer_id = answers.answer_id
+            WHERE answers.workspace = $1
+              AND answers.status IN ('draft', 'published')
+            """,
+            [workspace, config.schema_version],
+        )
+        return AnswerGraphStatusResponse(
+            workspace=workspace,
+            enabled=config.enabled,
+            total_answers=int((row or {}).get("total_answers") or 0),
+            ready=int((row or {}).get("ready") or 0),
+            stale=int((row or {}).get("stale") or 0),
+            pending=int((row or {}).get("pending") or 0),
+            failed=int((row or {}).get("failed") or 0),
+            missing=int((row or {}).get("missing") or 0),
+            last_built_at=_iso((row or {}).get("last_built_at")),
+        )
+
+    @router.post(
+        "/graph/preview",
+        response_model=AnswerGraphProjection,
+        dependencies=[Depends(combined_auth)],
+        summary="Preview an FAQ graph projection",
+        description=(
+            "Builds a read-only projection for one FAQ and returns the nodes and "
+            "relations that would be stored. The preview never writes graph or "
+            "projection data. Set use_llm=true only when the workspace LLM is available."
+        ),
+    )
+    async def preview_answer_graph(
+        request: Request,
+        payload: AnswerGraphPreviewRequest,
+    ):
+        workspace, db = await db_for_request(request)
+        answers, guidance_by_answer = await _answer_rows_and_guidance(
+            db, workspace, [payload.answer_id]
+        )
+        if not answers:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Answer '{payload.answer_id}' not found",
+            )
+        answer = answers[0]
+        config = await _get_answer_graph_config(db, workspace)
+        workspace_rag = await rag_for_workspace(workspace)
+        if payload.use_llm and getattr(workspace_rag, "llm_model_func", None) is None:
+            raise HTTPException(
+                status_code=409,
+                detail="LLM is not configured for this workspace.",
+            )
+        return await _build_answer_graph_preview(
+            db,
+            workspace,
+            workspace_rag,
+            answer,
+            guidance_by_answer.get(payload.answer_id, []),
+            config,
+            use_llm=payload.use_llm,
+        )
+
+    @router.get(
+        "/{answer_id}/graph",
+        response_model=AnswerGraphProjection,
+        dependencies=[Depends(combined_auth)],
+        summary="Get a stored FAQ graph projection",
+        description=(
+            "Returns the last stored projection for one FAQ. A 404 means the FAQ has "
+            "not been rebuilt yet; inspect GET /api/answers/graph/status or start a rebuild."
+        ),
+    )
+    async def get_answer_graph_projection(request: Request, answer_id: str):
+        workspace, db = await db_for_request(request)
+        await _get_answer_row(db, workspace, answer_id)
+        row = await db.query(
+            """
+            SELECT workspace, answer_id, answer_version, schema_version, status,
+                   content_hash, nodes, relations, error, built_at, update_time
+            FROM LIGHTRAG_ANSWER_GRAPH_PROJECTIONS
+            WHERE workspace = $1 AND answer_id = $2
+            """,
+            [workspace, answer_id],
+        )
+        if not row:
+            raise HTTPException(
+                status_code=404,
+                detail=f"FAQ graph projection for '{answer_id}' was not built.",
+            )
+        return _graph_projection_from_row(dict(row))
+
+    @router.post(
+        "/graph/rebuild",
+        response_model=AnswerGraphRebuildResponse,
+        dependencies=[Depends(combined_auth)],
+        summary="Rebuild FAQ graph projections",
+        description=(
+            "Starts an asynchronous rebuild and returns a task ID immediately. By "
+            "default, only published FAQs with missing or stale projections are selected. "
+            "Track progress with GET /api/tasks/{task_id} or the returned stream_url. "
+            "Existing keyword and vector retrieval remain available during the rebuild."
+        ),
+    )
+    async def rebuild_answer_graph(
+        request: Request,
+        payload: AnswerGraphRebuildRequest,
+    ):
+        from lightrag.api.task_manager import TaskStatus, TaskType, get_task_service
+
+        workspace, db = await db_for_request(request)
+        config = await _get_answer_graph_config(db, workspace)
+        if not config.enabled:
+            raise HTTPException(
+                status_code=409,
+                detail="Enable the FAQ graph for this workspace before rebuilding it.",
+            )
+        service = get_task_service()
+        active_tasks = [
+            task
+            for task in service.get_tasks_by_workspace(workspace)
+            if task.task_type == TaskType.FAQ_GRAPH_REBUILD
+            and task.status in (TaskStatus.PENDING, TaskStatus.RUNNING)
+        ]
+        if active_tasks:
+            active_task = max(active_tasks, key=lambda task: task.updated_at)
+            return AnswerGraphRebuildResponse(
+                task_id=active_task.task_id,
+                stream_url=f"/api/tasks/{active_task.task_id}/stream",
+                answer_count=int(active_task.metadata.get("answer_count", 0)),
+                message="An FAQ graph rebuild is already running.",
+                reused=True,
+            )
+        workspace_rag = await rag_for_workspace(workspace)
+        if payload.use_llm and getattr(workspace_rag, "llm_model_func", None) is None:
+            raise HTTPException(
+                status_code=409,
+                detail="LLM is not configured for this workspace.",
+            )
+        status_filter = (
+            ["draft", "published"] if payload.include_drafts else ["published"]
+        )
+        requested_ids = [
+            str(answer_id)
+            for answer_id in (payload.answer_ids or [])
+            if str(answer_id).strip()
+        ]
+        rows = await db.query(
+            """
+            SELECT answers.answer_id
+            FROM LIGHTRAG_ANSWER_ITEMS AS answers
+            LEFT JOIN LIGHTRAG_ANSWER_GRAPH_PROJECTIONS AS projections
+              ON projections.workspace = answers.workspace
+             AND projections.answer_id = answers.answer_id
+            WHERE answers.workspace = $1
+              AND answers.status = ANY($2::text[])
+              AND ($3::text[] IS NULL OR answers.answer_id = ANY($3::text[]))
+              AND (
+                    $4::boolean = FALSE
+                    OR projections.answer_id IS NULL
+                    OR projections.status <> 'ready'
+                    OR projections.answer_version <> answers.version
+                    OR projections.schema_version <> $5
+              )
+            ORDER BY answers.priority DESC, answers.update_time DESC
+            LIMIT $6
+            """,
+            [
+                workspace,
+                status_filter,
+                requested_ids or None,
+                payload.only_stale,
+                config.schema_version,
+                payload.limit,
+            ],
+            multirows=True,
+        )
+        answer_ids = [str(row["answer_id"]) for row in rows or []]
+        task = service.create_task(
+            task_type=TaskType.FAQ_GRAPH_REBUILD,
+            workspace=workspace,
+            metadata={
+                "answer_count": len(answer_ids),
+                "use_llm": payload.use_llm,
+                "schema_version": config.schema_version,
+                "trigger_source": "manual_api",
+            },
+        )
+        service.run_in_background(
+            task.task_id,
+            _rebuild_answer_graph_background,
+            task_id=task.task_id,
+            workspace=workspace,
+            db=db,
+            rag=workspace_rag,
+            answer_ids=answer_ids,
+            use_llm=payload.use_llm,
+        )
+        return AnswerGraphRebuildResponse(
+            task_id=task.task_id,
+            stream_url=f"/api/tasks/{task.task_id}/stream",
+            answer_count=len(answer_ids),
+            message="FAQ graph rebuild started.",
+        )
 
     @router.get("", response_model=AnswerListResponse, dependencies=[Depends(combined_auth)])
     async def list_answers(
@@ -2894,6 +7440,22 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                         "text": text.strip(),
                     },
                 )
+            asyncio.create_task(
+                _refresh_answer_vector_safely(
+                    db=db,
+                    workspace=workspace,
+                    answer_id=answer_id,
+                )
+            )
+            await _mark_answer_graph_stale(db, workspace, answer_id, 1)
+            asyncio.create_task(
+                _refresh_answer_graph_safely(
+                    db=db,
+                    workspace=workspace,
+                    answer_id=answer_id,
+                    trigger_source="answer_create",
+                )
+            )
             return _answer_from_row(dict(row))
         except HTTPException:
             raise
@@ -3017,6 +7579,13 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 if guidance_row:
                     created_guidance.append(_guidance_from_row(dict(guidance_row)))
 
+            asyncio.create_task(
+                _refresh_answer_vector_safely(
+                    db=db,
+                    workspace=workspace,
+                    answer_id=answer_id,
+                )
+            )
             return AnswerSourceDraftResponse(
                 answer=_answer_from_row(dict(row)),
                 guidance=created_guidance,
@@ -3204,7 +7773,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             )
 
         content, file_size = await _read_upload_limited(file, MAX_EXCEL_UPLOAD_BYTES)
-        sheets, selected_sheet, header, start_row, rows, columns, warnings = _extract_excel_rows(
+        sheets, selected_sheet, header, start_row, rows, columns, warnings, truncated = _extract_excel_rows(
             content,
             sheet_name=sheet_name,
             header_row=header_row,
@@ -3223,6 +7792,8 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             header_row=header,
             data_start_row=start_row,
             row_count=len(rows),
+            row_limit=max_rows,
+            truncated=truncated,
             columns=columns,
             raw_content=raw_content,
             source_uri=source_uri,
@@ -3237,6 +7808,14 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
     )
     async def materialize_structured_source(request: Request, payload: StructuredMaterializeRequest):
         workspace, db = await db_for_request(request)
+        enrichment_rag = None
+        if payload.llm_guidance_enrichment.enabled:
+            enrichment_rag = await rag_for_workspace(workspace)
+            if getattr(enrichment_rag, "llm_model_func", None) is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="LLM guidance enrichment is enabled, but no LLM is configured for this workspace.",
+                )
         profile = _profile_structured_source(payload.source_type, payload.raw_content, sample_limit=20)
         rows, _, _ = _parse_structured_rows(payload.source_type, payload.raw_content)
         profile_dict = profile.model_dump() if hasattr(profile, "model_dump") else profile.dict()
@@ -3258,14 +7837,44 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 field.name
                 for field in profile.fields
                 if field.semantic_role in {"category", "title", "id"}
+                and field.name != mapping.get("id")
             ][:5]
 
+        if payload.conversion_purpose == "id_lookup" and payload.materialization_mode != "row_per_answer":
+            raise HTTPException(
+                status_code=400,
+                detail="ID lookup conversion requires row_per_answer materialization.",
+            )
+        validation = _validate_id_lookup_rows(
+            rows,
+            mapping,
+            guidance_columns,
+            payload.conversion_purpose,
+        )
+        if validation.enabled and not validation.ready:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "ID lookup mapping validation failed.",
+                    "validation": validation.model_dump(),
+                },
+            )
+
         tags: list[str] = []
-        for tag in [*payload.tags, "structured", payload.source_type]:
+        purpose_tag = "id-lookup" if payload.conversion_purpose == "id_lookup" else None
+        for tag in [*payload.tags, "structured", payload.source_type, purpose_tag]:
             text = str(tag or "").strip()
             if text and text not in tags:
                 tags.append(text)
 
+        if payload.materialization_mode == "row_per_answer" and payload.source_truncated:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "The source preview was truncated. Split or filter the source before "
+                    "creating one answer per row."
+                ),
+            )
         if payload.materialization_mode == "row_per_answer" and len(rows) > MAX_STRUCTURED_ROWS_PER_ANSWER_BATCH:
             raise HTTPException(
                 status_code=400,
@@ -3283,6 +7892,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 "mapping": mapping,
                 "guidance_columns": guidance_columns,
                 "materialization_mode": payload.materialization_mode,
+                "conversion_purpose": payload.conversion_purpose,
             }
         }
         source_metadata = {
@@ -3291,6 +7901,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             "source_type": "structured",
             "structured_source_type": payload.source_type,
             "materialization_mode": payload.materialization_mode,
+            "conversion_purpose": payload.conversion_purpose,
             "source_uri": payload.source_uri,
             "file_name": payload.file_name,
             "source_profile": source_profile,
@@ -3309,6 +7920,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 "created_from": "structured_materialize",
                 "structured_source_type": payload.source_type,
                 "materialization_mode": payload.materialization_mode,
+                "conversion_purpose": payload.conversion_purpose,
                 "tags": tags,
             },
             created_answer_ids=answer_ids,
@@ -3317,6 +7929,12 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
         )
         source_metadata["source_snapshot_id"] = snapshot.snapshot_id
         source_metadata["source_content_hash"] = snapshot.content_hash
+        row_source_metadata = {
+            key: value
+            for key, value in source_metadata.items()
+            if key != "source_profile"
+        }
+        row_source_metadata["source_profile_ref"] = snapshot.snapshot_id
 
         created_guidance: list[AnswerGuidance] = []
         created_answers: list[AnswerItem] = []
@@ -3351,6 +7969,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                         "created_from": "structured_materialize",
                         "structured_source_type": payload.source_type,
                         "materialization_mode": payload.materialization_mode,
+                        "conversion_purpose": payload.conversion_purpose,
                         "mapping": mapping,
                         "guidance_columns": guidance_columns,
                     },
@@ -3360,7 +7979,12 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                         db,
                         workspace,
                         answer.answer_id,
-                        _guidance_from_structured_profile(rows, mapping, guidance_columns),
+                        _guidance_from_structured_profile(
+                            rows,
+                            mapping,
+                            guidance_columns,
+                            payload.conversion_purpose,
+                        ),
                     )
                 )
             else:
@@ -3369,8 +7993,12 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                     row_status = _status_for_structured_row(row_data, mapping, payload.status)
                     row_valid_from = _datetime_for_structured_row(row_data, mapping, "valid_from")
                     row_valid_until = _datetime_for_structured_row(row_data, mapping, "valid_until")
+                    source_id = _structured_row_text(row_data, mapping.get("id"))
                     row_metadata = {
-                        **source_metadata,
+                        **row_source_metadata,
+                        "source_id": source_id or None,
+                        "matched_id": source_id or None,
+                        "conversion_purpose": payload.conversion_purpose,
                         "source_row_index": row_index,
                         "source_row_hash": _content_hash(json.dumps(row_data, ensure_ascii=False, sort_keys=True)),
                         "source_row": row_data,
@@ -3385,8 +8013,17 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                         workspace,
                         answer_id=row_answer_id,
                         title=_title_for_structured_row(payload.title, row_data, mapping, row_index),
-                        body=_body_for_structured_row(row_data, mapping),
-                        approved_summary=_summary_for_structured_row(row_data, mapping, payload.approved_summary),
+                        body=_body_for_structured_row(
+                            row_data,
+                            mapping,
+                            payload.conversion_purpose,
+                        ),
+                        approved_summary=_summary_for_structured_row(
+                            row_data,
+                            mapping,
+                            payload.approved_summary,
+                            payload.conversion_purpose,
+                        ),
                         content_format="plain",
                         display_policy="both",
                         status=row_status,
@@ -3409,6 +8046,8 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                             "created_from": "structured_materialize",
                             "structured_source_type": payload.source_type,
                             "materialization_mode": payload.materialization_mode,
+                            "conversion_purpose": payload.conversion_purpose,
+                            "source_id": source_id or None,
                             "source_row_index": row_index,
                             "mapping": mapping,
                             "guidance_columns": guidance_columns,
@@ -3420,19 +8059,107 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                             db,
                             workspace,
                             answer.answer_id,
-                            _guidance_from_structured_profile([row_data], mapping, guidance_columns),
+                            _guidance_from_structured_profile(
+                                [row_data],
+                                mapping,
+                                guidance_columns,
+                                payload.conversion_purpose,
+                            ),
                         )
                     )
 
+            guidance_enrichment_task_id: Optional[str] = None
+            guidance_enrichment_stream_url: Optional[str] = None
+            vector_rebuild_task_id: Optional[str] = None
+            vector_rebuild_stream_url: Optional[str] = None
+            if payload.llm_guidance_enrichment.enabled and enrichment_rag is not None:
+                from lightrag.api.task_manager import TaskType, get_task_service
+
+                service = get_task_service()
+                enrichment_task = service.create_task(
+                    task_type=TaskType.FAQ_GUIDANCE_ENRICHMENT,
+                    workspace=workspace,
+                    metadata={
+                        "answer_count": len(answer_ids),
+                        "scope": payload.llm_guidance_enrichment.scope,
+                        "batch_size": payload.llm_guidance_enrichment.batch_size,
+                        "max_suggestions": payload.llm_guidance_enrichment.max_suggestions,
+                        "source_snapshot_id": snapshot.snapshot_id,
+                    },
+                )
+                guidance_enrichment_task_id = enrichment_task.task_id
+                guidance_enrichment_stream_url = (
+                    f"/api/tasks/{enrichment_task.task_id}/stream"
+                )
+                service.run_in_background(
+                    enrichment_task.task_id,
+                    _enrich_answer_guidance_background,
+                    task_id=enrichment_task.task_id,
+                    workspace=workspace,
+                    db=db,
+                    rag=enrichment_rag,
+                    answer_ids=answer_ids,
+                    scope=payload.llm_guidance_enrichment.scope,
+                    batch_size=payload.llm_guidance_enrichment.batch_size,
+                    max_suggestions=payload.llm_guidance_enrichment.max_suggestions,
+                )
+            else:
+                try:
+                    vector_rag = await rag_for_workspace(workspace)
+                    if _embedding_func_from_rag(vector_rag) is not None:
+                        from lightrag.api.task_manager import (
+                            TaskType,
+                            get_task_service,
+                        )
+
+                        service = get_task_service()
+                        vector_task = service.create_task(
+                            task_type=TaskType.FAQ_VECTOR_REBUILD,
+                            workspace=workspace,
+                            metadata={
+                                "answer_count": len(answer_ids),
+                                "source_snapshot_id": snapshot.snapshot_id,
+                                "automatic": True,
+                            },
+                        )
+                        vector_rebuild_task_id = vector_task.task_id
+                        vector_rebuild_stream_url = (
+                            f"/api/tasks/{vector_task.task_id}/stream"
+                        )
+                        service.run_in_background(
+                            vector_task.task_id,
+                            _rebuild_answer_vectors_background,
+                            task_id=vector_task.task_id,
+                            workspace=workspace,
+                            db=db,
+                            rag=vector_rag,
+                            answer_ids=answer_ids,
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "[Answers] Automatic FAQ vector task could not start: %s",
+                        exc,
+                    )
+
+            response_item_limit = 20
             return StructuredMaterializeResponse(
                 answer=created_answers[0],
                 dataset=created_datasets[0],
-                answers=created_answers,
-                datasets=created_datasets,
+                answers=created_answers[:response_item_limit],
+                datasets=created_datasets[:response_item_limit],
+                answer_count=len(created_answers),
+                answers_truncated=len(created_answers) > response_item_limit,
                 profile=profile,
-                guidance=created_guidance,
+                guidance=created_guidance[:response_item_limit],
+                guidance_count=len(created_guidance),
+                guidance_truncated=len(created_guidance) > response_item_limit,
                 snapshot=snapshot,
                 source_link=first_source_link,
+                validation=validation,
+                guidance_enrichment_task_id=guidance_enrichment_task_id,
+                guidance_enrichment_stream_url=guidance_enrichment_stream_url,
+                vector_rebuild_task_id=vector_rebuild_task_id,
+                vector_rebuild_stream_url=vector_rebuild_stream_url,
             )
         except HTTPException:
             raise
@@ -3763,13 +8490,25 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
         )
         profile = _profile_structured_source(sample.source_type, sample.raw_content, sample_limit=20)
         mapping = _mapping_from_profile(profile, payload.mapping)
+        guidance_columns = _guidance_columns_from_profile(
+            profile,
+            mapping,
+            payload.guidance_columns,
+        )
+        validation = _validate_id_lookup_rows(
+            sample.rows,
+            mapping,
+            guidance_columns,
+            payload.conversion_purpose,
+        )
         return SourceConnectorMappingPreviewResponse(
             connector=connector,
             sample=sample,
             profile=profile,
             mapping=mapping,
-            guidance_columns=_guidance_columns_from_profile(profile, mapping),
+            guidance_columns=guidance_columns,
             materialization_modes=["table_as_dataset", "row_per_answer"],
+            validation=validation,
         )
 
     @router.post(
@@ -3784,11 +8523,24 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
     ):
         workspace, db = await db_for_request(request)
         connector = _source_connector_from_row(await _get_connector_row(db, workspace, connector_id))
+        if payload.conversion_purpose == "id_lookup" and payload.materialization_mode != "row_per_answer":
+            raise HTTPException(
+                status_code=400,
+                detail="ID lookup conversion requires row_per_answer materialization.",
+            )
         sample = _connector_sample_response_from_raw(
             connector,
             *await _connector_raw_content_from_db(db, connector, 1000),
             limit=1000,
         )
+        if payload.materialization_mode == "row_per_answer" and sample.truncated:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"DB row-per-answer materialization supports up to {sample.row_limit} rows per request. "
+                    "Filter or split the source table before creating answer candidates."
+                ),
+            )
         profile = _profile_structured_source(sample.source_type, sample.raw_content, sample_limit=20)
         mapping = _mapping_from_profile(profile, payload.mapping)
         guidance_columns = _guidance_columns_from_profile(profile, mapping, payload.guidance_columns)
@@ -3812,6 +8564,9 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 mapping=mapping,
                 guidance_columns=guidance_columns,
                 materialization_mode=payload.materialization_mode,
+                conversion_purpose=payload.conversion_purpose,
+                source_truncated=sample.truncated,
+                llm_guidance_enrichment=payload.llm_guidance_enrichment,
                 metadata={
                     **payload.metadata,
                     "created_from": "source_connector",
@@ -3835,6 +8590,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 _json({
                     "last_materialized_at": _now().isoformat(),
                     "last_materialized_answer_ids": [answer.answer_id for answer in materialized.answers],
+                    "last_materialized_answer_count": materialized.answer_count,
                     "last_materialization_mode": payload.materialization_mode,
                 }),
             ],
@@ -3842,7 +8598,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
         refreshed = _source_connector_from_row(await _get_connector_row(db, workspace, connector_id))
         return SourceConnectorMaterializeResponse(
             connector=refreshed,
-            sample=sample,
+            sample=_compact_connector_materialization_sample(sample, profile),
             materialized=materialized,
         )
 
@@ -3890,11 +8646,740 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
         )
         return [_source_snapshot_from_row(dict(row)) for row in rows or []]
 
+    @router.get(
+        "/aliases",
+        response_model=list[AnswerAliasGroup],
+        dependencies=[Depends(combined_auth)],
+    )
+    async def list_answer_aliases(
+        request: Request,
+        search: Optional[str] = Query(default=None),
+    ):
+        workspace, db = await db_for_request(request)
+        groups = await _answer_alias_groups(db, workspace)
+        if not search or not search.strip():
+            return groups
+        needle = _normalise_text(search)
+        return [
+            group
+            for group in groups
+            if needle in _normalise_text(group.canonical_term)
+            or any(needle in _normalise_text(alias) for alias in group.aliases)
+        ]
+
+    @router.post(
+        "/aliases",
+        response_model=AnswerAliasGroup,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def create_answer_alias(
+        request: Request,
+        payload: AnswerAliasCreateRequest,
+    ):
+        workspace, db = await db_for_request(request)
+        canonical_term = " ".join(payload.canonical_term.split())
+        aliases: list[str] = []
+        seen = {_normalise_text(canonical_term)}
+        for alias in payload.aliases:
+            value = " ".join(str(alias or "").split())
+            key = _normalise_text(value)
+            if len(value) < 2 or key in seen:
+                continue
+            seen.add(key)
+            aliases.append(value[:200])
+        if not aliases:
+            raise HTTPException(
+                status_code=400,
+                detail="At least one distinct alias is required.",
+            )
+        try:
+            row = await db.query(
+                """
+                INSERT INTO LIGHTRAG_ANSWER_TERM_ALIASES
+                    (
+                        alias_id, workspace, canonical_term, aliases, enabled,
+                        source, metadata
+                    )
+                VALUES ($1, $2, $3, $4::jsonb, $5, 'workspace', $6::jsonb)
+                RETURNING alias_id, workspace, canonical_term, aliases, enabled,
+                          source, metadata, create_time, update_time
+                """,
+                [
+                    f"aalias-{uuid.uuid4().hex[:16]}",
+                    workspace,
+                    canonical_term,
+                    _json_list(aliases),
+                    payload.enabled,
+                    _json(payload.metadata),
+                ],
+            )
+        except Exception as exc:
+            message = str(exc)
+            if "duplicate" in message.lower() or "unique" in message.lower():
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Alias group '{canonical_term}' already exists.",
+                )
+            raise
+        if not row:
+            raise HTTPException(status_code=500, detail="Failed to create alias group.")
+        await _mark_all_answer_graph_stale(db, workspace)
+        return _alias_group_from_row(dict(row))
+
+    @router.get(
+        "/aliases/candidates",
+        response_model=list[AnswerTermCandidate],
+        dependencies=[Depends(combined_auth)],
+    )
+    async def list_answer_term_candidates(
+        request: Request,
+        status: Optional[TermCandidateStatus] = Query(default="suggested"),
+        search: Optional[str] = Query(default=None),
+        limit: int = Query(default=200, ge=1, le=1000),
+    ):
+        workspace, db = await db_for_request(request)
+        params: list[Any] = [workspace]
+        where = ["workspace = $1"]
+        if status:
+            params.append(status)
+            where.append(f"status = ${len(params)}")
+        if search and search.strip():
+            params.append(f"%{search.strip()}%")
+            where.append(
+                f"(canonical_term ILIKE ${len(params)} "
+                f"OR aliases::text ILIKE ${len(params)})"
+            )
+        params.append(limit)
+        rows = await db.query(
+            f"""
+            SELECT candidate_id, workspace, canonical_term, aliases, term_type,
+                   status, confidence, rationale, evidence, source, metadata,
+                   create_time, update_time
+            FROM LIGHTRAG_ANSWER_TERM_CANDIDATES
+            WHERE {' AND '.join(where)}
+            ORDER BY confidence DESC, update_time DESC
+            LIMIT ${len(params)}
+            """,
+            params,
+            multirows=True,
+        )
+        return [_term_candidate_from_row(dict(row)) for row in rows or []]
+
+    @router.post(
+        "/aliases/candidates/analyze",
+        response_model=AnswerTermDiscoveryResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def analyze_answer_terms(
+        request: Request,
+        payload: AnswerTermDiscoveryRequest,
+    ):
+        from lightrag.api.task_manager import TaskType, get_task_service
+
+        workspace, db = await db_for_request(request)
+        workspace_rag = await rag_for_workspace(workspace)
+        if getattr(workspace_rag, "llm_model_func", None) is None:
+            raise HTTPException(
+                status_code=409,
+                detail="LLM is not configured for this workspace.",
+            )
+
+        service = get_task_service()
+        task = service.create_task(
+            task_type=TaskType.FAQ_TERM_DISCOVERY,
+            workspace=workspace,
+            metadata={
+                "include_drafts": payload.include_drafts,
+                "include_no_match_queries": payload.include_no_match_queries,
+                "answer_limit": payload.answer_limit,
+                "event_limit": payload.event_limit,
+                "batch_size": payload.batch_size,
+            },
+        )
+        service.run_in_background(
+            task.task_id,
+            _discover_answer_terms_background,
+            task_id=task.task_id,
+            workspace=workspace,
+            db=db,
+            rag=workspace_rag,
+            include_drafts=payload.include_drafts,
+            include_no_match_queries=payload.include_no_match_queries,
+            answer_limit=payload.answer_limit,
+            event_limit=payload.event_limit,
+            batch_size=payload.batch_size,
+        )
+        return AnswerTermDiscoveryResponse(
+            task_id=task.task_id,
+            stream_url=f"/api/tasks/{task.task_id}/stream",
+            message="AI term discovery started.",
+        )
+
+    @router.post(
+        "/aliases/candidates/{candidate_id}/approve",
+        response_model=AnswerTermCandidateActionResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def approve_answer_term_candidate(request: Request, candidate_id: str):
+        workspace, db = await db_for_request(request)
+        candidate_row = await db.query(
+            """
+            SELECT candidate_id, workspace, canonical_term, aliases, term_type,
+                   status, confidence, rationale, evidence, source, metadata,
+                   create_time, update_time
+            FROM LIGHTRAG_ANSWER_TERM_CANDIDATES
+            WHERE workspace = $1 AND candidate_id = $2
+            """,
+            [workspace, candidate_id],
+        )
+        if not candidate_row:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Term candidate '{candidate_id}' not found.",
+            )
+        candidate = _term_candidate_from_row(dict(candidate_row))
+
+        groups = await _answer_alias_groups(db, workspace)
+        member_to_group: dict[str, AnswerAliasGroup] = {}
+        for group in groups:
+            for member in [group.canonical_term, *group.aliases]:
+                member_to_group.setdefault(_normalise_text(member), group)
+
+        canonical_group = member_to_group.get(
+            _normalise_text(candidate.canonical_term)
+        )
+        canonical_term = (
+            canonical_group.canonical_term
+            if canonical_group is not None
+            else candidate.canonical_term
+        )
+        canonical_key = _normalise_text(canonical_term)
+        aliases: list[str] = []
+        seen = {canonical_key}
+        for alias in candidate.aliases:
+            alias_key = _normalise_text(alias)
+            if alias_key in seen:
+                continue
+            conflicting_group = member_to_group.get(alias_key)
+            if (
+                conflicting_group is not None
+                and _normalise_text(conflicting_group.canonical_term)
+                != canonical_key
+            ):
+                continue
+            seen.add(alias_key)
+            aliases.append(alias)
+
+        workspace_group_row = await db.query(
+            """
+            SELECT alias_id, workspace, canonical_term, aliases, enabled, source,
+                   metadata, create_time, update_time
+            FROM LIGHTRAG_ANSWER_TERM_ALIASES
+            WHERE workspace = $1 AND LOWER(canonical_term) = LOWER($2)
+            """,
+            [workspace, canonical_term],
+        )
+        alias_group: Optional[AnswerAliasGroup] = None
+        if workspace_group_row:
+            workspace_group = _alias_group_from_row(dict(workspace_group_row))
+            merged_aliases = list(workspace_group.aliases)
+            merged_keys = {
+                _normalise_text(value)
+                for value in [workspace_group.canonical_term, *merged_aliases]
+            }
+            for alias in aliases:
+                if _normalise_text(alias) not in merged_keys:
+                    merged_aliases.append(alias)
+                    merged_keys.add(_normalise_text(alias))
+            updated_group = await db.query(
+                """
+                UPDATE LIGHTRAG_ANSWER_TERM_ALIASES
+                SET aliases = $3::jsonb,
+                    enabled = TRUE,
+                    metadata = metadata || $4::jsonb,
+                    update_time = NOW()
+                WHERE workspace = $1 AND alias_id = $2
+                RETURNING alias_id, workspace, canonical_term, aliases, enabled,
+                          source, metadata, create_time, update_time
+                """,
+                [
+                    workspace,
+                    workspace_group.alias_id,
+                    _json_list(merged_aliases[:30]),
+                    _json(
+                        {
+                            "last_approved_candidate_id": candidate_id,
+                            "updated_from": "ai_term_candidate",
+                        }
+                    ),
+                ],
+            )
+            alias_group = _alias_group_from_row(dict(updated_group))
+        elif aliases:
+            created_group = await db.query(
+                """
+                INSERT INTO LIGHTRAG_ANSWER_TERM_ALIASES
+                    (
+                        alias_id, workspace, canonical_term, aliases, enabled,
+                        source, metadata
+                    )
+                VALUES ($1, $2, $3, $4::jsonb, TRUE, 'ai_approved', $5::jsonb)
+                RETURNING alias_id, workspace, canonical_term, aliases, enabled,
+                          source, metadata, create_time, update_time
+                """,
+                [
+                    f"aalias-{uuid.uuid4().hex[:16]}",
+                    workspace,
+                    canonical_term,
+                    _json_list(aliases[:30]),
+                    _json(
+                        {
+                            "approved_candidate_id": candidate_id,
+                            "created_from": "ai_term_candidate",
+                        }
+                    ),
+                ],
+            )
+            alias_group = _alias_group_from_row(dict(created_group))
+        elif canonical_group is not None:
+            alias_group = canonical_group
+        else:
+            raise HTTPException(
+                status_code=409,
+                detail="No new non-conflicting aliases remain to approve.",
+            )
+
+        approved_row = await db.query(
+            """
+            UPDATE LIGHTRAG_ANSWER_TERM_CANDIDATES
+            SET status = 'approved',
+                metadata = metadata || $3::jsonb,
+                update_time = NOW()
+            WHERE workspace = $1 AND candidate_id = $2
+            RETURNING candidate_id, workspace, canonical_term, aliases, term_type,
+                      status, confidence, rationale, evidence, source, metadata,
+                      create_time, update_time
+            """,
+            [
+                workspace,
+                candidate_id,
+                _json(
+                    {
+                        "approved_alias_id": alias_group.alias_id,
+                        "approved_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                ),
+            ],
+        )
+        await _mark_all_answer_graph_stale(db, workspace)
+        return AnswerTermCandidateActionResponse(
+            candidate=_term_candidate_from_row(dict(approved_row)),
+            alias_group=alias_group,
+        )
+
+    @router.post(
+        "/aliases/candidates/{candidate_id}/reject",
+        response_model=AnswerTermCandidateActionResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def reject_answer_term_candidate(request: Request, candidate_id: str):
+        workspace, db = await db_for_request(request)
+        existing = await db.query(
+            """
+            SELECT status
+            FROM LIGHTRAG_ANSWER_TERM_CANDIDATES
+            WHERE workspace = $1 AND candidate_id = $2
+            """,
+            [workspace, candidate_id],
+        )
+        if not existing:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Term candidate '{candidate_id}' not found.",
+            )
+        if str(existing.get("status")) == "approved":
+            raise HTTPException(
+                status_code=409,
+                detail="Approved terms must be removed from the active term groups.",
+            )
+        rejected_row = await db.query(
+            """
+            UPDATE LIGHTRAG_ANSWER_TERM_CANDIDATES
+            SET status = 'rejected',
+                metadata = metadata || $3::jsonb,
+                update_time = NOW()
+            WHERE workspace = $1 AND candidate_id = $2
+            RETURNING candidate_id, workspace, canonical_term, aliases, term_type,
+                      status, confidence, rationale, evidence, source, metadata,
+                      create_time, update_time
+            """,
+            [
+                workspace,
+                candidate_id,
+                _json({"rejected_at": datetime.now(timezone.utc).isoformat()}),
+            ],
+        )
+        return AnswerTermCandidateActionResponse(
+            candidate=_term_candidate_from_row(dict(rejected_row)),
+        )
+
+    @router.delete(
+        "/aliases/{alias_id}",
+        dependencies=[Depends(combined_auth)],
+    )
+    async def delete_answer_alias(request: Request, alias_id: str):
+        workspace, db = await db_for_request(request)
+        if alias_id.startswith("builtin-"):
+            raise HTTPException(
+                status_code=409,
+                detail="Built-in alias groups cannot be deleted.",
+            )
+        row = await db.query(
+            """
+            DELETE FROM LIGHTRAG_ANSWER_TERM_ALIASES
+            WHERE workspace = $1 AND alias_id = $2
+            RETURNING alias_id
+            """,
+            [workspace, alias_id],
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Alias group '{alias_id}' not found.")
+        await _mark_all_answer_graph_stale(db, workspace)
+        return {"message": "Alias group deleted", "alias_id": alias_id}
+
+    @router.get(
+        "/{answer_id}/assets",
+        response_model=list[AnswerAsset],
+        dependencies=[Depends(combined_auth)],
+    )
+    async def list_answer_assets(
+        request: Request,
+        answer_id: str,
+        include_inactive: bool = Query(False),
+    ):
+        workspace, db = await db_for_request(request)
+        await _get_answer_row(db, workspace, answer_id)
+        assets = await _answer_assets_by_answer(
+            db,
+            workspace,
+            [answer_id],
+            include_inactive=include_inactive,
+        )
+        return assets.get(answer_id, [])
+
+    @router.post(
+        "/{answer_id}/assets",
+        response_model=AnswerAsset,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def create_answer_asset(
+        request: Request,
+        answer_id: str,
+        payload: AnswerAssetCreateRequest,
+    ):
+        workspace, db = await db_for_request(request)
+        current = await _get_answer_row(db, workspace, answer_id)
+        external_url = str(payload.external_url or "").strip()
+        content_text = str(payload.content_text or "").strip()
+        if external_url:
+            storage_type: AnswerAssetStorageType = "external"
+            storage_uri = _validate_external_asset_url(external_url)
+        elif payload.asset_type == "table" and content_text:
+            storage_type = "inline"
+            storage_uri = None
+        else:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Provide external_url, or provide content_text for an inline "
+                    "table asset"
+                ),
+            )
+
+        asset_id = f"asset-{uuid.uuid4().hex}"
+        file_name = payload.file_name
+        if not file_name and storage_uri:
+            file_name = Path(urlparse(storage_uri).path).name or None
+        mime_type = payload.mime_type
+        if not mime_type and file_name:
+            mime_type = mimetypes.guess_type(file_name)[0]
+        await db.query(
+            """
+            INSERT INTO LIGHTRAG_ANSWER_ASSETS
+                (asset_id, workspace, answer_id, answer_version, asset_type,
+                 storage_type, storage_uri, file_name, mime_type, file_size,
+                 caption, alt_text, search_text, content_text, display_order,
+                 metadata)
+            VALUES
+                ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                 $11, $12, $13, $14, $15, $16::jsonb)
+            RETURNING asset_id, workspace, answer_id, answer_version, asset_type,
+                      storage_type, storage_uri, file_name, mime_type, file_size,
+                      caption, alt_text, search_text, content_text, display_order,
+                      is_active, metadata, create_time, update_time
+            """,
+            [
+                asset_id,
+                workspace,
+                answer_id,
+                int(current.get("version") or 1) + 1,
+                payload.asset_type,
+                storage_type,
+                storage_uri,
+                file_name,
+                mime_type,
+                len(content_text.encode("utf-8")) if content_text else 0,
+                payload.caption,
+                payload.alt_text,
+                payload.search_text,
+                payload.content_text,
+                payload.display_order,
+                _json(payload.metadata),
+            ],
+        )
+        await _touch_answer_after_asset_change(db, workspace, answer_id)
+        return _answer_asset_from_row(
+            await _get_answer_asset_row(db, workspace, answer_id, asset_id)
+        )
+
+    @router.post(
+        "/{answer_id}/assets/upload",
+        response_model=AnswerAsset,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def upload_answer_asset(
+        request: Request,
+        answer_id: str,
+        file: UploadFile = File(...),
+        asset_type: Optional[AnswerAssetType] = Form(None),
+        caption: Optional[str] = Form(None),
+        alt_text: Optional[str] = Form(None),
+        search_text: Optional[str] = Form(None),
+        display_order: int = Form(0),
+        metadata_json: str = Form("{}"),
+    ):
+        workspace, db = await db_for_request(request)
+        current = await _get_answer_row(db, workspace, answer_id)
+        safe_name = _validate_answer_asset_file(file.filename or "")
+        content, file_size = await _read_answer_asset_upload(file)
+        guessed_mime = mimetypes.guess_type(safe_name)[0]
+        mime_type = str(file.content_type or guessed_mime or "application/octet-stream")
+        resolved_asset_type = asset_type or _infer_answer_asset_type(
+            safe_name,
+            mime_type,
+        )
+        metadata = _coerce_json(metadata_json, {})
+        if not isinstance(metadata, dict):
+            raise HTTPException(status_code=422, detail="metadata_json must be a JSON object")
+
+        asset_id = f"asset-{uuid.uuid4().hex}"
+        storage_type: AnswerAssetStorageType = "local"
+        storage_uri: Optional[str] = None
+        s3_client = get_s3_client()
+        if s3_client.is_enabled():
+            temporary_path: Optional[Path] = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    prefix="answer-asset-",
+                    suffix=Path(safe_name).suffix,
+                    delete=False,
+                ) as temporary:
+                    temporary.write(content)
+                    temporary_path = Path(temporary.name)
+                if resolved_asset_type == "image":
+                    storage_uri = await s3_client.upload_image(
+                        temporary_path,
+                        safe_name,
+                        workspace=workspace,
+                        doc_id=answer_id,
+                    )
+                else:
+                    storage_uri = await s3_client.upload_file(
+                        temporary_path,
+                        safe_name,
+                        workspace=workspace,
+                        doc_id=answer_id,
+                    )
+            finally:
+                if temporary_path and temporary_path.exists():
+                    temporary_path.unlink()
+            if storage_uri:
+                storage_type = "s3"
+
+        if not storage_uri:
+            relative_path = Path(
+                _safe_asset_segment(workspace, "workspace"),
+                _safe_asset_segment(answer_id, "answer"),
+                asset_id,
+                safe_name,
+            )
+            local_path = _local_answer_asset_path(str(relative_path))
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            local_path.write_bytes(content)
+            storage_uri = str(relative_path)
+            storage_type = "local"
+
+        metadata = {
+            **metadata,
+            "original_file_name": file.filename or safe_name,
+            "uploaded_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.query(
+            """
+            INSERT INTO LIGHTRAG_ANSWER_ASSETS
+                (asset_id, workspace, answer_id, answer_version, asset_type,
+                 storage_type, storage_uri, file_name, mime_type, file_size,
+                 caption, alt_text, search_text, display_order, metadata)
+            VALUES
+                ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                 $11, $12, $13, $14, $15::jsonb)
+            RETURNING asset_id, workspace, answer_id, answer_version, asset_type,
+                      storage_type, storage_uri, file_name, mime_type, file_size,
+                      caption, alt_text, search_text, content_text, display_order,
+                      is_active, metadata, create_time, update_time
+            """,
+            [
+                asset_id,
+                workspace,
+                answer_id,
+                int(current.get("version") or 1) + 1,
+                resolved_asset_type,
+                storage_type,
+                storage_uri,
+                safe_name,
+                mime_type,
+                file_size,
+                caption,
+                alt_text,
+                search_text,
+                display_order,
+                _json(metadata),
+            ],
+        )
+        await _touch_answer_after_asset_change(db, workspace, answer_id)
+        return _answer_asset_from_row(
+            await _get_answer_asset_row(db, workspace, answer_id, asset_id)
+        )
+
+    @router.patch(
+        "/{answer_id}/assets/{asset_id}",
+        response_model=AnswerAsset,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def update_answer_asset(
+        request: Request,
+        answer_id: str,
+        asset_id: str,
+        payload: AnswerAssetUpdateRequest,
+    ):
+        workspace, db = await db_for_request(request)
+        current = await _get_answer_asset_row(db, workspace, answer_id, asset_id)
+        values = dict(current)
+        values.update(payload.model_dump(exclude_unset=True))
+        await db.query(
+            """
+            UPDATE LIGHTRAG_ANSWER_ASSETS
+            SET caption = $4,
+                alt_text = $5,
+                search_text = $6,
+                content_text = $7,
+                display_order = $8,
+                metadata = $9::jsonb,
+                update_time = NOW()
+            WHERE workspace = $1 AND answer_id = $2 AND asset_id = $3
+              AND is_active = TRUE
+            RETURNING asset_id, workspace, answer_id, answer_version, asset_type,
+                      storage_type, storage_uri, file_name, mime_type, file_size,
+                      caption, alt_text, search_text, content_text, display_order,
+                      is_active, metadata, create_time, update_time
+            """,
+            [
+                workspace,
+                answer_id,
+                asset_id,
+                values.get("caption"),
+                values.get("alt_text"),
+                values.get("search_text"),
+                values.get("content_text"),
+                int(values.get("display_order") or 0),
+                _json(values.get("metadata")),
+            ],
+        )
+        await _touch_answer_after_asset_change(db, workspace, answer_id)
+        return _answer_asset_from_row(
+            await _get_answer_asset_row(db, workspace, answer_id, asset_id)
+        )
+
+    @router.delete(
+        "/{answer_id}/assets/{asset_id}",
+        dependencies=[Depends(combined_auth)],
+    )
+    async def delete_answer_asset(
+        request: Request,
+        answer_id: str,
+        asset_id: str,
+    ):
+        workspace, db = await db_for_request(request)
+        await _get_answer_asset_row(db, workspace, answer_id, asset_id)
+        row = await db.query(
+            """
+            UPDATE LIGHTRAG_ANSWER_ASSETS
+            SET is_active = FALSE,
+                update_time = NOW()
+            WHERE workspace = $1 AND answer_id = $2 AND asset_id = $3
+              AND is_active = TRUE
+            RETURNING asset_id
+            """,
+            [workspace, answer_id, asset_id],
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Asset '{asset_id}' not found")
+        await _touch_answer_after_asset_change(db, workspace, answer_id)
+        return {
+            "message": "Answer asset removed",
+            "answer_id": answer_id,
+            "asset_id": asset_id,
+        }
+
+    @router.get(
+        "/{answer_id}/assets/{asset_id}/content",
+        dependencies=[Depends(combined_auth)],
+    )
+    async def get_answer_asset_content(
+        request: Request,
+        answer_id: str,
+        asset_id: str,
+    ):
+        workspace, db = await db_for_request(request)
+        row = await _get_answer_asset_row(db, workspace, answer_id, asset_id)
+        storage_type = str(row.get("storage_type") or "")
+        storage_uri = str(row.get("storage_uri") or "").strip()
+        if storage_type in {"external", "s3"}:
+            return RedirectResponse(_validate_external_asset_url(storage_uri))
+        if storage_type == "inline":
+            return Response(
+                content=str(row.get("content_text") or ""),
+                media_type=str(row.get("mime_type") or "text/plain"),
+            )
+        if storage_type != "local" or not storage_uri:
+            raise HTTPException(status_code=404, detail="Asset content is unavailable")
+        local_path = _local_answer_asset_path(storage_uri)
+        if not local_path.is_file():
+            raise HTTPException(status_code=404, detail="Asset file is unavailable")
+        return FileResponse(
+            local_path,
+            media_type=str(row.get("mime_type") or "application/octet-stream"),
+            filename=str(row.get("file_name") or local_path.name),
+            content_disposition_type="inline",
+        )
+
     @router.get("/{answer_id}", response_model=AnswerItem, dependencies=[Depends(combined_auth)])
     async def get_answer(request: Request, answer_id: str):
         workspace, db = await db_for_request(request)
         row = await _get_answer_row(db, workspace, answer_id)
-        return _answer_from_row(dict(row))
+        answer = _answer_from_row(dict(row))
+        await _hydrate_answer_assets(db, workspace, [answer])
+        return answer
 
     @router.get("/{answer_id}/sources", response_model=list[AnswerSourceLink], dependencies=[Depends(combined_auth)])
     async def list_answer_sources(request: Request, answer_id: str):
@@ -4051,7 +9536,25 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             raise HTTPException(status_code=404, detail=f"Answer '{answer_id}' not found")
         await _record_revision(db, dict(row))
         await _delete_answer_vectors(db, workspace, answer_id)
-        return _answer_from_row(dict(row))
+        asyncio.create_task(
+            _refresh_answer_vector_safely(
+                db=db,
+                workspace=workspace,
+                answer_id=answer_id,
+            )
+        )
+        await _mark_answer_graph_stale(db, workspace, answer_id, next_version)
+        asyncio.create_task(
+            _refresh_answer_graph_safely(
+                db=db,
+                workspace=workspace,
+                answer_id=answer_id,
+                trigger_source="answer_update",
+            )
+        )
+        answer = _answer_from_row(dict(row))
+        await _hydrate_answer_assets(db, workspace, [answer])
+        return answer
 
     @router.post("/{answer_id}/publish", response_model=AnswerItem, dependencies=[Depends(combined_auth)])
     async def publish_answer(request: Request, answer_id: str):
@@ -4160,9 +9663,35 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
         )
         if not row:
             raise HTTPException(status_code=404, detail=f"Answer '{answer_id}' not found")
+        if "assets" in snapshot:
+            await _restore_answer_assets(
+                db,
+                workspace,
+                answer_id,
+                next_version,
+                snapshot.get("assets") or [],
+            )
         await _record_revision(db, dict(row))
         await _delete_answer_vectors(db, workspace, answer_id)
-        return _answer_from_row(dict(row))
+        asyncio.create_task(
+            _refresh_answer_vector_safely(
+                db=db,
+                workspace=workspace,
+                answer_id=answer_id,
+            )
+        )
+        await _mark_answer_graph_stale(db, workspace, answer_id, next_version)
+        asyncio.create_task(
+            _refresh_answer_graph_safely(
+                db=db,
+                workspace=workspace,
+                answer_id=answer_id,
+                trigger_source="answer_restore",
+            )
+        )
+        answer = _answer_from_row(dict(row))
+        await _hydrate_answer_assets(db, workspace, [answer])
+        return answer
 
     @router.get("/{answer_id}/guidance", response_model=list[AnswerGuidance], dependencies=[Depends(combined_auth)])
     async def list_guidance(request: Request, answer_id: str):
@@ -4228,6 +9757,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                             "You help FAQ operators add short representative questions, keywords, and synonyms. "
                             "Do not create final answer content."
                         ),
+                        _llm_purpose="knowledge_structure",
                     )
                     seen = {_normalise_text(item.text) for item in existing_guidance + suggestions}
                     allowed_types = {"question", "keyword", "synonym", "negative_keyword", "note"}
@@ -4261,7 +9791,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
     @router.post("/{answer_id}/guidance", response_model=AnswerGuidance, dependencies=[Depends(combined_auth)])
     async def create_guidance(request: Request, answer_id: str, payload: GuidanceCreateRequest):
         workspace, db = await db_for_request(request)
-        await _get_answer_row(db, workspace, answer_id)
+        answer_row = await _get_answer_row(db, workspace, answer_id)
         guidance_id = f"agd-{uuid.uuid4().hex}"
         row = await db.query(
             """
@@ -4283,11 +9813,30 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
         if not row:
             raise HTTPException(status_code=500, detail="Failed to create guidance")
         await _delete_answer_vectors(db, workspace, answer_id)
+        asyncio.create_task(
+            _refresh_answer_vector_safely(
+                db=db,
+                workspace=workspace,
+                answer_id=answer_id,
+            )
+        )
+        await _mark_answer_graph_stale(
+            db, workspace, answer_id, int(answer_row.get("version") or 1)
+        )
+        asyncio.create_task(
+            _refresh_answer_graph_safely(
+                db=db,
+                workspace=workspace,
+                answer_id=answer_id,
+                trigger_source="guidance_create",
+            )
+        )
         return _guidance_from_row(dict(row))
 
     @router.delete("/{answer_id}/guidance/{guidance_id}", dependencies=[Depends(combined_auth)])
     async def delete_guidance(request: Request, answer_id: str, guidance_id: str):
         workspace, db = await db_for_request(request)
+        answer_row = await _get_answer_row(db, workspace, answer_id)
         await db.execute(
             """
             DELETE FROM LIGHTRAG_ANSWER_GUIDANCE
@@ -4296,6 +9845,24 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             {"workspace": workspace, "answer_id": answer_id, "guidance_id": guidance_id},
         )
         await _delete_answer_vectors(db, workspace, answer_id)
+        asyncio.create_task(
+            _refresh_answer_vector_safely(
+                db=db,
+                workspace=workspace,
+                answer_id=answer_id,
+            )
+        )
+        await _mark_answer_graph_stale(
+            db, workspace, answer_id, int(answer_row.get("version") or 1)
+        )
+        asyncio.create_task(
+            _refresh_answer_graph_safely(
+                db=db,
+                workspace=workspace,
+                answer_id=answer_id,
+                trigger_source="guidance_delete",
+            )
+        )
         return {"message": "Guidance deleted", "guidance_id": guidance_id}
 
     @router.post("/{answer_id}/vectors/rebuild", dependencies=[Depends(combined_auth)])
@@ -4327,32 +9894,69 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
     async def rebuild_answer_vectors(
         request: Request,
         status: Optional[str] = Query(default=None),
-        limit: int = Query(default=100, ge=1, le=500),
+        limit: int = Query(default=500, ge=1, le=1000),
+        only_missing: bool = Query(
+            default=True,
+            description="Build the next answers without a current vector instead of rebuilding the same latest answers.",
+        ),
     ):
         workspace, db = await db_for_request(request)
         status_filter = [status] if status and status != "all" else ["draft", "published"]
         rows = await db.query(
             """
-            SELECT workspace, answer_id, title, body, approved_summary, content_format,
-                   display_policy, status, version, valid_from, valid_until, priority,
-                   tags, metadata, publish_time, create_time, update_time
-            FROM LIGHTRAG_ANSWER_ITEMS
-            WHERE workspace = $1 AND status = ANY($2::text[])
-            ORDER BY priority DESC, update_time DESC
-            LIMIT $3
+            SELECT
+                answers.workspace,
+                answers.answer_id,
+                answers.title,
+                answers.body,
+                answers.approved_summary,
+                answers.content_format,
+                answers.display_policy,
+                answers.status,
+                answers.version,
+                answers.valid_from,
+                answers.valid_until,
+                answers.priority,
+                answers.tags,
+                answers.metadata,
+                answers.publish_time,
+                answers.create_time,
+                answers.update_time
+            FROM LIGHTRAG_ANSWER_ITEMS AS answers
+            LEFT JOIN LIGHTRAG_ANSWER_VECTORS AS vectors
+              ON vectors.workspace = answers.workspace
+             AND vectors.answer_id = answers.answer_id
+             AND vectors.answer_version = answers.version
+             AND vectors.vector_kind = 'combined'
+             AND COALESCE((vectors.metadata->>'projection_version')::integer, 0) = $5
+            WHERE answers.workspace = $1
+              AND answers.status = ANY($2::text[])
+              AND ($3::boolean = FALSE OR vectors.answer_id IS NULL)
+            ORDER BY answers.priority DESC, answers.update_time DESC
+            LIMIT $4
             """,
-            [workspace, status_filter, limit],
+            [
+                workspace,
+                status_filter,
+                only_missing,
+                limit,
+                ANSWER_VECTOR_PROJECTION_VERSION,
+            ],
             multirows=True,
         )
-        guidance_rows = await db.query(
-            """
-            SELECT guidance_id, workspace, answer_id, guidance_type, text, weight, metadata, create_time
-            FROM LIGHTRAG_ANSWER_GUIDANCE
-            WHERE workspace = $1
-            """,
-            [workspace],
-            multirows=True,
-        )
+        answer_ids = [str(row["answer_id"]) for row in rows or []]
+        guidance_rows = []
+        if answer_ids:
+            guidance_rows = await db.query(
+                """
+                SELECT guidance_id, workspace, answer_id, guidance_type, text, weight, metadata, create_time
+                FROM LIGHTRAG_ANSWER_GUIDANCE
+                WHERE workspace = $1
+                  AND answer_id = ANY($2::text[])
+                """,
+                [workspace, answer_ids],
+                multirows=True,
+            )
         guidance_by_answer: dict[str, list[AnswerGuidance]] = {}
         for row in guidance_rows or []:
             guidance = _guidance_from_row(dict(row))
@@ -4374,7 +9978,29 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 rebuilt += 1
             else:
                 failed.append(answer.answer_id)
-        return {"message": "Answer vectors rebuild completed", "rebuilt": rebuilt, "failed": failed}
+        remaining = await db.query(
+            """
+            SELECT COUNT(*) AS count
+            FROM LIGHTRAG_ANSWER_ITEMS AS answers
+            LEFT JOIN LIGHTRAG_ANSWER_VECTORS AS vectors
+              ON vectors.workspace = answers.workspace
+             AND vectors.answer_id = answers.answer_id
+             AND vectors.answer_version = answers.version
+             AND vectors.vector_kind = 'combined'
+             AND COALESCE((vectors.metadata->>'projection_version')::integer, 0) = $3
+            WHERE answers.workspace = $1
+              AND answers.status = ANY($2::text[])
+              AND vectors.answer_id IS NULL
+            """,
+            [workspace, status_filter, ANSWER_VECTOR_PROJECTION_VERSION],
+        )
+        return {
+            "message": "Answer vectors rebuild completed",
+            "processed": len(answer_ids),
+            "rebuilt": rebuilt,
+            "failed": failed,
+            "remaining": int(remaining.get("count") or 0) if remaining else 0,
+        }
 
     async def resolve_answer_candidates(
         workspace: str,
@@ -4391,6 +10017,62 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             if payload.allowed_answer_ids is not None
             else None
         )
+        alias_expansions = await _expand_query_aliases(db, workspace, payload.query)
+        keyword_candidate_ids, keyword_candidates_truncated = await _keyword_candidate_ids(
+            db,
+            workspace,
+            payload.query,
+            status_filter,
+            allowed_answer_ids,
+            alias_expansions,
+        )
+        vector_scores: dict[str, float] = {}
+        vector_status = "not_requested"
+        graph_scores: dict[str, float] = {}
+        graph_evidence: dict[str, list[AnswerGraphEvidence]] = {}
+        graph_status = "not_requested"
+        graph_config = await _get_answer_graph_config(db, workspace)
+        workspace_rag = await rag_for_workspace(workspace)
+
+        if payload.retrieval_mode in {"hybrid", "graph_hybrid", "llm_rerank"}:
+            vector_scores, vector_status = await _answer_vector_scores(
+                db,
+                workspace,
+                workspace_rag,
+                payload.query,
+                payload.vector_top_k,
+                status_filter,
+                allowed_answer_ids,
+            )
+        graph_requested = payload.retrieval_mode == "graph_hybrid" or (
+            payload.retrieval_mode == "llm_rerank" and graph_config.enabled
+        )
+        if graph_requested:
+            graph_scores, graph_evidence, graph_status = await _answer_graph_scores(
+                db,
+                workspace,
+                workspace_rag,
+                payload.query,
+                payload.vector_top_k,
+                allowed_answer_ids,
+                graph_config,
+            )
+        effective_retrieval_mode, retrieval_fallback_reason = (
+            _effective_answer_retrieval(
+                payload.retrieval_mode,
+                graph_status,
+            )
+        )
+
+        candidate_answer_ids = list(
+            dict.fromkeys(
+                [
+                    *keyword_candidate_ids,
+                    *vector_scores.keys(),
+                    *graph_scores.keys(),
+                ]
+            )
+        )
         rows = await db.query(
             """
             SELECT workspace, answer_id, title, body, approved_summary, content_format,
@@ -4398,47 +10080,35 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                    tags, metadata, publish_time, create_time, update_time
             FROM LIGHTRAG_ANSWER_ITEMS
             WHERE workspace = $1
-              AND status = ANY($2::text[])
+              AND answer_id = ANY($2::text[])
+              AND status = ANY($3::text[])
               AND (valid_from IS NULL OR valid_from <= NOW())
               AND (valid_until IS NULL OR valid_until >= NOW())
-              AND ($3::text[] IS NULL OR answer_id = ANY($3::text[]))
-            ORDER BY priority DESC, update_time DESC
-            LIMIT 500
             """,
-            [workspace, status_filter, allowed_answer_ids],
+            [workspace, candidate_answer_ids, status_filter],
             multirows=True,
         )
-        guidance_rows = await db.query(
-            """
-            SELECT guidance_id, workspace, answer_id, guidance_type, text, weight, metadata, create_time
-            FROM LIGHTRAG_ANSWER_GUIDANCE
-            WHERE workspace = $1
-            """,
-            [workspace],
-            multirows=True,
-        )
+        guidance_rows = []
+        if candidate_answer_ids:
+            guidance_rows = await db.query(
+                """
+                SELECT guidance_id, workspace, answer_id, guidance_type, text, weight, metadata, create_time
+                FROM LIGHTRAG_ANSWER_GUIDANCE
+                WHERE workspace = $1
+                  AND answer_id = ANY($2::text[])
+                """,
+                [workspace, candidate_answer_ids],
+                multirows=True,
+            )
         guidance_by_answer: dict[str, list[AnswerGuidance]] = {}
         for row in guidance_rows or []:
             guidance = _guidance_from_row(dict(row))
             guidance_by_answer.setdefault(guidance.answer_id, []).append(guidance)
 
         answers = [_answer_from_row(dict(row)) for row in rows or []]
+        await _hydrate_answer_assets(db, workspace, answers)
         answer_by_id = {answer.answer_id: answer for answer in answers}
         keyword_scores: dict[str, tuple[float, list[str], str, dict[str, float]]] = {}
-        vector_scores: dict[str, float] = {}
-        vector_status = "not_requested"
-        workspace_rag = await rag_for_workspace(workspace)
-
-        if payload.retrieval_mode in {"hybrid", "llm_rerank"}:
-            vector_scores, vector_status = await _answer_vector_scores(
-                db,
-                workspace,
-                workspace_rag,
-                payload.query,
-                answers,
-                guidance_by_answer,
-                payload.vector_top_k,
-            )
 
         for row in rows or []:
             answer = answer_by_id[str(row["answer_id"])]
@@ -4447,6 +10117,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 guidance_by_answer.get(answer.answer_id, []),
                 payload.query,
                 payload.strategy,
+                alias_expansions,
             )
             keyword_scores[answer.answer_id] = (score, matched_guidance, reason, score_details)
 
@@ -4454,7 +10125,15 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             answer_id
             for answer_id, (keyword_score, _, _, _) in keyword_scores.items()
             if keyword_score > 0
-        } | {answer_id for answer_id, vector_score in vector_scores.items() if vector_score > 0}
+        } | {
+            answer_id
+            for answer_id, vector_score in vector_scores.items()
+            if vector_score > 0
+        } | {
+            answer_id
+            for answer_id, graph_score in graph_scores.items()
+            if graph_score > 0
+        }
 
         candidates: list[ResolveCandidate] = []
         for answer_id in candidate_ids:
@@ -4465,12 +10144,17 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 answer_id,
                 (0.0, [], "vector_match", {}),
             )
+            if reason == "blocked_by_negative_guidance":
+                continue
             vector_score = vector_scores.get(answer_id, 0.0)
             selected_by = "keyword"
             final_score = keyword_score
             detail_payload = dict(score_details)
             _add_score(detail_payload, "keyword_score", keyword_score)
-            if payload.retrieval_mode in {"hybrid", "llm_rerank"}:
+            if (
+                payload.retrieval_mode in {"hybrid", "graph_hybrid", "llm_rerank"}
+                and vector_score > 0
+            ):
                 priority_boost = min(0.05, max(answer.priority, 0) * 0.005)
                 final_score = min(1.0, keyword_score * 0.6 + vector_score * 0.35 + priority_boost)
                 _add_score(detail_payload, "vector_score", vector_score)
@@ -4485,14 +10169,39 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                     if vector_score > 0
                     else reason
                 )
+            graph_score = graph_scores.get(answer_id, 0.0)
+            candidate_graph_evidence = graph_evidence.get(answer_id, [])
+            if graph_requested and graph_score > 0:
+                graph_contribution = graph_score * graph_config.graph_weight
+                final_score = min(
+                    1.0,
+                    1.0 - (1.0 - final_score) * (1.0 - graph_contribution),
+                )
+                _add_score(detail_payload, "graph_score", graph_score)
+                _add_score(
+                    detail_payload,
+                    "graph_weight",
+                    graph_config.graph_weight,
+                )
+                _add_score(detail_payload, "graph_hybrid_score", final_score)
+                selected_by = (
+                    "graph"
+                    if keyword_score <= 0 and vector_score <= 0
+                    else "graph_hybrid"
+                )
+                reason = (
+                    f"{reason}; graph:{graph_score:.2f} "
+                    f"(weight:{graph_config.graph_weight:.2f})"
+                )
             candidates.append(
                 ResolveCandidate(
-                    answer=answer,
+                    answer=_search_answer_view(answer),
                     score=round(final_score, 4),
                     matched_guidance=matched_guidance,
                     reason=reason,
                     score_details=detail_payload,
                     selected_by=selected_by,
+                    graph_evidence=candidate_graph_evidence,
                 )
             )
 
@@ -4523,15 +10232,59 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                         )
                         break
 
+        effective_selection_policy: Literal["coverage", "precision"] = (
+            "precision"
+            if payload.selection_policy == "precision"
+            or (
+                payload.selection_policy == "workspace"
+                and graph_config.precision_mode
+            )
+            else "coverage"
+        )
+        precision_diagnostics: dict[str, Any] = {}
+        abstention_reason: Optional[str] = None
+        selected = candidates[0] if candidates else None
+        if effective_selection_policy == "precision":
+            abstention_reason, precision_diagnostics = _precision_abstention_reason(
+                selected,
+                candidates,
+                payload,
+                graph_config,
+                llm_selection,
+            )
+            if abstention_reason:
+                selected = None
+        elif selected and selected.score < payload.min_score:
+            selected = None
+            abstention_reason = "low_score"
+
         candidates = candidates[: payload.top_k]
-        selected = candidates[0] if candidates and candidates[0].score >= payload.min_score else None
         selected_by = selected.selected_by if selected else "none"
+        matched_id = _matched_business_id(selected.answer if selected else None)
+        clarification_question = (
+            _clarification_question(
+                candidates,
+                abstention_reason,
+                llm_selection,
+            )
+            if selected is None
+            else None
+        )
         rationale = (
             f"Selected {selected.answer.answer_id} by {selected_by}: {selected.reason}."
             if selected
-            else "No candidate reached the minimum answer matching score."
+            else (
+                "No answer was selected because the precision policy rejected "
+                f"the candidates: {abstention_reason}."
+                if effective_selection_policy == "precision"
+                else "No candidate reached the minimum answer matching score."
+            )
         )
-        if selected and llm_selection.get("rationale"):
+        if (
+            selected
+            and llm_selection.get("answer_id")
+            and llm_selection.get("rationale")
+        ):
             rationale = f"{rationale} LLM rationale: {llm_selection['rationale']}"
         trace_id = await _log_event(
             db,
@@ -4545,21 +10298,57 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 **(event_metadata or {}),
                 "latency_ms": int((time.time() - started) * 1000),
                 "mode": payload.retrieval_mode,
+                "requested_retrieval_mode": payload.retrieval_mode,
+                "effective_retrieval_mode": effective_retrieval_mode,
+                "retrieval_fallback_reason": retrieval_fallback_reason,
                 "strategy": payload.strategy,
                 "selected_by": selected_by,
+                "selection_policy": effective_selection_policy,
+                "abstention_reason": abstention_reason,
+                "clarification_question": clarification_question,
+                "precision_diagnostics": precision_diagnostics,
+                "matched_id": matched_id,
                 "vector_status": vector_status,
+                "graph_status": graph_status,
+                "graph_schema_version": graph_config.schema_version,
+                "graph_weight": graph_config.graph_weight,
+                "graph_min_similarity": graph_config.min_similarity,
+                "keyword_candidate_count": len(keyword_candidate_ids),
+                "keyword_candidates_truncated": keyword_candidates_truncated,
+                "keyword_candidate_limit": MAX_KEYWORD_SEARCH_CANDIDATES,
+                "alias_expansions": [
+                    expansion.model_dump()
+                    for expansion in alias_expansions
+                ],
                 "llm_selection": llm_selection,
                 "score_details": {item.answer.answer_id: item.score_details for item in candidates},
+                "graph_evidence": {
+                    item.answer.answer_id: [
+                        evidence_item.model_dump()
+                        for evidence_item in item.graph_evidence
+                    ]
+                    for item in candidates
+                    if item.graph_evidence
+                },
             },
         )
         return ResolveResponse(
             selected_answer=selected.answer if selected else None,
+            matched_id=matched_id,
             confidence=selected.score if selected else 0.0,
             candidates=candidates,
             trace_id=trace_id,
             rationale=rationale,
             retrieval_mode=payload.retrieval_mode,
+            requested_retrieval_mode=payload.retrieval_mode,
+            effective_retrieval_mode=effective_retrieval_mode,
+            graph_status=graph_status,
+            retrieval_fallback_reason=retrieval_fallback_reason,
             selected_by=selected_by,
+            alias_expansions=alias_expansions,
+            selection_policy=effective_selection_policy,
+            abstention_reason=abstention_reason,
+            clarification_question=clarification_question,
         )
 
     @router.post("/resolve", response_model=ResolveResponse, dependencies=[Depends(combined_auth)])
@@ -4583,6 +10372,7 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 vector_top_k=payload.vector_top_k,
                 llm_candidate_count=payload.llm_candidate_count,
                 allowed_answer_ids=payload.allowed_answer_ids,
+                selection_policy=payload.selection_policy,
             ),
             event_type="search",
             event_metadata={
@@ -4599,13 +10389,22 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
                 trace_id=result.trace_id,
                 rationale=result.rationale,
                 retrieval_mode=result.retrieval_mode,
+                requested_retrieval_mode=result.requested_retrieval_mode,
+                effective_retrieval_mode=result.effective_retrieval_mode,
+                graph_status=result.graph_status,
+                retrieval_fallback_reason=result.retrieval_fallback_reason,
                 selected_by=result.selected_by,
+                alias_expansions=result.alias_expansions,
+                selection_policy=result.selection_policy,
+                abstention_reason=result.abstention_reason,
+                clarification_question=result.clarification_question,
             )
 
         response_text, display_policy = _render_answer_response(answer, payload.response_policy)
         return AnswerSearchResponse(
             matched=True,
             answer_id=answer.answer_id,
+            matched_id=result.matched_id,
             title=answer.title,
             response=response_text,
             summary=answer.approved_summary,
@@ -4618,13 +10417,22 @@ def create_answer_routes(rag, api_key: Optional[str] = None):
             valid_until=answer.valid_until,
             confidence=result.confidence,
             tags=answer.tags,
+            assets=answer.assets,
             source_type=answer.metadata.get("source_type") or answer.metadata.get("created_from"),
             source_uri=answer.metadata.get("source_uri"),
             candidates=result.candidates if payload.include_candidates else [],
             trace_id=result.trace_id,
             rationale=result.rationale,
             retrieval_mode=result.retrieval_mode,
+            requested_retrieval_mode=result.requested_retrieval_mode,
+            effective_retrieval_mode=result.effective_retrieval_mode,
+            graph_status=result.graph_status,
+            retrieval_fallback_reason=result.retrieval_fallback_reason,
             selected_by=result.selected_by,
+            alias_expansions=result.alias_expansions,
+            selection_policy=result.selection_policy,
+            abstention_reason=result.abstention_reason,
+            clarification_question=result.clarification_question,
         )
 
     @router.get("/stats/events", response_model=AnswerEventStatsResponse, dependencies=[Depends(combined_auth)])

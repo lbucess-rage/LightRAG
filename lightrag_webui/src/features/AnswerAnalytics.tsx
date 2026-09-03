@@ -67,7 +67,7 @@ const DEFAULT_EVENT_STATS: AnswerEventStatsResponse = {
   hours: [],
 }
 
-export default function AnswerAnalytics() {
+export default function AnswerAnalytics({ embedded = false }: { embedded?: boolean }) {
   const { t } = useTranslation()
   const currentWorkspaceId = useWorkspaceStore.use.currentWorkspaceId()
   const timezoneName = useMemo(() => {
@@ -224,30 +224,32 @@ export default function AnswerAnalytics() {
   }
 
   return (
-    <div className="flex h-full flex-col gap-4 p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex items-start gap-3">
-          <div className="rounded-md border bg-muted/40 p-2">
-            <BarChart3Icon className="h-5 w-5" />
+    <div className={`flex h-full flex-col gap-4 ${embedded ? 'p-0' : 'p-4'}`}>
+      {!embedded && (
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <div className="rounded-md border bg-muted/40 p-2">
+              <BarChart3Icon className="h-5 w-5" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold">{t('answerCatalog.analytics.title', '답변 분석')}</h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {t('answerCatalog.analytics.description', '답변 사용량, 매칭 실패, 조회 방식, 소스별 현황을 확인합니다.')}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t('answerCatalog.analytics.timeBasis', '일자와 시간대는 이벤트 저장 시각(create_time)을 {{timezone}} 기준으로 변환해 집계합니다.', { timezone: eventStats.timezone || timezoneName })}
+              </p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-2xl font-bold">{t('answerCatalog.analytics.title', '답변 분석')}</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {t('answerCatalog.analytics.description', '답변 사용량, 매칭 실패, 조회 방식, 소스별 현황을 확인합니다.')}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {t('answerCatalog.analytics.timeBasis', '일자와 시간대는 이벤트 저장 시각(create_time)을 {{timezone}} 기준으로 변환해 집계합니다.', { timezone: eventStats.timezone || timezoneName })}
-            </p>
+          <div className="flex items-center gap-2">
+            <AnswerHelpButton />
+            <Button variant="outline" size="sm" onClick={fetchData} disabled={isLoading}>
+              <RefreshCwIcon className={isLoading ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
+              {t('common.refresh', '새로고침')}
+            </Button>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <AnswerHelpButton />
-          <Button variant="outline" size="sm" onClick={fetchData} disabled={isLoading}>
-            <RefreshCwIcon className={isLoading ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
-            {t('common.refresh', '새로고침')}
-          </Button>
-        </div>
-      </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2 rounded-md border p-3">
         <Input
@@ -309,7 +311,7 @@ export default function AnswerAnalytics() {
             )}
           </div>
 
-          <div className="grid border-b bg-muted/30 p-3 text-xs font-medium text-muted-foreground lg:grid-cols-[minmax(0,1fr)_240px_120px_130px_170px]">
+          <div className="hidden border-b bg-muted/30 p-3 text-xs font-medium text-muted-foreground 2xl:grid 2xl:grid-cols-[minmax(240px,1.4fr)_minmax(180px,1fr)_110px_130px_170px]">
             <div>{t('answerCatalog.test.query', '사용자 질문')}</div>
             <div>{t('answerCatalog.test.selected', '선택된 답변')}</div>
             <div>{t('answerCatalog.analytics.eventType', '기록 유형')}</div>
@@ -327,34 +329,57 @@ export default function AnswerAnalytics() {
               <div className="divide-y">
                 {events.map((event) => {
                   const selectedAnswer = event.selected_answer_id ? answerById[event.selected_answer_id] : null
+                  const highestCandidateScore = event.candidate_ids.reduce(
+                    (highest, candidateId) => Math.max(highest, Number(event.scores?.[candidateId] || 0)),
+                    0
+                  )
                   return (
                     <button
                       key={event.event_id}
                       type="button"
-                      className="grid w-full gap-2 p-3 text-left hover:bg-muted/40 lg:grid-cols-[minmax(0,1fr)_240px_120px_130px_170px] lg:items-center"
+                      className="grid w-full grid-cols-1 gap-3 p-3 text-left hover:bg-muted/40 sm:grid-cols-2 2xl:grid-cols-[minmax(240px,1.4fr)_minmax(180px,1fr)_110px_130px_170px] 2xl:items-center"
                       onClick={() => setSelectedEvent(event)}
                     >
-                      <div className="min-w-0">
-                        <div className="truncate text-sm">{event.query || '-'}</div>
-                        <div className="mt-1 flex flex-wrap gap-1">
-                          {event.candidate_ids.slice(0, 4).map((candidateId) => (
-                            <Badge key={candidateId} variant="outline">
-                              {answerById[candidateId]?.title || candidateId}: {Number(event.scores?.[candidateId] || 0).toFixed(2)}
-                            </Badge>
-                          ))}
+                      <div className="min-w-0 sm:col-span-2 2xl:col-span-1">
+                        <div className="mb-1 text-[11px] font-medium text-muted-foreground 2xl:hidden">
+                          {t('answerCatalog.test.query', '사용자 질문')}
                         </div>
+                        <div className="line-clamp-2 break-words text-sm font-medium">{event.query || '-'}</div>
+                        {event.candidate_ids.length > 0 && (
+                          <div className="mt-1 flex min-w-0 items-center gap-1.5 truncate text-xs text-muted-foreground">
+                            <span>{t('answerCatalog.analytics.candidateCount', '후보 수')} {event.candidate_ids.length}</span>
+                            <span aria-hidden="true">·</span>
+                            <span>
+                              {t('answerCatalog.analytics.highestCandidateScore', '최고 점수')} {highestCandidateScore.toFixed(2)}
+                            </span>
+                          </div>
+                        )}
                       </div>
                       <div className="min-w-0">
-                        <div className="truncate text-sm">
+                        <div className="mb-1 text-[11px] font-medium text-muted-foreground 2xl:hidden">
+                          {t('answerCatalog.test.selected', '선택된 답변')}
+                        </div>
+                        <div className="line-clamp-2 break-words text-sm">
                           {selectedAnswer?.title || event.selected_answer_id || t('answerCatalog.analytics.noMatch', '매칭 없음')}
                         </div>
                         {event.selected_answer_id && <div className="mt-1 truncate font-mono text-xs text-muted-foreground">{event.selected_answer_id}</div>}
                       </div>
-                      <div>
+                      <div className="min-w-0">
+                        <div className="mb-1 text-[11px] font-medium text-muted-foreground 2xl:hidden">
+                          {t('answerCatalog.analytics.eventType', '기록 유형')}
+                        </div>
                         <Badge variant="outline">{eventTypeLabel(event.event_type, t)}</Badge>
                       </div>
-                      <div className="text-sm text-muted-foreground">{modeLabel(String(event.metadata?.mode || '-'), t)}</div>
-                      <div className="text-xs text-muted-foreground">
+                      <div className="min-w-0">
+                        <div className="mb-1 text-[11px] font-medium text-muted-foreground 2xl:hidden">
+                          {t('answerCatalog.structured.mode', '모드')}
+                        </div>
+                        <div className="truncate text-sm text-muted-foreground">{modeLabel(String(event.metadata?.mode || '-'), t)}</div>
+                      </div>
+                      <div className="min-w-0 text-xs text-muted-foreground">
+                        <div className="mb-1 text-[11px] font-medium 2xl:hidden">
+                          {t('common.createdAt', '생성일')}
+                        </div>
                         {event.create_time ? new Date(event.create_time).toLocaleString() : '-'}
                       </div>
                     </button>
@@ -431,16 +456,16 @@ function modeLabel(mode: string, t: ReturnType<typeof useTranslation>['t']) {
 
 function eventTypeLabel(eventType: string, t: ReturnType<typeof useTranslation>['t']) {
   switch (eventType) {
-    case 'resolve':
-      return t('answerCatalog.analytics.eventTypes.resolve', '답변 선택')
-    case 'search':
-      return t('answerCatalog.analytics.eventTypes.search', '검색 API')
-    case 'view':
-      return t('answerCatalog.analytics.eventTypes.view', '조회')
-    case 'feedback':
-      return t('answerCatalog.analytics.eventTypes.feedback', '피드백')
-    default:
-      return eventType || '-'
+  case 'resolve':
+    return t('answerCatalog.analytics.eventTypes.resolve', '답변 선택')
+  case 'search':
+    return t('answerCatalog.analytics.eventTypes.search', '검색 API')
+  case 'view':
+    return t('answerCatalog.analytics.eventTypes.view', '조회')
+  case 'feedback':
+    return t('answerCatalog.analytics.eventTypes.feedback', '피드백')
+  default:
+    return eventType || '-'
   }
 }
 

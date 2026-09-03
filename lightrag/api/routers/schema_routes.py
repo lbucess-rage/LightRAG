@@ -162,6 +162,28 @@ def get_discovery_engine() -> Optional[SchemaDiscoveryEngine]:
     return _discovery_engine
 
 
+async def _get_workspace_discovery_engine(
+    request: Request,
+) -> Optional[SchemaDiscoveryEngine]:
+    """Create a request-scoped discovery engine using the workspace LLM policy."""
+    workspace = _get_workspace_from_request(request)
+    workspace_rag = await _get_workspace_rag(workspace)
+    llm_func = getattr(workspace_rag, "llm_model_func", None)
+    if llm_func is None:
+        return get_discovery_engine()
+
+    async def workspace_schema_llm(
+        prompt: str, system_prompt: Optional[str] = None
+    ) -> str:
+        return await llm_func(
+            prompt,
+            system_prompt=system_prompt,
+            _llm_purpose="schema_design",
+        )
+
+    return SchemaDiscoveryEngine(llm_func=workspace_schema_llm)
+
+
 # =============================================================================
 # Request/Response Models
 # =============================================================================
@@ -423,6 +445,7 @@ async def extract_file_content(file: UploadFile) -> str:
 
 @router.post("/discover/from-files", response_model=ApiResponse)
 async def discover_from_files(
+    http_request: Request,
     files: list[UploadFile] = File(..., description="Files to analyze (PDF, DOCX, TXT, MD, etc.)"),
     max_entity_types: int = Form(default=30, description="Maximum entity types to generate"),
     max_relation_types: int = Form(default=25, description="Maximum relation types to generate"),
@@ -434,7 +457,7 @@ async def discover_from_files(
 
     PDF, DOCX, TXT 등의 파일을 업로드하여 스키마를 발견합니다.
     """
-    engine = get_discovery_engine()
+    engine = await _get_workspace_discovery_engine(http_request)
     if engine is None:
         raise HTTPException(
             status_code=503,
@@ -487,12 +510,14 @@ async def discover_from_files(
 
 
 @router.post("/discover/from-document", response_model=ApiResponse)
-async def discover_from_document(request: DiscoverFromDocumentRequest):
+async def discover_from_document(
+    request: DiscoverFromDocumentRequest, http_request: Request
+):
     """문서 기반 스키마 발견
 
     업로드된 문서를 분석하여 도메인에 적합한 엔티티/관계 타입을 발견합니다.
     """
-    engine = get_discovery_engine()
+    engine = await _get_workspace_discovery_engine(http_request)
     if engine is None:
         raise HTTPException(
             status_code=503,
@@ -532,12 +557,14 @@ async def discover_from_document(request: DiscoverFromDocumentRequest):
 
 
 @router.post("/discover/from-domain", response_model=ApiResponse)
-async def discover_from_domain(request: DiscoverFromDomainRequest):
+async def discover_from_domain(
+    request: DiscoverFromDomainRequest, http_request: Request
+):
     """도메인 키워드 기반 스키마 생성
 
     LLM을 사용하여 도메인 키워드를 분석하고 적합한 스키마를 생성합니다.
     """
-    engine = get_discovery_engine()
+    engine = await _get_workspace_discovery_engine(http_request)
     if engine is None:
         raise HTTPException(
             status_code=503,
@@ -575,12 +602,12 @@ async def discover_from_domain(request: DiscoverFromDomainRequest):
 
 
 @router.post("/discover/hybrid", response_model=ApiResponse)
-async def discover_hybrid(request: HybridDiscoverRequest):
+async def discover_hybrid(request: HybridDiscoverRequest, http_request: Request):
     """하이브리드 스키마 발견
 
     문서 분석과 도메인 템플릿을 결합하여 스키마를 발견합니다.
     """
-    engine = get_discovery_engine()
+    engine = await _get_workspace_discovery_engine(http_request)
     if engine is None:
         raise HTTPException(
             status_code=503,

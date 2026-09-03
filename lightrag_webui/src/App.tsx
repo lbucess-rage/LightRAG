@@ -23,12 +23,13 @@ import SchemaManager from '@/features/SchemaManager'
 import RetrievalTesting from '@/features/RetrievalTesting'
 import ApiSite from '@/features/ApiSite'
 import PromptSettings from '@/features/PromptSettings'
+import LLMProfileSettings from '@/features/LLMProfileSettings'
 import WorkspaceManagement from '@/features/WorkspaceManagement'
 import AnswerLibrary from '@/features/AnswerLibrary'
-import AnswerSources from '@/features/AnswerSources'
+import AnswerCreation from '@/features/AnswerCreation'
+import AnswerQualityManagement from '@/features/AnswerQualityManagement'
 import AnswerMatching from '@/features/AnswerMatching'
 import AnswerStructuredData from '@/features/AnswerStructuredData'
-import AnswerTestConsole from '@/features/AnswerTestConsole'
 import AnswerAnalytics from '@/features/AnswerAnalytics'
 import AnswerDetailedAnalytics from '@/features/AnswerDetailedAnalytics'
 import AnswerHelp from '@/features/AnswerHelp'
@@ -328,8 +329,8 @@ function App() {
                   </TabsContent>
                 )}
                 {canShowTab('answer-sources') && (
-                  <TabsContent value="answer-sources" className="absolute top-0 right-0 bottom-0 left-0 overflow-auto">
-                    <AnswerSources />
+                  <TabsContent value="answer-sources" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
+                    <AnswerCreation />
                   </TabsContent>
                 )}
                 {canShowTab('answer-matching') && (
@@ -344,7 +345,7 @@ function App() {
                 )}
                 {canShowTab('answer-test') && (
                   <TabsContent value="answer-test" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
-                    <AnswerTestConsole />
+                    <AnswerQualityManagement />
                   </TabsContent>
                 )}
                 {canShowTab('answer-analytics') && (
@@ -370,6 +371,11 @@ function App() {
                 {canShowTab('prompts') && (
                   <TabsContent value="prompts" className="absolute top-0 right-0 bottom-0 left-0 overflow-auto">
                     <PromptSettings />
+                  </TabsContent>
+                )}
+                {canShowTab('llm-settings') && (
+                  <TabsContent value="llm-settings" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
+                    <LLMProfileSettings />
                   </TabsContent>
                 )}
                 {canShowTab('workspaces') && (

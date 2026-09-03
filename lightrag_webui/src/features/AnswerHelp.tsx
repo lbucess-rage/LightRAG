@@ -13,8 +13,10 @@ import {
   GaugeIcon,
   HelpCircleIcon,
   InfoIcon,
+  KeyRoundIcon,
   LibraryIcon,
   MousePointerClickIcon,
+  NetworkIcon,
   PlayCircleIcon,
   SearchCheckIcon,
   SearchIcon,
@@ -37,7 +39,7 @@ type GuideStep = {
   action: string
 }
 
-type HelpTopic = 'overview' | 'screens' | 'matching' | 'testing' | 'detailedAnalytics' | 'operations' | 'glossary'
+type HelpTopic = 'overview' | 'screens' | 'building' | 'matching' | 'testing' | 'detailedAnalytics' | 'operations' | 'glossary'
 
 type TopicConfig = {
   id: HelpTopic
@@ -72,6 +74,10 @@ const terms = [
     description: '아직 게시되지 않은 개별 답변입니다. 소스에서 여러 개를 만들 수 있고, 답변 메뉴에서 검토한 뒤 게시해야 서비스됩니다.',
   },
   {
+    term: 'FAQ 첨부 자료',
+    description: 'FAQ 본문과 함께 보여주는 이미지, 영상, 음성, 표 또는 파일입니다. 화면 표시 설명은 사용자에게 보이고, 검색용 설명과 대체 텍스트는 미디어 내용을 검색 후보에 반영할 때 사용합니다.',
+  },
+  {
     term: '공통 적용 정보',
     description: '소스에서 여러 답변 후보를 만들 때 모든 후보에 같이 들어가는 태그, 우선순위, 생성 묶음 이름 같은 값입니다.',
   },
@@ -80,12 +86,32 @@ const terms = [
     description: 'Excel이나 표의 각 행을 답변 후보로 바꿀 때 어떤 컬럼을 제목, 질문, 본문, 분류, 상태, 유효기간으로 사용할지 정하는 규칙입니다.',
   },
   {
+    term: 'ID 찾기 FAQ',
+    description: 'DB나 Excel의 상세정보 컬럼으로 행을 찾고, 일반 답변 문장 대신 해당 행의 업무 ID를 반환하는 FAQ 변환 방식입니다.',
+  },
+  {
+    term: '업무 ID (matched_id)',
+    description: '원본 DB나 Excel에서 사용하는 상품번호, 장애코드, 정책번호 같은 값입니다. 시스템 내부 FAQ 식별자인 answer_id와 구분해 API의 matched_id로 반환합니다.',
+  },
+  {
     term: '매핑 템플릿',
     description: '답변 자체가 아니라 컬럼 매핑 규칙을 재사용하기 위한 개념입니다. 같은 형식의 Excel이나 DB 샘플을 반복 처리할 때 사용합니다.',
   },
   {
     term: '찾기 힌트',
     description: '답변을 찾기 쉽게 만드는 질문, 키워드, 동의어, 메모입니다. 대표 질문은 더 높은 기준으로 선택됩니다.',
+  },
+  {
+    term: '공통 용어·동의어',
+    description: '여러 FAQ에 공통으로 적용되는 제품명, 약어, 한영 별칭 묶음입니다. 예를 들어 Teams, MS Teams, 팀즈를 같은 용어로 인식합니다.',
+  },
+  {
+    term: 'AI 용어 후보',
+    description: 'AI가 FAQ와 찾지 못한 질문을 비교해 제안한 동의어, 약어, 신조어입니다. 검토 대기 상태에서는 검색에 영향을 주지 않으며 운영자가 승인한 뒤에만 공통 용어로 적용됩니다.',
+  },
+  {
+    term: 'LLM 일괄 보완',
+    description: 'Excel 행별 FAQ를 미게시 상태로 만든 뒤, 답변 본문은 바꾸지 않고 구어체 질문·키워드·동의어·한영 제품명 별칭만 여러 FAQ에 나누어 추가하는 선택 기능입니다.',
   },
   {
     term: '제외어',
@@ -105,11 +131,11 @@ const terms = [
   },
   {
     term: '빠른 키워드 방식',
-    description: '현재 기본 방식입니다. 대표 질문, 키워드, 동의어, 제외어를 가중치로 계산해 빠르게 후보 답변을 찾습니다.',
+    description: '대표 질문, 키워드, 동의어, 제외어와 공통 용어 사전을 가중치로 계산해 빠르게 후보 답변을 찾는 방식입니다.',
   },
   {
     term: '의미 보강 검색',
-    description: '키워드가 정확히 같지 않아도 뜻이 비슷한 답변을 찾기 위해 답변별 벡터를 함께 비교하는 선택 방식입니다.',
+    description: '키워드와 용어 확장 결과에 답변별 벡터 유사도를 함께 적용하는 기본 조회 방식입니다. 표현이 달라도 뜻이 비슷한 후보를 보강합니다.',
   },
   {
     term: 'LLM ID 선택',
@@ -151,137 +177,93 @@ const terms = [
 
 const screenshotGuides = [
   {
-    title: '답변 조회',
-    caption: '답변을 만들고, 게시하고, 상세 편집과 이전 버전 복구를 수행하는 운영 화면입니다.',
+    title: 'FAQ 목록',
+    caption: '등록된 FAQ를 찾고, 게시 상태와 본문을 확인하며 상세 화면에서 첨부 자료, 검색 설정과 변경 이력을 관리합니다.',
     image: 'help/answer-catalog/answers-screen.png',
-    points: ['게시 상태', '답변 상세', '변경 이력'],
-    example: '예: “유심 불량 무상 교체 기준” 답변을 후보로 만들고, 검토 후 게시 상태로 전환합니다.',
+    points: ['FAQ 검색', '본문과 첨부 자료', '상세 설정'],
+    example: '“유심 불량 무상 교체 기준” FAQ에 교체 절차 이미지를 추가하고 “유심 교체 화면 순서”를 검색용 설명으로 입력한 뒤 실제 질문으로 확인합니다.',
     tab: 'answers' as AppTab,
   },
   {
-    title: '답변 추가',
-    caption: '빠른 답변 추가로 텍스트, URL, Excel 같은 원본을 바로 미리보고, 반복/대량 추가 설정은 필요한 경우에만 등록해 재사용하는 화면입니다.',
+    title: 'FAQ 생성',
+    caption: '직접 작성하거나 텍스트, URL, Excel, DB 표 데이터를 검토 가능한 FAQ로 변환하는 화면입니다.',
     image: 'help/answer-catalog/sources-screen.png',
-    points: ['Excel 업로드와 시트 선택', '컬럼 매핑', '반복/대량 추가 설정'],
-    example: '예: 응대가이드 Excel 파일을 업로드하고 “질문/답변/분류/키워드” 컬럼을 매핑한 뒤 행마다 FAQ 답변 후보를 생성합니다.',
+    points: ['FAQ 작성·변환', '표 데이터 연결', 'LLM 힌트 보완'],
+    example: '응대가이드 Excel에서 “질문/답변/분류” 컬럼을 매핑하고, 질문 표현이 부족한 행만 LLM으로 보완한 뒤 미게시 FAQ를 생성합니다.',
     tab: 'answer-sources' as AppTab,
   },
   {
-    title: '답변 항목 설정',
-    caption: '답변별 질문, 키워드, 동의어, 제외어를 관리하고 키워드/벡터/LLM ID 선택 방식으로 빠른 테스트를 수행하는 화면입니다.',
+    title: '품질 관리 - 개선 필요',
+    caption: '힌트가 부족하거나 질문 연결을 점검해야 하는 FAQ를 모아 대표 질문, 키워드, 동의어, 제외어를 보강합니다.',
     image: 'help/answer-catalog/matching-screen.png',
-    points: ['찾기 힌트', '벡터 갱신', '빠른 테스트'],
-    example: '예: “SIM 교체”, “유심 변경”, “유심 인식 불가”를 같은 답변의 대표 질문과 동의어로 등록합니다.',
-    tab: 'answer-matching' as AppTab,
-  },
-  {
-    title: '구조화 데이터',
-    caption: '소스의 필드와 샘플 행을 확인하고 안전 조회를 미리보기/실행하는 화면입니다.',
-    image: 'help/answer-catalog/structured-data-screen.png',
-    points: ['필드 역할', '안전 조회', '샘플 행'],
-    example: '예: 요금제 표의 “상품명”, “월정액”, “제공량” 필드를 분석하고 조건 검색으로 정확한 행을 찾습니다.',
-    tab: 'structured-data' as AppTab,
-  },
-  {
-    title: '테스트 콘솔',
-    caption: '사용자 질문을 넣고 선택된 답변, 후보, 점수 구성요소를 확인하는 검증 화면입니다.',
-    image: 'help/answer-catalog/test-console-screen.png',
-    points: ['사용자 질문', '조회 방식', '후보 점수'],
-    example: '예: “유심이 고장난 것 같아요”를 키워드+벡터로 조회해 어떤 답변이 선택되는지 확인합니다.',
+    points: ['개선 대상 FAQ', '찾기 힌트', 'LLM 힌트 추천'],
+    example: '“SIM 교체”, “유심 변경”, “유심 인식 불가”를 같은 FAQ의 대표 질문과 동의어로 추가합니다.',
     tab: 'answer-test' as AppTab,
   },
   {
-    title: '분석',
-    caption: '조회 기록, 답변을 찾지 못한 질문, 평균 지연, 상위 선택 답변을 확인하고 운영 보강 대상을 찾는 화면입니다.',
-    image: 'help/answer-catalog/analytics-screen.png',
-    points: ['조회 기록', '답변을 찾지 못한 질문', '상위 답변'],
-    example: '예: 답변을 찾지 못한 질문을 모아 새 답변을 만들거나 기존 답변의 제외어와 동의어를 보강합니다.',
-    tab: 'answer-analytics' as AppTab,
+    title: '품질 관리 - 테스트',
+    caption: '사용자 질문을 넣고 선택된 FAQ, 후보, 점수 근거를 확인하는 검증 화면입니다.',
+    image: 'help/answer-catalog/test-console-screen.png',
+    points: ['사용자 질문', '검색 방식', '후보 점수'],
+    example: '“유심이 고장난 것 같아요”를 키워드+벡터 방식으로 조회해 어떤 FAQ가 선택되는지 확인합니다.',
+    tab: 'answer-test' as AppTab,
   },
   {
-    title: '상세 분석',
-    caption: '기간과 조건을 정해 조회한 뒤 답변 선택률, 답변 없음, 응답시간, LLM 선택 비율을 보고 각 이벤트의 상세 근거까지 확인하는 화면입니다.',
+    title: '품질 관리 - 이용 현황',
+    caption: '조회 기록과 FAQ를 찾지 못한 질문, 응답 시간, 검색 방식별 결과를 확인하고 개선 대상을 찾는 화면입니다.',
     image: 'help/answer-catalog/detailed-analytics-screen.png',
-    points: ['조건 조회', '요약 카드', '분석 관점', '이벤트 상세'],
-    example: '예: 최근 7일 중 “찾은 답변 없음” 카드만 선택해 반복 실패 질문을 확인하고, 해당 질문의 후보 점수를 상세 팝업에서 검토합니다.',
-    tab: 'answer-detailed-analytics' as AppTab,
+    points: ['기간과 조건 조회', '선택률과 실패 질문', '이벤트 상세'],
+    example: '최근 7일의 “FAQ를 찾지 못함” 기록만 조회해 반복 질문을 확인하고 기존 FAQ의 힌트를 보강합니다.',
+    tab: 'answer-test' as AppTab,
   },
 ]
 
 const featureGuides = [
   {
-    title: '답변',
-    purpose: '승인된 답변의 본문, 요약, 게시 상태, 유효기간, 표시 방식을 관리합니다.',
-    when: '운영자가 최종 답변을 검토하거나 이전 버전으로 복구해야 할 때 사용합니다.',
-    example: '예: 상담사가 그대로 읽어도 되는 공식 안내문을 게시하고, 기간이 지난 프로모션 답변은 만료 처리합니다.',
+    title: 'FAQ 목록',
+    purpose: '등록된 FAQ의 본문, 첨부 자료, 게시 상태, 유효기간, 찾기 힌트와 변경 이력을 관리합니다.',
+    when: '원하는 FAQ를 찾거나 본문과 검색 설정을 함께 검토해야 할 때 사용합니다.',
+    example: '상담사가 읽을 안내문과 앱 설정 화면 이미지를 함께 게시합니다. 콜봇은 본문을 읽고, 웹 채널은 본문과 이미지를 함께 보여줍니다.',
     tab: 'answers' as AppTab,
   },
   {
-    title: '답변 추가',
-    purpose: '텍스트, Excel, 파일, URL, 표 샘플, DB/NoSQL 샘플을 검토 가능한 답변 후보로 바꿉니다.',
-    when: '한 번성 입력은 빠른 답변 추가에서 처리하고, 반복해서 쓰는 DB/NoSQL/웹/테이블 입력만 반복/대량 추가 설정에 저장합니다.',
-    example: '예: 고객센터 백과사전 Excel의 “응대가이드” 시트를 빠른 답변 추가에서 업로드하고 행별 답변 후보로 변환합니다.',
+    title: 'FAQ 생성',
+    purpose: '직접 작성하거나 텍스트, Excel, 파일, URL, DB/NoSQL 표 데이터를 검토 가능한 FAQ로 바꿉니다.',
+    when: '하나의 FAQ를 작성하거나 외부 자료에서 여러 FAQ를 한 번에 생성할 때 사용합니다.',
+    example: '고객센터 백과사전 Excel의 “응대가이드” 시트를 행별 FAQ로 변환하고, 필요한 행만 LLM으로 대표 질문과 동의어를 보완합니다.',
     tab: 'answer-sources' as AppTab,
   },
   {
-    title: '답변 항목 설정',
-    purpose: '대표 질문, 키워드, 제외어 같은 찾기 힌트를 답변별로 관리하고, 필요하면 벡터와 LLM ID 선택을 함께 테스트합니다.',
-    when: '질문이 엉뚱한 답변으로 연결되거나 표현 차이 때문에 후보 점수를 더 높여야 할 때 사용합니다.',
-    example: '예: “번호 이동” 질문이 “기기 변경” 답변으로 연결되면 제외어를 추가하고 대표 질문을 분리합니다.',
-    tab: 'answer-matching' as AppTab,
-  },
-  {
-    title: '구조화 데이터',
-    purpose: 'CSV/JSON 같은 표 데이터를 분석하고 데이터셋으로 만들어 조건 검색합니다.',
-    when: '정해진 컬럼과 행을 기준으로 빠르고 일관된 조회가 필요할 때 사용합니다.',
-    example: '예: 요금제, 부가서비스, 지점 목록처럼 표로 관리되는 데이터를 조건 검색 가능한 데이터셋으로 만듭니다.',
-    tab: 'structured-data' as AppTab,
-  },
-  {
-    title: '테스트 콘솔',
-    purpose: '실제 질문을 넣어 선택 답변, 후보 목록, 점수 근거를 확인합니다.',
-    when: '답변을 게시하기 전 품질을 검증하거나 최소 점수 기준을 조정할 때 사용합니다.',
-    example: '예: 같은 질문을 키워드, 키워드+벡터, LLM ID 선택으로 비교해 운영 기본 방식을 결정합니다.',
+    title: '품질 관리',
+    purpose: 'FAQ의 찾기 힌트를 개선하고, 실제 질문으로 검증하며, 운영 중 쌓인 이용 기록을 분석합니다.',
+    when: '질문이 엉뚱한 FAQ로 연결되거나 표현 차이로 찾지 못한 원인을 확인할 때 사용합니다.',
+    example: '같은 질문을 키워드, 키워드+벡터, LLM ID 선택으로 비교하고 실패 질문의 힌트를 보강합니다.',
     tab: 'answer-test' as AppTab,
-  },
-  {
-    title: '분석',
-    purpose: '조회 기록, 답변을 찾지 못한 질문, 많이 선택된 답변, 지연 시간을 확인합니다.',
-    when: '운영 중 보강해야 할 답변과 찾기 힌트를 찾을 때 사용합니다.',
-    example: '예: 많이 조회되지만 신뢰도가 낮은 답변을 찾아 대표 질문과 동의어를 추가합니다.',
-    tab: 'answer-analytics' as AppTab,
-  },
-  {
-    title: '상세 분석',
-    purpose: '조건 기반으로 이벤트를 다시 조회하고, 요약 카드와 탭을 선택해 운영 리포트를 세부 목록까지 확인합니다.',
-    when: '기간별 품질 점검, 실패 질문 분석, 느린 응답 확인, LLM 사용 비율 점검이 필요할 때 사용합니다.',
-    example: '예: “최소 신뢰도 0.5 이상, 최대 응답시간 1000ms 이하” 조건으로 조회한 뒤 찾은 답변 없음 이벤트만 골라 원인을 확인합니다.',
-    tab: 'answer-detailed-analytics' as AppTab,
   },
 ]
 
 const advancedMatchingGuideTemplates = [
   {
     key: 'prepare',
-    title: '1. 답변 항목 설정 화면에서 벡터와 힌트 준비',
-    tab: 'answer-matching' as AppTab,
+    title: '1. 품질 관리에서 벡터와 힌트 준비',
+    tab: 'answer-test' as AppTab,
     image: 'help/answer-catalog/matching-hybrid-controls.png',
-    alt: '답변 항목 설정 화면의 벡터 갱신, 힌트 추천, 조회 방식 선택 영역',
-    summary: '기본 키워드 방식을 유지하면서, 필요할 때만 의미 보강 검색과 LLM ID 선택을 켤 수 있습니다.',
+    alt: '품질 관리 화면의 벡터 갱신, 힌트 추천, 조회 방식 선택 영역',
+    summary: '기본 하이브리드 방식은 키워드·용어 확장·벡터 검색을 함께 사용하며, 필요할 때만 LLM ID 선택을 켤 수 있습니다.',
     points: ['벡터 갱신', '힌트 추천', '조회 방식'],
     bullets: [
-      '벡터 갱신은 답변 제목, 요약, 본문 일부, 태그, 찾기 힌트를 합쳐 답변별 검색 벡터를 다시 만듭니다.',
-      '힌트 추천은 대표 질문, 키워드, 동의어 후보를 제안합니다. 추천 결과는 자동 반영되지 않고 운영자가 추가해야 반영됩니다.',
-      '조회 방식은 키워드, 키워드+벡터, LLM ID 선택으로 나뉩니다. 기본값은 가장 빠른 키워드 방식입니다.',
+      'FAQ를 생성하거나 수정하면 의미 검색용 벡터가 백그라운드에서 자동 갱신됩니다. 벡터 갱신 버튼은 기존 FAQ를 일괄 재생성할 때 사용합니다.',
+      '용어·동의어 탭에서 Teams/팀즈처럼 여러 FAQ에 공통인 한영 표현과 약어를 관리할 수 있습니다. ‘AI로 용어 찾기’를 실행하면 FAQ와 찾지 못한 질문을 근거로 후보를 제안하며, 승인한 후보만 검색에 적용됩니다.',
+      '조회 방식은 키워드, 키워드+벡터, LLM ID 선택으로 나뉩니다. 기본값은 속도와 표현 대응을 함께 고려한 키워드+벡터 방식입니다.',
     ],
-    note: '답변을 대량 등록했거나 찾기 힌트를 많이 수정한 뒤에는 벡터 갱신을 먼저 실행한 다음 하이브리드 테스트를 진행하는 흐름이 안정적입니다.',
+    note: '기존에 등록된 FAQ가 많고 벡터가 없는 경우에만 벡터 갱신을 한 번 실행하세요. 이후 신규·수정 FAQ는 자동으로 갱신됩니다.',
   },
   {
     key: 'hybrid',
     title: '2. 키워드+벡터 결과 해석',
     tab: 'answer-test' as AppTab,
     image: 'help/answer-catalog/test-console-hybrid-result.png',
-    alt: '테스트 콘솔에서 키워드+벡터 조회 결과와 후보 점수 상세를 확인하는 화면',
+    alt: '품질 관리에서 키워드+벡터 조회 결과와 후보 점수 상세를 확인하는 화면',
     summary: '하이브리드 모드는 기존 키워드 점수와 의미 유사도 점수를 함께 사용해 후보를 정렬합니다.',
     points: ['선택 답변', '후보 점수', '점수 상세'],
     bullets: [
@@ -296,7 +278,7 @@ const advancedMatchingGuideTemplates = [
     title: '3. LLM ID 선택은 마지막 확인 단계',
     tab: 'answer-test' as AppTab,
     image: 'help/answer-catalog/test-console-llm-id-select.png',
-    alt: '테스트 콘솔에서 LLM ID 선택 방식으로 후보 답변 ID만 선택한 화면',
+    alt: '품질 관리에서 LLM ID 선택 방식으로 후보 FAQ ID만 선택한 화면',
     summary: 'LLM ID 선택은 본문을 생성하지 않고, 이미 검색된 후보 답변 ID 중 하나만 고르게 제한합니다.',
     points: ['후보 제한', 'ID 검증', '선택 근거'],
     bullets: [
@@ -316,40 +298,22 @@ export default function AnswerHelp() {
 
   const tutorialSteps = useMemo<GuideStep[]>(() => [
     {
-      title: t('answerCatalog.help.steps.create.title', '1. 답변 후보 만들기'),
-      description: t('answerCatalog.help.steps.create.description', '직접 답변을 만들거나 빠른 답변 추가에서 원자료를 미리보기로 분석한 뒤 답변 후보로 변환합니다. 후보는 바로 서비스되지 않습니다.'),
+      title: t('answerCatalog.help.steps.create.title', '1. FAQ 작성·변환'),
+      description: t('answerCatalog.help.steps.create.description', '직접 FAQ를 작성하거나 텍스트, Excel, URL, 표 데이터를 검토한 뒤 FAQ로 변환합니다. 생성된 FAQ는 검토 후 게시합니다.'),
       tab: 'answer-sources',
-      action: t('answerCatalog.help.steps.create.action', '답변 추가 열기'),
+      action: t('answerCatalog.help.steps.create.action', 'FAQ 생성 열기'),
     },
     {
-      title: t('answerCatalog.help.steps.review.title', '2. 답변 검토 및 정책 설정'),
-      description: t('answerCatalog.help.steps.review.description', '본문, 답변 메모, 표시 방식, 우선순위, 유효기간, 태그를 확인합니다. 잘못 저장해도 변경 이력에서 이전 버전으로 복구할 수 있습니다.'),
+      title: t('answerCatalog.help.steps.review.title', '2. FAQ 검토 및 게시'),
+      description: t('answerCatalog.help.steps.review.description', 'FAQ 목록에서 본문, 답변 메모, 유효기간과 검색 설정을 확인합니다. 변경 이력에서 이전 버전으로 복구할 수도 있습니다.'),
       tab: 'answers',
-      action: t('answerCatalog.help.steps.review.action', '답변 조회 열기'),
+      action: t('answerCatalog.help.steps.review.action', 'FAQ 목록 열기'),
     },
     {
-      title: t('answerCatalog.help.steps.guidance.title', '3. 답변 항목 규칙과 제외어 정리'),
-      description: t('answerCatalog.help.steps.guidance.description', '답변 항목 설정 화면에서 대표 질문과 키워드를 추가하고, 잘못 연결될 수 있는 질문은 제외어로 막습니다. 빠른 테스트로 후보 점수를 즉시 확인합니다.'),
-      tab: 'answer-matching',
-      action: t('answerCatalog.help.steps.guidance.action', '답변 항목 설정 열기'),
-    },
-    {
-      title: t('answerCatalog.help.steps.structured.title', '4. 구조화 데이터 확인'),
-      description: t('answerCatalog.help.steps.structured.description', 'JSON, CSV, DB/NoSQL 샘플에서 감지된 필드와 샘플 행을 확인하고, 안전 조회로 조건 검색을 미리보기/실행합니다.'),
-      tab: 'structured-data',
-      action: t('answerCatalog.help.steps.structured.action', '구조화 데이터 열기'),
-    },
-    {
-      title: t('answerCatalog.help.steps.test.title', '5. 테스트 콘솔에서 검증'),
-      description: t('answerCatalog.help.steps.test.description', '실제 사용자 질문을 넣어 선택된 답변, 후보 점수, 점수 구성요소를 확인합니다. 최소 점수 기준도 함께 조정합니다.'),
+      title: t('answerCatalog.help.steps.guidance.title', '3. 품질 검증과 개선'),
+      description: t('answerCatalog.help.steps.guidance.description', '품질 관리에서 실제 질문을 테스트하고, 부족한 대표 질문·키워드·동의어를 보강하며, 이용 현황에서 반복 실패 질문을 확인합니다.'),
       tab: 'answer-test',
-      action: t('answerCatalog.help.steps.test.action', '테스트 콘솔 열기'),
-    },
-    {
-      title: t('answerCatalog.help.steps.publish.title', '6. 게시 후 운영 분석'),
-      description: t('answerCatalog.help.steps.publish.description', '충분히 검증된 답변만 게시합니다. 운영 중에는 조회 기록, 답변을 찾지 못한 질문, 평균 지연, 상위 선택 답변을 보고 찾기 힌트를 보강합니다.'),
-      tab: 'answer-analytics',
-      action: t('answerCatalog.help.steps.publish.action', '분석 탭 열기'),
+      action: t('answerCatalog.help.steps.guidance.action', '품질 관리 열기'),
     },
   ], [t])
 
@@ -363,9 +327,9 @@ export default function AnswerHelp() {
       actionLabel: tutorialSteps[activeStep].action,
       summaryTitle: '현재 단계 핵심',
       summaryBullets: [
-        '답변 후보는 바로 서비스되지 않으므로 검토 후 게시합니다.',
-        '찾기 힌트와 제외어를 정리한 뒤 테스트 콘솔에서 검증합니다.',
-        '운영 중에는 분석 화면에서 답변을 찾지 못한 질문을 보강합니다.',
+        '생성된 FAQ는 바로 서비스하지 않고 내용을 검토한 뒤 게시합니다.',
+        '품질 관리에서 찾기 힌트와 제외어를 정리한 뒤 실제 질문으로 검증합니다.',
+        '이용 현황에서 FAQ를 찾지 못한 질문을 모아 기존 FAQ를 보강합니다.',
       ],
     },
     {
@@ -374,21 +338,36 @@ export default function AnswerHelp() {
       description: '각 메뉴가 어떤 작업을 담당하는지 빠르게 확인합니다.',
       icon: <BookOpenIcon className="h-4 w-4" />,
       actionTab: 'answers',
-      actionLabel: '답변 조회 열기',
+      actionLabel: 'FAQ 목록 열기',
       summaryTitle: '화면을 고르는 기준',
       summaryBullets: [
-        '새 자료를 넣을 때는 답변 추가 화면의 빠른 답변 추가에서 시작합니다. Excel은 업로드 후 시트와 컬럼 매핑을 확인합니다.',
-        '답변 품질을 다듬을 때는 답변과 답변 항목 설정 화면을 함께 봅니다.',
-        '상세 분석에서는 조건 조회 후 요약 카드나 탭을 선택해 세부 목록을 확인합니다.',
+        '새 자료를 넣을 때는 FAQ 생성에서 시작합니다. Excel과 DB 표 데이터도 같은 화면에서 연결합니다.',
+        '등록된 FAQ의 내용과 검색 설정은 FAQ 목록의 상세 화면에서 함께 확인합니다.',
+        '테스트, 개선 대상, 이용 현황은 품질 관리 안에서 목적에 맞게 선택합니다.',
+      ],
+    },
+    {
+      id: 'building',
+      title: '구축 예시',
+      description: 'DB와 Excel의 상세정보로 업무 ID를 찾는 FAQ를 실제 예시로 구성합니다.',
+      icon: <KeyRoundIcon className="h-4 w-4" />,
+      actionTab: 'answer-sources',
+      actionLabel: 'FAQ 생성 열기',
+      summaryTitle: 'ID 찾기 FAQ 핵심',
+      summaryBullets: [
+        '반환 ID 컬럼과 사용자가 검색할 상세정보 컬럼을 분리해 매핑합니다.',
+        '내부 answer_id는 FAQ 관리용이고, 업무 ID는 matched_id로 별도 반환됩니다.',
+        '빈 ID와 같은 상세정보가 서로 다른 ID를 가리키는 행은 생성 전에 정리합니다.',
+        '자연어 질문 컬럼이 부족하면 LLM 일괄 보완을 선택해 대표 질문·키워드·동의어만 추가합니다.',
       ],
     },
     {
       id: 'matching',
-      title: '답변 항목 설정 방식',
+      title: 'FAQ 검색 방식',
       description: '키워드, 벡터, LLM ID 선택의 차이와 사용 순서를 설명합니다.',
       icon: <SearchCheckIcon className="h-4 w-4" />,
-      actionTab: 'answer-matching',
-      actionLabel: '답변 항목 설정 열기',
+      actionTab: 'answer-test',
+      actionLabel: '품질 관리 열기',
       summaryTitle: '권장 사용 순서',
       summaryBullets: [
         '기본값은 빠르고 예측 가능한 키워드 방식입니다.',
@@ -399,15 +378,15 @@ export default function AnswerHelp() {
     {
       id: 'testing',
       title: '테스트와 점수',
-      description: '테스트 콘솔에서 선택 답변과 후보 점수를 읽는 방법입니다.',
+      description: '품질 관리의 테스트 화면에서 선택된 FAQ와 후보 점수를 읽는 방법입니다.',
       icon: <GaugeIcon className="h-4 w-4" />,
       actionTab: 'answer-test',
-      actionLabel: '테스트 콘솔 열기',
+      actionLabel: '품질 관리 열기',
       summaryTitle: '검증할 항목',
       summaryBullets: [
         '질문별 selected_by와 score_details를 함께 확인합니다.',
         '최소 점수 기준을 너무 낮게 두면 오답 선택 위험이 커집니다.',
-        '답변을 찾지 못한 질문은 답변 추가 또는 힌트 보강 대상으로 남깁니다.',
+        'FAQ를 찾지 못한 질문은 FAQ 생성 또는 힌트 보강 대상으로 남깁니다.',
       ],
     },
     {
@@ -415,8 +394,8 @@ export default function AnswerHelp() {
       title: '상세 분석',
       description: '조건 조회, 요약 카드, 탭별 리포트, 이벤트 상세 해석 방법입니다.',
       icon: <BarChart3Icon className="h-4 w-4" />,
-      actionTab: 'answer-detailed-analytics',
-      actionLabel: '상세 분석 열기',
+      actionTab: 'answer-test',
+      actionLabel: '품질 관리 열기',
       summaryTitle: '상세 분석 핵심',
       summaryBullets: [
         '조건을 바꾼 뒤에는 조회 버튼 또는 Enter로 직접 실행합니다.',
@@ -427,15 +406,15 @@ export default function AnswerHelp() {
     {
       id: 'operations',
       title: '운영 관리',
-      description: '답변 게시, 소스, 구조화 데이터, 분석 화면의 운영 흐름입니다.',
+      description: 'FAQ 게시, 자료 변환, 표 데이터, 품질 분석의 운영 흐름입니다.',
       icon: <BarChart3Icon className="h-4 w-4" />,
-      actionTab: 'answer-analytics',
-      actionLabel: '분석 탭 열기',
+      actionTab: 'answer-test',
+      actionLabel: '품질 관리 열기',
       summaryTitle: '운영 루틴',
       summaryBullets: [
-        '게시 전에는 테스트 콘솔로 대표 질문을 확인합니다.',
-        '조회 기록과 답변을 찾지 못한 질문을 기준으로 힌트를 보강합니다.',
-        '구조화 데이터는 안전 조회로 조건 검색 품질을 확인합니다.',
+        '게시 전에는 품질 관리의 테스트 화면에서 대표 질문을 확인합니다.',
+        '이용 현황의 조회 기록과 FAQ를 찾지 못한 질문을 기준으로 힌트를 보강합니다.',
+        '표 데이터는 FAQ 생성에서 연결하고 안전 조회로 조건 검색 품질을 확인합니다.',
       ],
     },
     {
@@ -448,8 +427,8 @@ export default function AnswerHelp() {
       summaryTitle: '용어를 볼 때',
       summaryBullets: [
         '운영 화면의 용어와 API 응답 필드명을 함께 연결해 이해합니다.',
-        '점수 이름은 테스트 콘솔 후보 카드와 같은 기준으로 읽습니다.',
-        '헷갈리는 용어는 답변 항목 설정 방식 페이지의 예시와 함께 확인합니다.',
+        '점수 이름은 품질 관리의 후보 카드와 같은 기준으로 읽습니다.',
+        '헷갈리는 용어는 검색 방식 페이지의 예시와 함께 확인합니다.',
       ],
     },
   ], [activeStep, tutorialSteps])
@@ -489,6 +468,10 @@ export default function AnswerHelp() {
             advancedMatchingGuides={advancedMatchingGuides}
             goToTab={goToTab}
           />
+        )
+      case 'building':
+        return (
+          <BuildingExamplesTopic goToTab={goToTab} />
         )
       case 'testing':
         return (
@@ -544,7 +527,7 @@ export default function AnswerHelp() {
             </Button>
           </div>
 
-          <div className="mt-4 grid w-full gap-3 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7">
+          <div className="mt-4 grid w-full gap-3 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-8">
             {topics.map((topic) => (
               <QuickTopicCard
                 key={topic.id}
@@ -616,8 +599,8 @@ function OverviewTopic({
       <section className="rounded-md border p-4">
         <SectionTitle
           icon={<ClipboardListIcon className="h-4 w-4" />}
-          title="6단계 운영 튜터"
-          description="처음 설정하거나 새 답변 묶음을 만들 때는 이 순서대로 확인합니다."
+          title="3단계 FAQ 운영 안내"
+          description="새 FAQ를 만들고 운영 품질을 관리할 때는 이 순서대로 확인합니다."
         />
         <div className="mt-4 grid gap-2">
           {tutorialSteps.map((step, index) => (
@@ -653,9 +636,9 @@ function OverviewTopic({
         </div>
         <div className="mt-4 grid gap-3 md:grid-cols-3">
           {[
-            ['1', '원자료 또는 답변을 준비합니다.'],
-            ['2', '운영자가 정책과 답변 항목 설정을 검토합니다.'],
-            ['3', '테스트 콘솔과 분석 화면에서 계속 보강합니다.'],
+            ['1', '직접 작성하거나 원자료에서 FAQ를 생성합니다.'],
+            ['2', 'FAQ 목록에서 본문과 검색 설정을 검토합니다.'],
+            ['3', '품질 관리에서 테스트하고 이용 결과를 보강합니다.'],
           ].map(([number, text]) => (
             <div key={number} className="rounded-md border bg-background p-3 text-sm leading-6">
               <span className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-xs font-semibold text-white">{number}</span>
@@ -697,10 +680,137 @@ function ScreensTopic({ goToTab }: { goToTab: (tab: AppTab) => void }) {
           description="FAQ 워크스페이스에서는 모든 메뉴가 한 흐름으로 연결됩니다."
         />
         <div className="mt-4 grid gap-3 md:grid-cols-3">
-          <FlowCard title="등록" text="답변 추가의 빠른 답변 추가에서 텍스트나 Excel을 미리보고 답변 후보를 만들며, 답변 화면에서 본문과 유효기간을 검토합니다." />
-          <FlowCard title="답변 항목 설정" text="답변 항목 설정 화면에서 대표 질문, 동의어, 제외어를 보강하고 벡터를 갱신합니다." />
-          <FlowCard title="반복/대량 추가" text="같은 DB, NoSQL, 웹, 테이블 입력을 계속 사용할 때만 반복/대량 추가 설정에 저장합니다." />
+          <FlowCard title="FAQ 목록" text="등록된 FAQ를 찾고 본문, 게시 상태, 검색 설정과 변경 이력을 함께 확인합니다." />
+          <FlowCard title="FAQ 생성" text="직접 작성하거나 텍스트, Excel, URL, DB 표 데이터를 FAQ로 변환합니다." />
+          <FlowCard title="품질 관리" text="실제 질문을 테스트하고 개선 대상과 이용 현황을 확인해 찾기 힌트를 보강합니다." />
         </div>
+      </section>
+    </div>
+  )
+}
+
+function BuildingExamplesTopic({ goToTab }: { goToTab: (tab: AppTab) => void }) {
+  const sampleRows = [
+    ['PRD-1042', '삼성', 'AX100', '전원이 켜지지 않음', '공기청정기'],
+    ['PRD-2088', 'LG', 'BX200', '작동 중 큰 소음', '공기청정기'],
+    ['PRD-3110', '삼성', 'CW310', '필터 교체 알림', '공기청정기'],
+  ]
+  return (
+    <div className="grid gap-5">
+      <section className="grid gap-4 rounded-md border p-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)]">
+        <div className="min-w-0">
+          <SectionTitle
+            icon={<KeyRoundIcon className="h-4 w-4" />}
+            title="DB 상세정보로 업무 ID 찾기"
+            description="상품명이나 증상을 질문하면 설명문을 새로 만들지 않고 원본 테이블의 상품 ID를 반환하는 구성입니다."
+            trailing={<Badge variant="outline">ID 찾기 FAQ</Badge>}
+          />
+          <div className="mt-4 overflow-x-auto rounded-md border">
+            <table className="min-w-[720px] w-full text-xs">
+              <thead className="bg-muted/40 text-left">
+                <tr>
+                  {['product_id', 'manufacturer', 'model_name', 'symptom', 'category'].map((column) => (
+                    <th key={column} className="border-b px-3 py-2 font-medium">{column}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {sampleRows.map((row) => (
+                  <tr key={row[0]}>
+                    {row.map((value) => <td key={value} className="px-3 py-2">{value}</td>)}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 text-xs leading-5 text-muted-foreground">
+            실제 DB 연결 위치는 <code className="rounded bg-muted px-1 py-0.5">db://public.product_support</code>처럼 등록합니다.
+            외부 PostgreSQL은 서버 환경변수에 연결 URL을 저장하고 해당 환경변수 이름만 반복 입력 설정에 지정합니다.
+          </p>
+        </div>
+        <div className="min-w-0 overflow-hidden rounded-md border bg-muted/20">
+          <img
+            src={`${webuiPrefix}help/answer-catalog/sources-screen.png`}
+            alt="FAQ 생성 화면에서 Excel과 DB 표 데이터를 매핑하는 화면"
+            className="h-full min-h-64 w-full object-cover object-top"
+            loading="lazy"
+          />
+        </div>
+      </section>
+
+      <section className="rounded-md border bg-muted/20 p-4">
+        <SectionTitle
+          icon={<WorkflowIcon className="h-4 w-4" />}
+          title="화면에서 설정하는 순서"
+          description="FAQ 생성의 Excel 행별 매핑과 반복 입력 설정에서 동일한 기준을 사용합니다."
+        />
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <FlowCard title="1. 변환 목적" text="‘상세정보로 ID 찾기’를 선택합니다. 이 유형은 자동으로 행마다 FAQ 1개를 만드는 방식으로 고정됩니다." />
+          <FlowCard title="2. 반환 ID" text="product_id를 반환 ID로 선택합니다. 이 값은 원본 업무 ID이며 FAQ 내부 answer_id와 다릅니다." />
+          <FlowCard title="3. 검색 상세정보" text="manufacturer, model_name, symptom, category를 제목·대표 질문·분류·찾기 힌트로 매핑합니다." />
+          <FlowCard title="4. 데이터 점검" text="빈 ID, 중복 ID, 같은 상세정보가 서로 다른 ID를 가리키는 행을 확인한 뒤 미게시 FAQ를 생성합니다." />
+        </div>
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-2">
+        <div className="rounded-md border p-4">
+          <SectionTitle
+            icon={<SearchIcon className="h-4 w-4" />}
+            title="질문과 반환 예시"
+            description="상세정보의 표현이 일치하거나 찾기 힌트·벡터가 보강하면 해당 행의 업무 ID가 선택됩니다."
+          />
+          <div className="mt-4 grid gap-3 text-sm">
+            <div className="rounded-md border bg-muted/20 p-3">
+              <div className="text-xs text-muted-foreground">사용자 질문</div>
+              <div className="mt-1 font-medium">삼성 공기청정기인데 전원이 안 켜지는 모델 ID를 알려주세요.</div>
+            </div>
+            <div className="rounded-md border border-emerald-200 bg-emerald-50/60 p-3 dark:border-emerald-900 dark:bg-emerald-950/10">
+              <div className="text-xs text-muted-foreground">선택 결과</div>
+              <div className="mt-1 font-mono font-semibold">matched_id: PRD-1042</div>
+              <div className="mt-2 text-xs leading-5 text-muted-foreground">
+                응답 본문도 PRD-1042이며, 내부 answer_id는 FAQ 버전·게시·이력 관리를 위해 별도로 유지됩니다.
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="rounded-md border p-4">
+          <SectionTitle
+            icon={<FileInputIcon className="h-4 w-4" />}
+            title="API 응답에서 확인할 값"
+            description="외부 시스템은 answer_id 대신 matched_id를 업무 키로 사용합니다."
+          />
+          <pre className="mt-4 overflow-x-auto rounded-md bg-neutral-950 p-4 text-xs leading-5 text-neutral-100">{`{
+  "matched": true,
+  "answer_id": "ANS-7d6a09c1e042",
+  "matched_id": "PRD-1042",
+  "title": "AX100",
+  "response": "PRD-1042",
+  "confidence": 0.91
+}`}</pre>
+          <div className="mt-3 text-xs leading-5 text-muted-foreground">
+            <strong className="text-foreground">answer_id</strong>는 KMS 내부 FAQ 식별자이고,
+            <strong className="ml-1 text-foreground">matched_id</strong>는 원본 테이블의 업무 ID입니다.
+            일반 FAQ에는 matched_id가 비어 있습니다.
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-md border border-amber-200 bg-amber-50/60 p-4 dark:border-amber-900 dark:bg-amber-950/10">
+        <SectionTitle
+          icon={<InfoIcon className="h-4 w-4" />}
+          title="대량 데이터와 정확도 주의사항"
+          description="ID 찾기 FAQ는 자연어 유사도 검색이며 SQL의 다중 조건 정확 조회를 완전히 대체하지 않습니다."
+        />
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <ChecklistItem title="현재 1회 최대 1,000행" text="1,000행을 넘는 Excel 시트나 DB 테이블은 필터 또는 배치로 나누어 변환합니다. 일부 행을 조용히 누락하지 않고 생성 전에 중단합니다." />
+          <ChecklistItem title="모순 데이터 우선 정리" text="같은 제조사·모델·증상 조합이 서로 다른 ID를 가리키면 어떤 ID가 맞는지 결정할 수 없으므로 생성이 차단됩니다." />
+          <ChecklistItem title="힌트가 부족할 때만 LLM 사용" text="제목과 본문만 있어도 기본 검색은 가능합니다. 대표 질문이나 동의어가 부족한 대량 Excel은 ‘힌트가 부족한 FAQ만’을 선택하면 답변 본문을 바꾸지 않고 검색 힌트만 보완합니다." />
+          <ChecklistItem title="정확 조건 조회는 별도 사용" text="코드, 날짜, 수치 조건을 반드시 정확히 비교해야 하면 구조화 데이터 안전 조회 API를 사용하고, 자연어 질문은 FAQ 검색으로 보완합니다." />
+        </div>
+        <Button className="mt-4" onClick={() => goToTab('answer-sources')}>
+          <MousePointerClickIcon className="h-4 w-4" />
+          FAQ 생성에서 예시 적용
+        </Button>
       </section>
     </div>
   )
@@ -724,7 +834,7 @@ function MatchingTopic({
 }) {
   return (
     <div className="grid gap-5">
-      <section className="grid gap-3 xl:grid-cols-3">
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <MatchingModeCard
           icon={<BadgeCheckIcon className="h-4 w-4" />}
           title="빠른 키워드"
@@ -740,6 +850,13 @@ function MatchingTopic({
           bestFor="유심 변경/SIM 교체처럼 같은 뜻을 여러 표현으로 묻는 질문"
         />
         <MatchingModeCard
+          icon={<NetworkIcon className="h-4 w-4" />}
+          title="키워드+벡터+그래프"
+          badge="선택 기능"
+          text="키워드와 벡터 후보를 유지하면서, 질문과 가까운 제품·증상·용어 노드가 어떤 FAQ로 이어지는지 경로 점수를 추가합니다."
+          bestFor="제품명과 증상, 동의어와 처리 절차처럼 여러 관계를 함께 따라가야 답변을 찾을 수 있는 질문"
+        />
+        <MatchingModeCard
           icon={<SparklesIcon className="h-4 w-4" />}
           title="LLM ID 선택"
           badge="후보 최종 선택"
@@ -750,8 +867,64 @@ function MatchingTopic({
 
       <section className="rounded-md border p-4">
         <SectionTitle
+          icon={<NetworkIcon className="h-4 w-4" />}
+          title="FAQ 그래프를 적용하는 순서"
+          description="기존 조회 방식을 바꾸지 않고 품질 관리의 FAQ 그래프 화면에서 선택적으로 준비합니다."
+        />
+        <div className="mt-4 grid gap-3 md:grid-cols-4">
+          <ChecklistItem title="1. 스키마 확인" text="FAQ 전용 스키마의 FAQAnswer, 제품, 시스템, 증상, 오류코드, 절차, 용어 유형과 허용 관계를 확인합니다. KMS 문서 스키마와는 별도로 관리됩니다." />
+          <ChecklistItem title="2. 선택 FAQ 미리보기" text="FAQ 하나를 선택해 만들어질 노드와 관계를 확인합니다. 선택값은 미리보기에만 적용되며 저장하지 않습니다." />
+          <ChecklistItem title="3. AI로 그래프 구축" text="기본적으로 AI 구축을 사용해 규칙 그래프에 제품·증상·절차 엔티티와 관계를 추가합니다. 끄면 질문, 찾기 힌트와 태그만 사용하는 규칙 기반 그래프가 생성됩니다." />
+          <ChecklistItem title="4. 워크스페이스 전체 구축" text="전체 구축은 선택한 FAQ와 무관하게 워크스페이스의 미구축·변경·실패 FAQ를 처리합니다. 완료 후 조회 방식별 결과를 비교합니다." />
+        </div>
+        <div className="mt-4 rounded-md border border-emerald-200 bg-emerald-50/50 p-3 text-sm leading-6 dark:border-emerald-900 dark:bg-emerald-950/10">
+          <strong>예시:</strong> “팀즈 연결이 안 돼”가 들어오면 <code>팀즈</code> 용어가
+          <code className="mx-1">Microsoft Teams</code> 표준 용어와 연결되고, Teams 제품과 회의 연결 증상을 거쳐
+          관련 FAQ로 이어진 경로가 후보 근거에 표시됩니다. 그래프가 준비되지 않았으면 기존 하이브리드 검색 결과를 그대로 사용합니다.
+        </div>
+        <div className="mt-3 rounded-md border p-3">
+          <div className="font-semibold">AI 그래프 구축 방식 선택</div>
+          <div className="mt-3 grid gap-3 md:grid-cols-3">
+            <ChecklistItem title="빠른 구조화 추출 (운영 권장)" text="Thinking 없이 한 번 추출합니다. 현재 비교 테스트에서 가장 높은 통과 결과와 합리적인 구축 시간을 보였습니다." />
+            <ChecklistItem title="적응형 분석 (실험)" text="먼저 빠르게 추출한 뒤 필요한 관계가 부족한 FAQ만 Thinking으로 다시 분석합니다. 관계는 풍부해지지만 검색 품질 개선은 별도 검증이 필요합니다." />
+            <ChecklistItem title="모든 FAQ 정밀 분석" text="모든 FAQ에 Thinking을 사용합니다. 느리므로 소량의 복잡한 FAQ를 재구축할 때 사용합니다." />
+          </div>
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">
+            LLM 설정에서 <strong className="text-foreground">FAQ 그래프 구성</strong>은 대량 처리용으로
+            Thinking을 끄고, <strong className="text-foreground">도메인 스키마 설계</strong>는 더 넉넉한
+            응답 예산과 Thinking을 사용하도록 별도로 지정할 수 있습니다. 현재 운영 권장은 FAQ 그래프 구성은
+            빠른 구축, 스키마 설계는 Thinking 사용입니다. 적응형 재분석은 FAQ 그래프 설정의 응답 예산을
+            사용하며 서버를 재시작하지 않아도 다음 구축부터 적용됩니다.
+          </p>
+        </div>
+        <div className="mt-3 border-t pt-4">
+          <div className="font-semibold">정확도를 우선해 답변을 보류하는 방법</div>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+            FAQ 그래프 설정에서 <strong className="text-foreground">확실한 경우만 답변</strong>을 켜면
+            최소 점수와 키워드·벡터·그래프 근거 수를 확인합니다. 기준을 통과한 후보가 여러 개이면
+            점수 차이가 작아도 가장 높은 후보 하나를 선택하고 접전 여부는 진단 정보에 남깁니다.
+          </p>
+          <div className="mt-3 grid gap-3 md:grid-cols-3">
+            <ChecklistItem title="근거 부족" text="질문 길이와 관계없이 검색 근거가 부족하면 답변하지 않습니다. 짧은 질문도 한 후보가 충분히 우세하면 답변합니다." />
+            <ChecklistItem title="가장 가까운 답변" text="최소 점수와 근거 기준을 통과하면 후보 간 점수 차이가 작아도 1위 FAQ를 선택합니다." />
+            <ChecklistItem title="AI 최종 선택" text="그래프 후보만 전달하며, AI가 범위 밖 또는 모호함을 명시하거나 신뢰도가 낮거나 호출을 완료하지 못한 경우에는 답변하지 않습니다." />
+          </div>
+          <div className="mt-3 rounded-md border border-amber-200 bg-amber-50/60 p-3 text-sm leading-6 dark:border-amber-900 dark:bg-amber-950/10">
+            <strong>예시:</strong> “PUK 잠김”, “유심 배송”처럼 의미가 고유한 짧은 질문은 답변합니다.
+            “유심 안돼”처럼 여러 FAQ가 비슷하면 최소 기준을 통과한 후보 중 점수가 가장 높은 답변을
+            우선 선택합니다. 점수가 기준보다 낮거나 검색 근거가 부족할 때만 추가 정보를 요청합니다.
+          </div>
+        </div>
+        <Button className="mt-4" onClick={() => goToTab('answer-test')}>
+          <NetworkIcon className="h-4 w-4" />
+          품질 관리 열기
+        </Button>
+      </section>
+
+      <section className="rounded-md border p-4">
+        <SectionTitle
           icon={<SearchCheckIcon className="h-4 w-4" />}
-          title="벡터/하이브리드 답변 항목 설정 상세 가이드"
+          title="벡터/하이브리드 검색 상세 가이드"
           description="아래 캡처는 실제 테스트 워크스페이스에서 확인한 화면입니다. 번호를 따라 어떤 값을 봐야 하는지 확인하세요."
           trailing={<Badge variant="outline">실제 화면 캡처</Badge>}
         />
@@ -772,7 +945,9 @@ function MatchingTopic({
           <TroubleshootingItem title="엉뚱한 답변이 선택됩니다" text="먼저 제외어를 추가하고, 대표 질문을 더 구체적으로 분리합니다. 그 다음 동의어를 보강합니다." />
           <TroubleshootingItem title="표현이 다르면 답변을 못 찾습니다" text="키워드+벡터 모드로 테스트하고, 벡터 점수가 낮으면 대표 질문과 요약 문장을 보강한 뒤 벡터를 갱신합니다." />
           <TroubleshootingItem title="LLM ID 선택이 느립니다" text="모든 요청에 쓰지 말고 후보가 애매한 질문에만 사용합니다. top-k와 후보 수를 줄이면 지연을 낮출 수 있습니다." />
+          <TroubleshootingItem title="AI 장애 때도 답변이 보류됩니다" text="정확도 우선 정책의 LLM ID 선택은 AI 호출 실패나 잘못된 응답을 기존 후보로 대체하지 않습니다. 오답 위험을 줄이기 위한 정상적인 안전 동작입니다." />
           <TroubleshootingItem title="후보가 전혀 없습니다" text="답변이 게시 상태인지, 유효기간이 맞는지, 최소 점수가 너무 높지 않은지 확인합니다." />
+          <TroubleshootingItem title="후보는 있지만 답변하지 않습니다" text="정확도 우선 정책에서 최소 점수나 필수 근거 수가 부족하거나, AI가 범위 밖·모호함을 명시한 정상 보류일 수 있습니다. 후보 점수 차이만으로는 보류하지 않습니다." />
         </div>
       </section>
     </div>
@@ -785,8 +960,8 @@ function TestingTopic({ goToTab }: { goToTab: (tab: AppTab) => void }) {
       <section className="rounded-md border p-4">
         <SectionTitle
           icon={<GaugeIcon className="h-4 w-4" />}
-          title="테스트 콘솔에서 보는 순서"
-          description="질문을 넣은 뒤 선택 답변만 보지 말고 후보 점수와 선택 방식을 함께 확인합니다."
+          title="품질 테스트에서 보는 순서"
+          description="질문을 넣은 뒤 선택된 FAQ만 보지 말고 후보 점수와 선택 방식을 함께 확인합니다."
         />
         <div className="mt-4 grid gap-3 md:grid-cols-5">
           {[
@@ -807,7 +982,7 @@ function TestingTopic({ goToTab }: { goToTab: (tab: AppTab) => void }) {
         </div>
         <Button className="mt-4" onClick={() => goToTab('answer-test')}>
           <MousePointerClickIcon className="h-4 w-4" />
-          테스트 콘솔 열기
+          품질 관리 열기
         </Button>
       </section>
 
@@ -866,9 +1041,9 @@ function DetailedAnalyticsTopic({ goToTab }: { goToTab: (tab: AppTab) => void })
             <span className="font-semibold">예시: </span>
             최근 7일을 선택하고 찾은 답변 없음 카드를 누른 뒤 조회하면, 답변을 찾지 못한 질문만 모아 새 답변 또는 찾기 힌트 보강 대상으로 검토할 수 있습니다.
           </div>
-          <Button className="mt-4" variant="outline" size="sm" onClick={() => goToTab('answer-detailed-analytics')}>
+          <Button className="mt-4" variant="outline" size="sm" onClick={() => goToTab('answer-test')}>
             <MousePointerClickIcon className="h-4 w-4" />
-            상세 분석 열기
+            품질 관리 열기
           </Button>
         </div>
       </section>
@@ -944,10 +1119,10 @@ function OperationsTopic({ goToTab }: { goToTab: (tab: AppTab) => void }) {
           description="운영 중에는 답변 품질과 사용 현황을 함께 봐야 합니다."
         />
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <ChecklistItem title="게시 전 검증" text="대표 질문 5개 이상을 테스트 콘솔에서 확인하고, 표시 방식과 유효기간을 점검합니다." />
-          <ChecklistItem title="답변을 찾지 못한 질문 관리" text="분석 화면에서 답변을 찾지 못한 질문을 보고 새 답변 또는 찾기 힌트를 추가합니다." />
-          <ChecklistItem title="구조화 데이터 활용" text="표 형태의 원자료는 구조 분석 결과를 확인하고 안전 조회로 조건 검색을 검증합니다." />
-          <ChecklistItem title="변경 이력 관리" text="답변을 수정한 뒤 문제가 생기면 변경 이력에서 이전 버전으로 복구합니다." />
+          <ChecklistItem title="게시 전 검증" text="대표 질문 5개 이상을 품질 관리에서 확인하고, 표시 방식과 유효기간을 점검합니다." />
+          <ChecklistItem title="FAQ를 찾지 못한 질문 관리" text="이용 현황에서 FAQ를 찾지 못한 질문을 보고 새 FAQ 또는 찾기 힌트를 추가합니다." />
+          <ChecklistItem title="표 데이터 활용" text="FAQ 생성에서 표 형태의 원자료를 연결하고 안전 조회로 조건 검색을 검증합니다." />
+          <ChecklistItem title="변경 이력 관리" text="FAQ를 수정한 뒤 문제가 생기면 변경 이력에서 이전 버전으로 복구합니다." />
         </div>
       </section>
     </div>
@@ -1302,7 +1477,7 @@ function ChecklistItem({ title, text }: { title: string; text: string }) {
 
 function ScreenshotMock({ step }: { step: number }) {
   const labels = [
-    ['입력 선택', '미리보기', '후보 검토'],
+    ['입력 선택', '미리보기', 'FAQ 검토'],
     ['답변 상세', '정책 설정', '저장'],
     ['질문 추가', '제외어 추가', '빠른 테스트'],
     ['필드 확인', 'SQL 미리보기', '실행'],
@@ -1333,27 +1508,6 @@ function ScreenshotMock({ step }: { step: number }) {
           </div>
         ))}
       </div>
-    </div>
-  )
-}
-
-function MiniScreen({ title }: { title: string }) {
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <div className="h-3 w-24 rounded bg-muted" />
-        <div className="h-6 w-16 rounded border bg-muted/40" />
-      </div>
-      <div className="h-16 rounded-md border bg-muted/30 p-2">
-        <div className="mb-2 h-2 w-1/2 rounded bg-muted" />
-        <div className="h-2 w-4/5 rounded bg-muted" />
-      </div>
-      <div className="grid grid-cols-3 gap-2">
-        <div className="h-8 rounded border bg-background" />
-        <div className="h-8 rounded border bg-background" />
-        <div className="h-8 rounded border bg-background" />
-      </div>
-      <div className="sr-only">{title}</div>
     </div>
   )
 }

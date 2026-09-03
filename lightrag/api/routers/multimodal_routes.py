@@ -601,8 +601,33 @@ async def _process_multimodal_background(
             )
 
             processors = {}
-            caption_func = _vlm_model_func or _llm_model_func
-            llm_func = _llm_model_func or caption_func
+
+            async def workspace_multimodal_func(
+                prompt: str,
+                system_prompt: str | None = None,
+                **kwargs,
+            ):
+                try:
+                    return await rag.llm_model_func(
+                        prompt,
+                        system_prompt=system_prompt,
+                        _llm_purpose="multimodal",
+                        **kwargs,
+                    )
+                except Exception:
+                    if kwargs.get("image_data") is not None and _vlm_model_func:
+                        logger.warning(
+                            "Workspace multimodal profile failed; using environment VLM"
+                        )
+                        return await _vlm_model_func(
+                            prompt,
+                            system_prompt=system_prompt,
+                            **kwargs,
+                        )
+                    raise
+
+            caption_func = workspace_multimodal_func
+            llm_func = workspace_multimodal_func
 
             if process_images and config.enable_image_processing:
                 image_processor = ImageModalProcessor(
@@ -619,7 +644,7 @@ async def _process_multimodal_background(
                     modal_caption_func=llm_func,
                     context_extractor=context_extractor,
                     response_language=config.vlm_response_language,
-                    vlm_caption_func=_vlm_model_func,
+                    vlm_caption_func=workspace_multimodal_func,
                 )
                 table_processor.pdf_path = str(tmp_path)
                 processors["table"] = table_processor

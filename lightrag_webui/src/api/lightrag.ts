@@ -993,6 +993,171 @@ export const resetAllPrompts = async (): Promise<PromptResetResponse> => {
   return response.data
 }
 
+// LLM Profile Types
+export type LLMProfile = {
+  profile_id: string
+  name: string
+  description: string | null
+  provider: 'openai_compatible'
+  base_url: string
+  model: string
+  api_key_configured: boolean
+  timeout_seconds: number
+  context_window: number
+  max_tokens: number
+  temperature: number
+  top_p: number
+  presence_penalty: number
+  thinking_enabled: boolean
+  supports_thinking: boolean
+  supports_tools: boolean
+  supports_structured_output: boolean
+  supports_vision: boolean
+  verify_tls: boolean
+  extra_options: Record<string, any>
+  is_active: boolean
+  create_time?: string | null
+  update_time?: string | null
+}
+
+export type LLMProfileCreateRequest = Omit<LLMProfile, 'profile_id' | 'api_key_configured' | 'create_time' | 'update_time'> & {
+  profile_id?: string
+  api_key?: string | null
+}
+
+export type LLMProfileUpdateRequest = Partial<Omit<LLMProfileCreateRequest, 'profile_id'>> & {
+  clear_api_key?: boolean
+}
+
+export type LLMProfileProbeResult = {
+  status: 'ok' | 'failed' | 'not_supported' | 'skipped'
+  status_code?: number | null
+  detail?: string | null
+}
+
+export type LLMProfileTestRequest = {
+  prompt: string
+  thinking_enabled?: boolean
+  image_url?: string | null
+  max_tokens?: number
+}
+
+export type LLMProfileTestResponse = {
+  success: boolean
+  profile_id: string
+  model: string
+  endpoint: string
+  latency_ms: number
+  health: LLMProfileProbeResult
+  models: LLMProfileProbeResult
+  model_found?: boolean | null
+  content?: string | null
+  reasoning_detected: boolean
+  reasoning_length: number
+  vision_requested: boolean
+  thinking_enabled: boolean
+  usage?: Record<string, any> | null
+  error?: string | null
+}
+
+export type WorkspaceLLMPurpose =
+  | 'knowledge_ingestion'
+  | 'knowledge_structure'
+  | 'schema_design'
+  | 'search_answer'
+  | 'faq_selection'
+  | 'multimodal'
+
+export type WorkspaceLLMPolicy = {
+  workspace_id: string
+  purpose: WorkspaceLLMPurpose
+  profile_id: string
+  profile_name: string
+  profile_model: string
+  thinking_mode: 'inherit' | 'enabled' | 'disabled'
+  timeout_seconds?: number | null
+  max_tokens?: number | null
+  temperature?: number | null
+  top_p?: number | null
+  presence_penalty?: number | null
+  response_format?: 'json_object' | null
+  fallback_profile_id?: string | null
+  fallback_profile_name?: string | null
+  extra_options: Record<string, any>
+  update_time?: string | null
+}
+
+export type WorkspaceLLMPolicyUpsert = Pick<
+  WorkspaceLLMPolicy,
+  | 'purpose'
+  | 'profile_id'
+  | 'thinking_mode'
+  | 'timeout_seconds'
+  | 'max_tokens'
+  | 'temperature'
+  | 'top_p'
+  | 'presence_penalty'
+  | 'response_format'
+  | 'fallback_profile_id'
+  | 'extra_options'
+>
+
+export const getLLMProfiles = async (): Promise<LLMProfile[]> => {
+  const response = await axiosInstance.get('/llm-profiles')
+  return response.data
+}
+
+export const createLLMProfile = async (request: LLMProfileCreateRequest): Promise<LLMProfile> => {
+  const response = await axiosInstance.post('/llm-profiles', request)
+  return response.data
+}
+
+export const updateLLMProfile = async (
+  profileId: string,
+  request: LLMProfileUpdateRequest
+): Promise<LLMProfile> => {
+  const response = await axiosInstance.put(`/llm-profiles/${encodeURIComponent(profileId)}`, request)
+  return response.data
+}
+
+export const deleteLLMProfile = async (profileId: string): Promise<void> => {
+  await axiosInstance.delete(`/llm-profiles/${encodeURIComponent(profileId)}`)
+}
+
+export const testLLMProfile = async (
+  profileId: string,
+  request: LLMProfileTestRequest
+): Promise<LLMProfileTestResponse> => {
+  const response = await axiosInstance.post(`/llm-profiles/${encodeURIComponent(profileId)}/test`, request)
+  return response.data
+}
+
+export const getWorkspaceLLMPolicies = async (
+  workspaceId: string
+): Promise<WorkspaceLLMPolicy[]> => {
+  const response = await axiosInstance.get(
+    `/llm-profiles/workspaces/${encodeURIComponent(workspaceId)}/policies`
+  )
+  return response.data
+}
+
+export const updateWorkspaceLLMPolicies = async (
+  workspaceId: string,
+  policies: WorkspaceLLMPolicyUpsert[]
+): Promise<WorkspaceLLMPolicy[]> => {
+  const response = await axiosInstance.put(
+    `/llm-profiles/workspaces/${encodeURIComponent(workspaceId)}/policies`,
+    { policies }
+  )
+  return response.data
+}
+
+export const resetWorkspaceLLMPolicies = async (workspaceId: string): Promise<void> => {
+  await axiosInstance.delete(
+    `/llm-profiles/workspaces/${encodeURIComponent(workspaceId)}/policies`
+  )
+}
+
 // User Prompt Template Types
 export type UserPromptTemplate = {
   template_id: string
@@ -1892,6 +2057,31 @@ export type AnswerStatus = 'draft' | 'published' | 'archived' | 'expired'
 export type AnswerDisplayPolicy = 'summary' | 'full' | 'both'
 export type AnswerContentFormat = 'plain' | 'markdown' | 'html'
 export type AnswerGuidanceType = 'keyword' | 'question' | 'synonym' | 'negative_keyword' | 'note'
+export type AnswerAssetType = 'image' | 'video' | 'audio' | 'table' | 'file'
+export type AnswerAssetStorageType = 'external' | 's3' | 'local' | 'inline'
+
+export type AnswerAsset = {
+  asset_id: string
+  workspace: string
+  answer_id: string
+  answer_version: number
+  asset_type: AnswerAssetType
+  storage_type: AnswerAssetStorageType
+  storage_uri?: string | null
+  content_url?: string | null
+  file_name?: string | null
+  mime_type?: string | null
+  file_size: number
+  caption?: string | null
+  alt_text?: string | null
+  search_text?: string | null
+  content_text?: string | null
+  display_order: number
+  is_active: boolean
+  metadata: Record<string, any>
+  create_time?: string | null
+  update_time?: string | null
+}
 
 export type AnswerItem = {
   answer_id: string
@@ -1908,6 +2098,7 @@ export type AnswerItem = {
   priority: number
   tags: string[]
   metadata: Record<string, any>
+  assets: AnswerAsset[]
   publish_time?: string | null
   create_time?: string | null
   update_time?: string | null
@@ -2084,6 +2275,8 @@ export type AnswerExcelPreviewResponse = {
   header_row: number
   data_start_row: number
   row_count: number
+  row_limit: number
+  truncated: boolean
   columns: string[]
   raw_content: string
   source_uri: string
@@ -2104,7 +2297,32 @@ export type AnswerStructuredMaterializeRequest = {
   mapping?: Record<string, string>
   guidance_columns?: string[]
   materialization_mode?: 'table_as_dataset' | 'row_per_answer'
+  conversion_purpose?: 'faq' | 'id_lookup'
+  source_truncated?: boolean
+  llm_guidance_enrichment?: {
+    enabled: boolean
+    scope?: 'missing_or_weak' | 'coverage' | 'all'
+    batch_size?: number
+    max_suggestions?: number
+  }
   metadata?: Record<string, any>
+}
+
+export type AnswerStructuredIdLookupValidation = {
+  enabled: boolean
+  ready: boolean
+  id_column?: string | null
+  searchable_columns: string[]
+  row_count: number
+  valid_id_count: number
+  blank_id_rows: number[]
+  duplicate_ids: string[]
+  ambiguous_detail_groups: Array<{
+    values: Record<string, string>
+    ids: string[]
+    rows: number[]
+  }>
+  warnings: string[]
 }
 
 export type AnswerStructuredMaterializeResponse = {
@@ -2112,10 +2330,19 @@ export type AnswerStructuredMaterializeResponse = {
   dataset: AnswerStructuredDataset
   answers: AnswerItem[]
   datasets: AnswerStructuredDataset[]
+  answer_count: number
+  answers_truncated: boolean
   profile: AnswerStructuredProfileResponse
   guidance: AnswerGuidance[]
+  guidance_count: number
+  guidance_truncated: boolean
   snapshot?: AnswerSourceSnapshot | null
   source_link?: AnswerSourceLink | null
+  validation: AnswerStructuredIdLookupValidation
+  guidance_enrichment_task_id?: string | null
+  guidance_enrichment_stream_url?: string | null
+  vector_rebuild_task_id?: string | null
+  vector_rebuild_stream_url?: string | null
 }
 
 export type AnswerStructuredLookupLog = {
@@ -2171,6 +2398,8 @@ export type AnswerSourceConnectorSample = {
   rows: Record<string, any>[]
   columns: string[]
   row_count: number
+  row_limit: number
+  truncated: boolean
   warnings: string[]
 }
 
@@ -2181,6 +2410,7 @@ export type AnswerSourceConnectorMappingPreview = {
   mapping: Record<string, string>
   guidance_columns: string[]
   materialization_modes: Array<'table_as_dataset' | 'row_per_answer'>
+  validation: AnswerStructuredIdLookupValidation
 }
 
 export type AnswerSourceConnectorMaterializeRequest = {
@@ -2188,6 +2418,7 @@ export type AnswerSourceConnectorMaterializeRequest = {
   mapping?: Record<string, string>
   guidance_columns?: string[]
   materialization_mode?: 'table_as_dataset' | 'row_per_answer'
+  conversion_purpose?: 'faq' | 'id_lookup'
   status?: AnswerStatus
   tags?: string[]
   metadata?: Record<string, any>
@@ -2230,9 +2461,10 @@ export type AnswerResolveRequest = {
   min_score?: number
   include_drafts?: boolean
   strategy?: 'fast' | 'balanced'
-  retrieval_mode?: 'keyword' | 'hybrid' | 'llm_rerank'
+  retrieval_mode?: 'keyword' | 'hybrid' | 'graph_hybrid' | 'llm_rerank'
   vector_top_k?: number
   llm_candidate_count?: number
+  selection_policy?: 'workspace' | 'coverage' | 'precision'
 }
 
 export type AnswerResolveCandidate = {
@@ -2242,16 +2474,161 @@ export type AnswerResolveCandidate = {
   reason: string
   score_details?: Record<string, number>
   selected_by?: string
+  graph_evidence?: AnswerGraphEvidence[]
+}
+
+export type AnswerGraphEvidence = {
+  answer_id: string
+  score: number
+  start_node: string
+  path: string[]
+  relation_types: string[]
+}
+
+export type AnswerGraphConfig = {
+  workspace: string
+  enabled: boolean
+  auto_sync: boolean
+  graph_weight: number
+  min_similarity: number
+  max_hops: number
+  precision_mode: boolean
+  precision_min_score: number
+  min_score_margin: number
+  min_category_margin: number
+  min_evidence_sources: number
+  llm_min_confidence: number
+  entity_types: string[]
+  relation_types: string[]
+  extraction_prompt: string
+  ai_extraction_strategy: 'fast' | 'adaptive' | 'deep'
+  ai_retry_max_tokens: number
+  ai_min_relations: number
+  ai_min_relation_types: number
+  schema_version: number
+  create_time?: string | null
+  update_time?: string | null
+}
+
+export type AnswerGraphNode = {
+  node_id: string
+  entity_type: string
+  label: string
+  description: string
+  source: string
+}
+
+export type AnswerGraphRelation = {
+  source_id: string
+  target_id: string
+  relation_type: string
+  description: string
+  weight: number
+  source: string
+}
+
+export type AnswerGraphProjection = {
+  workspace: string
+  answer_id: string
+  answer_version: number
+  schema_version: number
+  status: string
+  content_hash: string
+  nodes: AnswerGraphNode[]
+  relations: AnswerGraphRelation[]
+  error?: string | null
+  built_at?: string | null
+  update_time?: string | null
+}
+
+export type AnswerGraphStatus = {
+  workspace: string
+  enabled: boolean
+  total_answers: number
+  ready: number
+  stale: number
+  pending: number
+  failed: number
+  missing: number
+  last_built_at?: string | null
+}
+
+export type AnswerAliasGroup = {
+  alias_id: string
+  workspace: string
+  canonical_term: string
+  aliases: string[]
+  enabled: boolean
+  source: 'builtin' | 'workspace' | string
+  metadata: Record<string, any>
+  create_time?: string | null
+  update_time?: string | null
+}
+
+export type AnswerTermCandidateType = 'synonym' | 'abbreviation' | 'neologism'
+export type AnswerTermCandidateStatus = 'suggested' | 'approved' | 'rejected'
+
+export type AnswerTermCandidate = {
+  candidate_id: string
+  workspace: string
+  canonical_term: string
+  aliases: string[]
+  term_type: AnswerTermCandidateType
+  status: AnswerTermCandidateStatus
+  confidence: number
+  rationale?: string | null
+  evidence: Array<{
+    ref: string
+    kind: 'faq' | 'unmatched_query' | string
+    label?: string
+    answer_id?: string
+    create_time?: string | null
+  }>
+  source: string
+  metadata: Record<string, any>
+  create_time?: string | null
+  update_time?: string | null
+}
+
+export type AnswerTermDiscoveryRequest = {
+  include_drafts?: boolean
+  include_no_match_queries?: boolean
+  answer_limit?: number
+  event_limit?: number
+  batch_size?: number
+}
+
+export type AnswerTermDiscoveryResponse = {
+  task_id: string
+  stream_url: string
+  message: string
+}
+
+export type AnswerTermCandidateActionResponse = {
+  candidate: AnswerTermCandidate
+  alias_group?: AnswerAliasGroup | null
+}
+
+export type AnswerAliasExpansion = {
+  canonical_term: string
+  matched_term: string
+  expanded_terms: string[]
+  source: string
 }
 
 export type AnswerResolveResponse = {
   selected_answer?: AnswerItem | null
+  matched_id?: string | null
   confidence: number
   candidates: AnswerResolveCandidate[]
   trace_id: string
   rationale: string
-  retrieval_mode?: 'keyword' | 'hybrid' | 'llm_rerank'
+  retrieval_mode?: 'keyword' | 'hybrid' | 'graph_hybrid' | 'llm_rerank'
   selected_by?: string
+  alias_expansions?: AnswerAliasExpansion[]
+  selection_policy?: 'coverage' | 'precision'
+  abstention_reason?: string | null
+  clarification_question?: string | null
 }
 
 export type AnswerSearchRequest = AnswerResolveRequest & {
@@ -2262,6 +2639,7 @@ export type AnswerSearchRequest = AnswerResolveRequest & {
 export type AnswerSearchResponse = {
   matched: boolean
   answer_id?: string | null
+  matched_id?: string | null
   title?: string | null
   response?: string | null
   summary?: string | null
@@ -2276,11 +2654,16 @@ export type AnswerSearchResponse = {
   tags: string[]
   source_type?: string | null
   source_uri?: string | null
+  assets: AnswerAsset[]
   candidates: AnswerResolveCandidate[]
   trace_id: string
   rationale: string
-  retrieval_mode?: 'keyword' | 'hybrid' | 'llm_rerank'
+  retrieval_mode?: 'keyword' | 'hybrid' | 'graph_hybrid' | 'llm_rerank'
   selected_by?: string
+  alias_expansions?: AnswerAliasExpansion[]
+  selection_policy?: 'coverage' | 'precision'
+  abstention_reason?: string | null
+  clarification_question?: string | null
 }
 
 export type AnswerGuidanceSuggestionRequest = {
@@ -2395,6 +2778,107 @@ export const updateAnswer = async (answerId: string, request: AnswerUpdateReques
   return response.data
 }
 
+export const listAnswerAssets = async (
+  answerId: string,
+  includeInactive = false
+): Promise<AnswerAsset[]> => {
+  const response = await axiosInstance.get(
+    `/api/answers/${encodeURIComponent(answerId)}/assets`,
+    { params: { include_inactive: includeInactive } }
+  )
+  return response.data
+}
+
+export const createAnswerAsset = async (
+  answerId: string,
+  request: {
+    asset_type: AnswerAssetType
+    external_url?: string | null
+    file_name?: string | null
+    mime_type?: string | null
+    caption?: string | null
+    alt_text?: string | null
+    search_text?: string | null
+    content_text?: string | null
+    display_order?: number
+    metadata?: Record<string, any>
+  }
+): Promise<AnswerAsset> => {
+  const response = await axiosInstance.post(
+    `/api/answers/${encodeURIComponent(answerId)}/assets`,
+    request
+  )
+  return response.data
+}
+
+export const uploadAnswerAsset = async (
+  answerId: string,
+  file: File,
+  options?: {
+    asset_type?: AnswerAssetType
+    caption?: string
+    alt_text?: string
+    search_text?: string
+    display_order?: number
+    metadata?: Record<string, any>
+  }
+): Promise<AnswerAsset> => {
+  const form = new FormData()
+  form.append('file', file)
+  if (options?.asset_type) form.append('asset_type', options.asset_type)
+  if (options?.caption) form.append('caption', options.caption)
+  if (options?.alt_text) form.append('alt_text', options.alt_text)
+  if (options?.search_text) form.append('search_text', options.search_text)
+  form.append('display_order', String(options?.display_order ?? 0))
+  form.append('metadata_json', JSON.stringify(options?.metadata ?? {}))
+  const response = await axiosInstance.post(
+    `/api/answers/${encodeURIComponent(answerId)}/assets/upload`,
+    form
+  )
+  return response.data
+}
+
+export const updateAnswerAsset = async (
+  answerId: string,
+  assetId: string,
+  request: {
+    caption?: string | null
+    alt_text?: string | null
+    search_text?: string | null
+    content_text?: string | null
+    display_order?: number
+    metadata?: Record<string, any>
+  }
+): Promise<AnswerAsset> => {
+  const response = await axiosInstance.patch(
+    `/api/answers/${encodeURIComponent(answerId)}/assets/${encodeURIComponent(assetId)}`,
+    request
+  )
+  return response.data
+}
+
+export const deleteAnswerAsset = async (
+  answerId: string,
+  assetId: string
+): Promise<{ message: string; answer_id: string; asset_id: string }> => {
+  const response = await axiosInstance.delete(
+    `/api/answers/${encodeURIComponent(answerId)}/assets/${encodeURIComponent(assetId)}`
+  )
+  return response.data
+}
+
+export const getAnswerAssetContent = async (asset: AnswerAsset): Promise<Blob> => {
+  if (!asset.content_url) {
+    return new Blob([asset.content_text || ''], {
+      type: asset.mime_type || 'text/plain',
+    })
+  }
+  const response = await axiosInstance.get(asset.content_url, {
+    responseType: 'blob',
+  })
+  return response.data
+}
+
 export const publishAnswer = async (answerId: string): Promise<AnswerItem> => {
   const response = await axiosInstance.post(`/api/answers/${encodeURIComponent(answerId)}/publish`)
   return response.data
@@ -2431,10 +2915,69 @@ export const suggestAnswerGuidance = async (
   return response.data
 }
 
+export const listAnswerAliases = async (search?: string): Promise<AnswerAliasGroup[]> => {
+  const response = await axiosInstance.get('/api/answers/aliases', {
+    params: search?.trim() ? { search: search.trim() } : undefined,
+  })
+  return response.data
+}
+
+export const createAnswerAlias = async (request: {
+  canonical_term: string
+  aliases: string[]
+  enabled?: boolean
+  metadata?: Record<string, any>
+}): Promise<AnswerAliasGroup> => {
+  const response = await axiosInstance.post('/api/answers/aliases', request)
+  return response.data
+}
+
+export const deleteAnswerAlias = async (
+  aliasId: string
+): Promise<{ message: string; alias_id: string }> => {
+  const response = await axiosInstance.delete(`/api/answers/aliases/${encodeURIComponent(aliasId)}`)
+  return response.data
+}
+
+export const listAnswerTermCandidates = async (params?: {
+  status?: AnswerTermCandidateStatus
+  search?: string
+  limit?: number
+}): Promise<AnswerTermCandidate[]> => {
+  const response = await axiosInstance.get('/api/answers/aliases/candidates', { params })
+  return response.data
+}
+
+export const analyzeAnswerTerms = async (
+  request: AnswerTermDiscoveryRequest = {}
+): Promise<AnswerTermDiscoveryResponse> => {
+  const response = await axiosInstance.post('/api/answers/aliases/candidates/analyze', request)
+  return response.data
+}
+
+export const approveAnswerTermCandidate = async (
+  candidateId: string
+): Promise<AnswerTermCandidateActionResponse> => {
+  const response = await axiosInstance.post(
+    `/api/answers/aliases/candidates/${encodeURIComponent(candidateId)}/approve`
+  )
+  return response.data
+}
+
+export const rejectAnswerTermCandidate = async (
+  candidateId: string
+): Promise<AnswerTermCandidateActionResponse> => {
+  const response = await axiosInstance.post(
+    `/api/answers/aliases/candidates/${encodeURIComponent(candidateId)}/reject`
+  )
+  return response.data
+}
+
 export const rebuildAnswerVectors = async (params?: {
   status?: string
   limit?: number
-}): Promise<{ message: string; rebuilt: number; failed: string[] }> => {
+  only_missing?: boolean
+}): Promise<{ message: string; processed: number; rebuilt: number; failed: string[]; remaining: number }> => {
   const response = await axiosInstance.post('/api/answers/vectors/rebuild', null, { params })
   return response.data
 }
@@ -2443,6 +2986,58 @@ export const rebuildAnswerVector = async (
   answerId: string
 ): Promise<{ message: string; answer_id: string; dimensions: number }> => {
   const response = await axiosInstance.post(`/api/answers/${encodeURIComponent(answerId)}/vectors/rebuild`)
+  return response.data
+}
+
+export const getAnswerGraphConfig = async (): Promise<AnswerGraphConfig> => {
+  const response = await axiosInstance.get('/api/answers/graph/config')
+  return response.data
+}
+
+export const updateAnswerGraphConfig = async (
+  request: Partial<Omit<AnswerGraphConfig, 'workspace' | 'schema_version' | 'create_time' | 'update_time'>>
+): Promise<AnswerGraphConfig> => {
+  const response = await axiosInstance.put('/api/answers/graph/config', request)
+  return response.data
+}
+
+export const getAnswerGraphStatus = async (): Promise<AnswerGraphStatus> => {
+  const response = await axiosInstance.get('/api/answers/graph/status')
+  return response.data
+}
+
+export const previewAnswerGraph = async (
+  answerId: string,
+  useLlm = true
+): Promise<AnswerGraphProjection> => {
+  const response = await axiosInstance.post('/api/answers/graph/preview', {
+    answer_id: answerId,
+    use_llm: useLlm,
+  })
+  return response.data
+}
+
+export const getAnswerGraphProjection = async (
+  answerId: string
+): Promise<AnswerGraphProjection> => {
+  const response = await axiosInstance.get(`/api/answers/${encodeURIComponent(answerId)}/graph`)
+  return response.data
+}
+
+export const rebuildAnswerGraph = async (request: {
+  answer_ids?: string[]
+  include_drafts?: boolean
+  only_stale?: boolean
+  use_llm?: boolean
+  limit?: number
+} = {}): Promise<{
+  task_id: string
+  stream_url: string
+  answer_count: number
+  message: string
+  reused?: boolean
+}> => {
+  const response = await axiosInstance.post('/api/answers/graph/rebuild', request)
   return response.data
 }
 
@@ -2627,7 +3222,12 @@ export const profileAnswerSourceConnector = async (
 
 export const previewAnswerSourceConnectorMapping = async (
   connectorId: string,
-  request: { mapping?: Record<string, string>; materialization_mode?: 'table_as_dataset' | 'row_per_answer' } = {}
+  request: {
+    mapping?: Record<string, string>
+    guidance_columns?: string[]
+    materialization_mode?: 'table_as_dataset' | 'row_per_answer'
+    conversion_purpose?: 'faq' | 'id_lookup'
+  } = {}
 ): Promise<AnswerSourceConnectorMappingPreview> => {
   const response = await axiosInstance.post(`/api/answers/connectors/${encodeURIComponent(connectorId)}/mapping/preview`, request)
   return response.data

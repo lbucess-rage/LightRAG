@@ -30,6 +30,80 @@ class CandidateScope:
     eligibility: dict[str, Any]
 
 
+FAQ_DISPLAY_DEFAULTS: dict[str, Any] = {"min_score": 0.27, "gap": 0.02, "list_size": 3}
+
+
+async def _tenant_faq_display_config(tenant_id: str | None) -> dict[str, Any]:
+    if not tenant_id:
+        return {}
+    row = await db.fetchrow(
+        "SELECT metadata FROM KMS_ADMIN_TENANTS WHERE tenant_id = $1",
+        tenant_id,
+    )
+    if not row:
+        return {}
+    metadata = row.get("metadata")
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except (TypeError, ValueError):
+            return {}
+    if not isinstance(metadata, dict):
+        return {}
+    cfg = metadata.get("faq_display")
+    return cfg if isinstance(cfg, dict) else {}
+
+
+def resolve_faq_display_config(tenant_cfg: dict[str, Any], request_cfg: Any) -> dict[str, Any]:
+    cfg = dict(FAQ_DISPLAY_DEFAULTS)
+    for source in (tenant_cfg, request_cfg if isinstance(request_cfg, dict) else {}):
+        for key in FAQ_DISPLAY_DEFAULTS:
+            value = source.get(key)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                cfg[key] = value
+    cfg["list_size"] = max(1, int(cfg["list_size"]))
+    return cfg
+
+
+def compute_faq_display(faq_response: dict[str, Any] | None, cfg: dict[str, Any]) -> dict[str, Any]:
+    items: list[dict[str, Any]] = []
+    for candidate in (faq_response or {}).get("candidates") or []:
+        answer = candidate.get("answer") or {}
+        answer_id = answer.get("answer_id")
+        if not answer_id or any(item["answer_id"] == answer_id for item in items):
+            continue
+        items.append(
+            {
+                "answer_id": answer_id,
+                "title": answer.get("title"),
+                "score": float(candidate.get("score") or 0.0),
+                "body": answer.get("body"),
+                "content_format": answer.get("content_format"),
+            }
+        )
+    if not items and (faq_response or {}).get("answer_id"):
+        items.append(
+            {
+                "answer_id": faq_response["answer_id"],
+                "title": faq_response.get("title"),
+                "score": float(faq_response.get("confidence") or 0.0),
+                "body": faq_response.get("full_content") or faq_response.get("response"),
+                "content_format": faq_response.get("content_format"),
+            }
+        )
+    items.sort(key=lambda item: -item["score"])
+    verdict: dict[str, Any] = {"thresholds": cfg}
+    if not items:
+        verdict.update({"mode": "none", "reason": "no_candidates", "items": []})
+    elif items[0]["score"] < cfg["min_score"]:
+        verdict.update({"mode": "none", "reason": "below_min_score", "items": []})
+    elif len(items) == 1 or items[0]["score"] - items[1]["score"] >= cfg["gap"]:
+        verdict.update({"mode": "solo", "reason": None, "items": items[:1]})
+    else:
+        verdict.update({"mode": "list", "reason": None, "items": items[: cfg["list_size"]]})
+    return verdict
+
+
 BRIEF_ANSWER_RESPONSE_TYPE = (
     "Brief answer: MAXIMUM 5 bullet points using '- ' (hyphen+space). "
     "Each point is one concise line. Fewer is better."
@@ -43,6 +117,22 @@ DEFAULT_KMS_QUERY_OPTIONS: dict[str, Any] = {
     "highlight_entities": True,
     "enable_rerank": True,
 }
+
+DEFAULT_FAQ_RETRIEVAL_MODE = "graph_hybrid"
+
+
+def build_faq_search_payload(
+    query: str,
+    options: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    request_payload = {
+        "query": query,
+        "include_candidates": True,
+        **(options or {}),
+    }
+    if not request_payload.get("retrieval_mode"):
+        request_payload["retrieval_mode"] = DEFAULT_FAQ_RETRIEVAL_MODE
+    return request_payload
 
 
 def build_kms_query_payload(
@@ -192,6 +282,17 @@ async def resolve_candidate_scope(
     scope: WorkspaceScope,
     category_ids: list[str],
 ) -> CandidateScope:
+    if not category_ids:
+        eligibility = _empty_eligibility([], [])
+        eligibility["scope_mode"] = "workspace"
+        eligibility["kms"]["allowed_count"] = None
+        eligibility["faq"]["allowed_count"] = None
+        return CandidateScope(
+            allowed_doc_ids=None,
+            allowed_answer_ids=None,
+            eligibility=eligibility,
+        )
+
     expanded_category_ids = await _category_descendants(scope.tenant_id, category_ids) if category_ids else []
     params: list[Any] = [scope.kms_workspace, scope.faq_workspace, scope.tenant_id]
     category_filter = ""
@@ -256,6 +357,7 @@ async def resolve_candidate_scope(
 
     eligibility["kms"]["allowed_count"] = len(doc_ids)
     eligibility["faq"]["allowed_count"] = len(answer_ids)
+    eligibility["scope_mode"] = "category"
     return CandidateScope(
         allowed_doc_ids=sorted(doc_ids),
         allowed_answer_ids=sorted(answer_ids),
@@ -285,6 +387,8 @@ async def integrated_search(
 
     generative_answer = None
     faq_results: list[dict[str, Any]] = []
+    faq_metadata: dict[str, Any] = {}
+    faq_display: dict[str, Any] | None = None
     generative_trace_id = None
     faq_trace_id = None
     errors: list[dict[str, Any]] = []
@@ -311,11 +415,7 @@ async def integrated_search(
             )
 
     if include_faq and allowed_answer_ids != []:
-        faq_payload = {
-            "query": query,
-            "include_candidates": True,
-            **(payload.get("faq_options") or {}),
-        }
+        faq_payload = build_faq_search_payload(query, payload.get("faq_options"))
         if allowed_answer_ids is not None:
             faq_payload["allowed_answer_ids"] = allowed_answer_ids
         try:
@@ -326,8 +426,35 @@ async def integrated_search(
                 json_body=faq_payload,
             )
             faq_trace_id = faq_response.get("trace_id")
+            faq_metadata = {
+                key: faq_response.get(key)
+                for key in (
+                    "matched",
+                    "matched_id",
+                    "confidence",
+                    "trace_id",
+                    "rationale",
+                    "retrieval_mode",
+                    "requested_retrieval_mode",
+                    "effective_retrieval_mode",
+                    "graph_status",
+                    "retrieval_fallback_reason",
+                    "selected_by",
+                    "selection_policy",
+                    "abstention_reason",
+                    "clarification_question",
+                    "alias_expansions",
+                )
+                if faq_response.get(key) is not None
+            }
             faq_results = [faq_response] if faq_response.get("matched") else faq_response.get("candidates", [])
+            display_cfg = resolve_faq_display_config(
+                await _tenant_faq_display_config(scope.tenant_id),
+                payload.get("display_options"),
+            )
+            faq_display = compute_faq_display(faq_response, display_cfg)
         except httpx.HTTPStatusError as exc:
+            faq_display = {"mode": "error", "reason": "faq_search_failed", "items": [], "thresholds": None}
             errors.append(
                 {
                     "source": "faq",
@@ -335,6 +462,8 @@ async def integrated_search(
                     "detail": http_error_detail(exc),
                 }
             )
+    if faq_display is None and include_faq:
+        faq_display = {"mode": "none", "reason": "no_scope", "items": [], "thresholds": None}
 
     keywords = extract_keywords(
         query,
@@ -346,6 +475,8 @@ async def integrated_search(
         "search_id": search_id,
         "generative_answer": generative_answer,
         "faq_results": faq_results,
+        "faq_metadata": faq_metadata,
+        "faq_display": faq_display,
         "keywords": keywords,
         "references": (generative_answer or {}).get("references", []),
         "latency_ms": latency_ms,
@@ -386,6 +517,7 @@ async def integrated_search(
             {
                 "keyword_count": len(keywords),
                 "faq_count": len(faq_results),
+                "faq_metadata": faq_metadata,
                 "has_generative_answer": generative_answer is not None,
                 "eligibility": candidate_scope.eligibility,
             }
@@ -453,12 +585,9 @@ async def integrated_search_stream(
             }
 
     faq_results: list[dict[str, Any]] = []
+    faq_metadata: dict[str, Any] = {}
     if payload.get("include_faq", True) and allowed_answer_ids != []:
-        faq_payload = {
-            "query": query,
-            "include_candidates": True,
-            **(payload.get("faq_options") or {}),
-        }
+        faq_payload = build_faq_search_payload(query, payload.get("faq_options"))
         if allowed_answer_ids is not None:
             faq_payload["allowed_answer_ids"] = allowed_answer_ids
         try:
@@ -468,8 +597,39 @@ async def integrated_search_stream(
                 workspace=scope.faq_workspace,
                 json_body=faq_payload,
             )
+            faq_metadata = {
+                key: faq_response.get(key)
+                for key in (
+                    "matched",
+                    "matched_id",
+                    "confidence",
+                    "trace_id",
+                    "rationale",
+                    "retrieval_mode",
+                    "requested_retrieval_mode",
+                    "effective_retrieval_mode",
+                    "graph_status",
+                    "retrieval_fallback_reason",
+                    "selected_by",
+                    "selection_policy",
+                    "abstention_reason",
+                    "clarification_question",
+                    "alias_expansions",
+                )
+                if faq_response.get(key) is not None
+            }
             faq_results = [faq_response] if faq_response.get("matched") else faq_response.get("candidates", [])
-            yield {"event": "faq_results", "search_id": search_id, "results": faq_results}
+            display_cfg = resolve_faq_display_config(
+                await _tenant_faq_display_config(scope.tenant_id),
+                payload.get("display_options"),
+            )
+            yield {
+                "event": "faq_results",
+                "search_id": search_id,
+                "results": faq_results,
+                "metadata": faq_metadata,
+                "display": compute_faq_display(faq_response, display_cfg),
+            }
         except httpx.HTTPStatusError as exc:
             yield {
                 "event": "error",
@@ -502,6 +662,7 @@ async def integrated_search_stream(
         json.dumps(
             {
                 "faq_count": len(faq_results),
+                "faq_metadata": faq_metadata,
                 "references_count": len(references),
                 "eligibility": candidate_scope.eligibility,
             }
@@ -518,5 +679,6 @@ async def integrated_search_stream(
         "latency_ms": latency_ms,
         "keywords": extract_keywords(query, accumulated),
         "references": references,
+        "faq_metadata": faq_metadata,
         "eligibility": candidate_scope.eligibility,
     }

@@ -7,7 +7,7 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 
 from ..config import settings
@@ -142,6 +142,220 @@ class FaqAnswerUpdateRequest(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
+class FaqAssetCreateRequest(BaseModel):
+    asset_type: str = Field(pattern="^(image|video|audio|table|file)$")
+    external_url: str | None = None
+    file_name: str | None = None
+    mime_type: str | None = None
+    caption: str | None = None
+    alt_text: str | None = None
+    search_text: str | None = None
+    content_text: str | None = None
+    display_order: int = 0
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class FaqAssetUpdateRequest(BaseModel):
+    caption: str | None = None
+    alt_text: str | None = None
+    search_text: str | None = None
+    content_text: str | None = None
+    display_order: int | None = None
+    metadata: dict[str, Any] | None = None
+
+
+@router.get("/faq-answers/{answer_id}/assets/{asset_id}/content")
+async def proxy_faq_answer_asset(
+    answer_id: str,
+    asset_id: str,
+    faq_workspace: str = Query(min_length=1),
+    _: dict = Depends(get_current_user),
+) -> Response:
+    try:
+        content, content_type, content_disposition = await lightrag_client.request_bytes(
+            "GET",
+            (
+                f"/api/answers/{quote(answer_id, safe='')}/assets/"
+                f"{quote(asset_id, safe='')}/content"
+            ),
+            workspace=faq_workspace,
+        )
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=exc.response.status_code,
+            detail=http_error_detail(exc),
+        ) from exc
+    headers = {}
+    if content_disposition:
+        headers["Content-Disposition"] = content_disposition
+    return Response(content=content, media_type=content_type, headers=headers)
+
+
+@router.get("/faq-answers/{answer_id}/assets")
+async def list_faq_answer_assets(
+    answer_id: str,
+    faq_workspace: str | None = Query(default=None),
+    user: dict = Depends(get_current_user),
+) -> dict:
+    effective_workspace = _effective_faq_workspace(user, faq_workspace)
+    try:
+        assets = await lightrag_client.request_json(
+            "GET",
+            f"/api/answers/{quote(answer_id, safe='')}/assets",
+            workspace=effective_workspace,
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_lightrag_error(exc)
+    return {"assets": assets, "workspace": effective_workspace}
+
+
+@router.post("/faq-answers/{answer_id}/assets")
+async def create_faq_answer_asset(
+    answer_id: str,
+    payload: FaqAssetCreateRequest,
+    request: Request,
+    faq_workspace: str | None = Query(default=None),
+    user: dict = Depends(get_current_user),
+) -> dict:
+    effective_workspace = _effective_faq_workspace(user, faq_workspace)
+    try:
+        asset = await lightrag_client.request_json(
+            "POST",
+            f"/api/answers/{quote(answer_id, safe='')}/assets",
+            workspace=effective_workspace,
+            json_body=payload.model_dump(exclude_none=True),
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_lightrag_error(exc)
+    await audit_log(
+        request,
+        actor_type="user",
+        actor_id=user["user_id"],
+        action="create_faq_answer_asset",
+        target_type="answer_asset",
+        target_id=asset.get("asset_id"),
+        detail={"workspace": effective_workspace, "answer_id": answer_id},
+    )
+    return asset
+
+
+@router.post("/faq-answers/{answer_id}/assets/upload")
+async def upload_faq_answer_asset(
+    answer_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    caption: str | None = Form(default=None),
+    alt_text: str | None = Form(default=None),
+    search_text: str | None = Form(default=None),
+    display_order: int = Form(default=0),
+    faq_workspace: str | None = Query(default=None),
+    user: dict = Depends(get_current_user),
+) -> dict:
+    content = await file.read(100 * 1024 * 1024 + 1)
+    if len(content) > 100 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="FAQ attachment exceeds the 100MB limit")
+    effective_workspace = _effective_faq_workspace(user, faq_workspace)
+    data = {
+        "caption": caption or "",
+        "alt_text": alt_text or "",
+        "search_text": search_text or "",
+        "display_order": str(display_order),
+        "metadata_json": "{}",
+    }
+    try:
+        asset = await lightrag_client.request_form(
+            "POST",
+            f"/api/answers/{quote(answer_id, safe='')}/assets/upload",
+            workspace=effective_workspace,
+            data=data,
+            files={
+                "file": (
+                    file.filename or "attachment",
+                    content,
+                    file.content_type,
+                )
+            },
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_lightrag_error(exc)
+    await audit_log(
+        request,
+        actor_type="user",
+        actor_id=user["user_id"],
+        action="upload_faq_answer_asset",
+        target_type="answer_asset",
+        target_id=asset.get("asset_id"),
+        detail={"workspace": effective_workspace, "answer_id": answer_id},
+    )
+    return asset
+
+
+@router.patch("/faq-answers/{answer_id}/assets/{asset_id}")
+async def update_faq_answer_asset(
+    answer_id: str,
+    asset_id: str,
+    payload: FaqAssetUpdateRequest,
+    request: Request,
+    faq_workspace: str | None = Query(default=None),
+    user: dict = Depends(get_current_user),
+) -> dict:
+    effective_workspace = _effective_faq_workspace(user, faq_workspace)
+    try:
+        asset = await lightrag_client.request_json(
+            "PATCH",
+            (
+                f"/api/answers/{quote(answer_id, safe='')}/assets/"
+                f"{quote(asset_id, safe='')}"
+            ),
+            workspace=effective_workspace,
+            json_body=payload.model_dump(exclude_unset=True),
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_lightrag_error(exc)
+    await audit_log(
+        request,
+        actor_type="user",
+        actor_id=user["user_id"],
+        action="update_faq_answer_asset",
+        target_type="answer_asset",
+        target_id=asset_id,
+        detail={"workspace": effective_workspace, "answer_id": answer_id},
+    )
+    return asset
+
+
+@router.delete("/faq-answers/{answer_id}/assets/{asset_id}")
+async def delete_faq_answer_asset(
+    answer_id: str,
+    asset_id: str,
+    request: Request,
+    faq_workspace: str | None = Query(default=None),
+    user: dict = Depends(get_current_user),
+) -> dict:
+    effective_workspace = _effective_faq_workspace(user, faq_workspace)
+    try:
+        response = await lightrag_client.request_json(
+            "DELETE",
+            (
+                f"/api/answers/{quote(answer_id, safe='')}/assets/"
+                f"{quote(asset_id, safe='')}"
+            ),
+            workspace=effective_workspace,
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_lightrag_error(exc)
+    await audit_log(
+        request,
+        actor_type="user",
+        actor_id=user["user_id"],
+        action="delete_faq_answer_asset",
+        target_type="answer_asset",
+        target_id=asset_id,
+        detail={"workspace": effective_workspace, "answer_id": answer_id},
+    )
+    return response
+
+
 def _faq_answer_update_body(payload: FaqAnswerUpdateRequest) -> dict[str, Any]:
     return payload.model_dump(mode="json", exclude_unset=True)
 
@@ -159,12 +373,141 @@ class FaqCandidateSearchRequest(BaseModel):
     min_score: float = Field(default=0.18, ge=0.0, le=1.0)
     include_drafts: bool = True
     strategy: str = "balanced"
-    retrieval_mode: str = "keyword"
+    retrieval_mode: str = "hybrid"
     vector_top_k: int = Field(default=8, ge=1, le=50)
     llm_candidate_count: int = Field(default=5, ge=1, le=10)
     allowed_answer_ids: list[str] | None = None
+    selection_policy: str = "workspace"
     response_policy: str | None = None
     include_candidates: bool = True
+
+
+class FaqGraphConfigUpdateRequest(BaseModel):
+    enabled: bool | None = None
+    auto_sync: bool | None = None
+    graph_weight: float | None = Field(default=None, ge=0.0, le=1.0)
+    min_similarity: float | None = Field(default=None, ge=0.0, le=1.0)
+    max_hops: int | None = Field(default=None, ge=1, le=3)
+    precision_mode: bool | None = None
+    precision_min_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    min_score_margin: float | None = Field(default=None, ge=0.0, le=1.0)
+    min_category_margin: float | None = Field(default=None, ge=0.0, le=1.0)
+    min_evidence_sources: int | None = Field(default=None, ge=1, le=3)
+    llm_min_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    entity_types: list[str] | None = None
+    relation_types: list[str] | None = None
+    extraction_prompt: str | None = None
+
+
+class FaqGraphPreviewRequest(BaseModel):
+    answer_id: str = Field(min_length=1)
+    use_llm: bool = False
+
+
+class FaqGraphRebuildRequest(BaseModel):
+    answer_ids: list[str] | None = None
+    include_drafts: bool = False
+    only_stale: bool = True
+    use_llm: bool = False
+    limit: int = Field(default=500, ge=1, le=1000)
+
+
+class FaqAliasCreateRequest(BaseModel):
+    canonical_term: str = Field(min_length=2, max_length=200)
+    aliases: list[str] = Field(default_factory=list, max_length=30)
+    enabled: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class FaqTermDiscoveryRequest(BaseModel):
+    include_drafts: bool = True
+    include_no_match_queries: bool = True
+    answer_limit: int = Field(default=1000, ge=1, le=5000)
+    event_limit: int = Field(default=300, ge=0, le=2000)
+    batch_size: int = Field(default=20, ge=5, le=40)
+
+
+class FaqStructuredProfileRequest(BaseModel):
+    source_type: str = "json"
+    raw_content: str = Field(min_length=1)
+    source_uri: str | None = None
+    sample_limit: int = Field(default=20, ge=1, le=100)
+    faq_workspace: str | None = None
+
+
+class FaqStructuredMaterializeRequest(BaseModel):
+    source_type: str = "json"
+    raw_content: str = Field(min_length=1)
+    title: str = Field(min_length=1, max_length=500)
+    approved_summary: str | None = None
+    source_uri: str | None = None
+    file_name: str | None = None
+    status: str = "draft"
+    priority: int = 0
+    tags: list[str] = Field(default_factory=list)
+    mapping: dict[str, str] = Field(default_factory=dict)
+    guidance_columns: list[str] = Field(default_factory=list)
+    materialization_mode: str = "row_per_answer"
+    conversion_purpose: str = "faq"
+    source_truncated: bool = False
+    llm_guidance_enrichment: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    tenant_id: str | None = None
+    category_id: str | None = None
+    enabled: bool = True
+    valid_from: datetime | None = None
+    valid_until: datetime | None = None
+    faq_workspace: str | None = None
+
+
+class FaqConnectorCreateRequest(BaseModel):
+    connector_id: str | None = None
+    name: str = Field(min_length=1, max_length=300)
+    connector_type: str
+    status: str = "draft"
+    config: dict[str, Any] = Field(default_factory=dict)
+    auth_ref: str | None = None
+    refresh_policy: dict[str, Any] = Field(default_factory=dict)
+    enabled: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    faq_workspace: str | None = None
+
+
+class FaqConnectorUpdateRequest(BaseModel):
+    name: str | None = None
+    status: str | None = None
+    config: dict[str, Any] | None = None
+    auth_ref: str | None = None
+    refresh_policy: dict[str, Any] | None = None
+    enabled: bool | None = None
+    metadata: dict[str, Any] | None = None
+    faq_workspace: str | None = None
+
+
+class FaqConnectorSampleRequest(BaseModel):
+    limit: int = Field(default=20, ge=1, le=200)
+    faq_workspace: str | None = None
+
+
+class FaqConnectorMappingRequest(BaseModel):
+    mapping: dict[str, str] = Field(default_factory=dict)
+    guidance_columns: list[str] = Field(default_factory=list)
+    materialization_mode: str = "row_per_answer"
+    conversion_purpose: str = "faq"
+    faq_workspace: str | None = None
+
+
+class FaqConnectorMaterializeRequest(FaqConnectorMappingRequest):
+    title: str | None = None
+    status: str = "draft"
+    tags: list[str] = Field(default_factory=list)
+    llm_guidance_enrichment: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    tenant_id: str | None = None
+    category_id: str | None = None
+    enabled: bool = True
+    valid_from: datetime | None = None
+    valid_until: datetime | None = None
 
 
 class ExistingKnowledgeRefRequest(BaseModel):
@@ -284,6 +627,60 @@ def _effective_tenant_id(user: dict, requested: str | None = None) -> str:
     return user.get("tenant_id") or settings.default_tenant_id
 
 
+async def _resolve_registered_scope(
+    user: dict,
+    *,
+    tenant_id: str | None = None,
+    kms_workspace: str | None = None,
+    faq_workspace: str | None = None,
+) -> tuple[str, str, str]:
+    if user.get("role") != "admin":
+        return (
+            user.get("tenant_id") or settings.default_tenant_id,
+            user.get("kms_workspace") or settings.default_kms_workspace,
+            user.get("faq_workspace") or settings.default_faq_workspace,
+        )
+
+    if tenant_id:
+        tenant = await db.fetchrow(
+            """
+            SELECT tenant_id, kms_workspace, faq_workspace
+            FROM KMS_ADMIN_TENANTS
+            WHERE tenant_id = $1
+              AND is_active = TRUE
+            """,
+            tenant_id,
+        )
+    elif kms_workspace or faq_workspace:
+        tenant = await db.fetchrow(
+            """
+            SELECT tenant_id, kms_workspace, faq_workspace
+            FROM KMS_ADMIN_TENANTS
+            WHERE kms_workspace = $1
+              AND faq_workspace = $2
+              AND is_active = TRUE
+            ORDER BY create_time ASC
+            LIMIT 1
+            """,
+            kms_workspace or user.get("kms_workspace") or settings.default_kms_workspace,
+            faq_workspace or user.get("faq_workspace") or settings.default_faq_workspace,
+        )
+    else:
+        tenant = {
+            "tenant_id": user.get("tenant_id") or settings.default_tenant_id,
+            "kms_workspace": user.get("kms_workspace") or settings.default_kms_workspace,
+            "faq_workspace": user.get("faq_workspace") or settings.default_faq_workspace,
+        }
+
+    if not tenant:
+        raise HTTPException(status_code=422, detail="Active tenant workspace pair not found")
+    if kms_workspace and kms_workspace != tenant["kms_workspace"]:
+        raise HTTPException(status_code=422, detail="KMS workspace does not match the selected tenant")
+    if faq_workspace and faq_workspace != tenant["faq_workspace"]:
+        raise HTTPException(status_code=422, detail="FAQ workspace does not match the selected tenant")
+    return tenant["tenant_id"], tenant["kms_workspace"], tenant["faq_workspace"]
+
+
 async def _create_item(
     *,
     payload: KnowledgeMetadataRequest,
@@ -292,9 +689,12 @@ async def _create_item(
     status: str = "draft",
 ) -> str:
     item_id = str(uuid.uuid4())
-    tenant_id = _effective_tenant_id(user, payload.tenant_id)
-    kms_workspace = _effective_kms_workspace(user, payload.kms_workspace)
-    faq_workspace = _effective_faq_workspace(user, payload.faq_workspace)
+    tenant_id, kms_workspace, faq_workspace = await _resolve_registered_scope(
+        user,
+        tenant_id=payload.tenant_id,
+        kms_workspace=payload.kms_workspace,
+        faq_workspace=payload.faq_workspace,
+    )
     await db.execute(
         """
         INSERT INTO KMS_ADMIN_KNOWLEDGE_ITEMS(
@@ -364,6 +764,41 @@ async def _create_job(
         progress_value,
         response.get("message"),
         json.dumps(response),
+    )
+    return job_id
+
+
+async def _create_standalone_job(
+    *,
+    user: dict,
+    job_type: str,
+    response: dict[str, Any],
+    workspace: str,
+) -> str:
+    job_id = str(uuid.uuid4())
+    task_id = response.get("task_id")
+    await db.execute(
+        """
+        INSERT INTO KMS_ADMIN_JOBS(
+            job_id, tenant_id, item_id, job_type, status, lightrag_task_id,
+            progress, message, metadata
+        )
+        VALUES($1, $2, NULL, $3, $4, $5, $6, $7, $8::jsonb)
+        """,
+        job_id,
+        _effective_tenant_id(user),
+        job_type,
+        "running" if task_id else "completed",
+        task_id,
+        0.0 if task_id else 100.0,
+        response.get("message") or "LightRAG 작업이 시작되었습니다.",
+        json.dumps(
+            {
+                **response,
+                "workspace": workspace,
+                "tasks": [{"task_id": task_id}] if task_id else [],
+            }
+        ),
     )
     return job_id
 
@@ -535,6 +970,185 @@ async def _create_ref(
         external_id,
         json.dumps(metadata or {}),
     )
+
+
+def _materialized_answer_ids(response: dict[str, Any]) -> list[str]:
+    materialized = response.get("materialized") if isinstance(response.get("materialized"), dict) else response
+    snapshot = materialized.get("snapshot") if isinstance(materialized, dict) else {}
+    answer_ids = _json_list((snapshot or {}).get("created_answer_ids"))
+    if not answer_ids and isinstance(materialized, dict):
+        answer_ids = [
+            item.get("answer_id")
+            for item in materialized.get("answers") or []
+            if isinstance(item, dict) and item.get("answer_id")
+        ]
+        first_answer = materialized.get("answer")
+        if isinstance(first_answer, dict) and first_answer.get("answer_id"):
+            answer_ids.insert(0, first_answer["answer_id"])
+    return list(dict.fromkeys(str(answer_id) for answer_id in answer_ids if answer_id))
+
+
+async def _link_materialized_faq_answers(
+    *,
+    response: dict[str, Any],
+    payload: FaqStructuredMaterializeRequest | FaqConnectorMaterializeRequest,
+    user: dict,
+    faq_workspace: str,
+    source_label: str,
+) -> dict[str, Any]:
+    answer_ids = _materialized_answer_ids(response)
+    if not answer_ids:
+        raise HTTPException(
+            status_code=502,
+            detail="LightRAG structured materialization response did not include answer IDs",
+        )
+
+    materialized = response.get("materialized") if isinstance(response.get("materialized"), dict) else response
+    answer_details = {
+        str(answer.get("answer_id")): answer
+        for answer in materialized.get("answers") or []
+        if isinstance(answer, dict) and answer.get("answer_id")
+    }
+    batch_id = f"faq-batch-{uuid.uuid4().hex[:16]}"
+    tenant_id = _effective_tenant_id(user, payload.tenant_id)
+    kms_workspace = _effective_kms_workspace(user)
+    category_id = payload.category_id
+    task_ids = [
+        str(task_id)
+        for task_id in [
+            materialized.get("guidance_enrichment_task_id"),
+            materialized.get("vector_rebuild_task_id"),
+        ]
+        if task_id
+    ]
+    snapshot = materialized.get("snapshot") or {}
+    source_uri = snapshot.get("source_uri") or getattr(payload, "source_uri", None)
+    now_metadata = {
+        "source_type": "faq_structured_batch",
+        "batch_id": batch_id,
+        "source_label": source_label,
+        "source_uri": source_uri,
+        "conversion_purpose": payload.conversion_purpose,
+        "materialization_mode": payload.materialization_mode,
+        "task_ids": task_ids,
+    }
+
+    item_rows: list[tuple[Any, ...]] = []
+    ref_rows: list[tuple[Any, ...]] = []
+    job_rows: list[tuple[Any, ...]] = []
+    item_ids: list[str] = []
+    for index, answer_id in enumerate(answer_ids):
+        item_id = str(uuid.uuid4())
+        item_ids.append(item_id)
+        detail = answer_details.get(answer_id) or {}
+        title = str(detail.get("title") or f"{payload.title or source_label} · {answer_id}")
+        item_metadata = {
+            **now_metadata,
+            "answer_id": answer_id,
+            "source_row_index": index,
+        }
+        item_rows.append(
+            (
+                item_id,
+                tenant_id,
+                "faq_structured",
+                title,
+                detail.get("approved_summary") or detail.get("body"),
+                category_id,
+                payload.enabled,
+                payload.valid_from,
+                payload.valid_until,
+                kms_workspace,
+                faq_workspace,
+                "ready",
+                json.dumps(item_metadata),
+                user["user_id"],
+            )
+        )
+        ref_rows.append(
+            (
+                str(uuid.uuid4()),
+                item_id,
+                "answer_id",
+                "faq",
+                faq_workspace,
+                answer_id,
+                json.dumps(
+                    {
+                        "batch_id": batch_id,
+                        "source_label": source_label,
+                        "source_uri": source_uri,
+                        "answer": detail,
+                    }
+                ),
+            )
+        )
+        is_tracked_job = index == 0 and bool(task_ids)
+        job_metadata = {
+            **now_metadata,
+            "answer_id": answer_id,
+            "answer_count": len(answer_ids),
+            "tasks": [{"task_id": task_id} for task_id in task_ids] if is_tracked_job else [],
+        }
+        job_rows.append(
+            (
+                str(uuid.uuid4()),
+                tenant_id,
+                item_id,
+                "faq_structured_batch" if is_tracked_job else "faq_structured_answer",
+                "running" if is_tracked_job else "completed",
+                task_ids[0] if is_tracked_job else None,
+                0.0 if is_tracked_job else 100.0,
+                (
+                    "FAQ 생성 후 검색 품질 보완 진행 중"
+                    if is_tracked_job
+                    else "표 데이터 FAQ 생성 완료"
+                ),
+                json.dumps(job_metadata),
+            )
+        )
+
+    await db.execute_many_transaction(
+        [
+            (
+                """
+                INSERT INTO KMS_ADMIN_KNOWLEDGE_ITEMS(
+                    item_id, tenant_id, knowledge_type, title, body, category_id, enabled,
+                    valid_from, valid_until, kms_workspace, faq_workspace, status,
+                    metadata, created_by
+                )
+                VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14)
+                """,
+                item_rows,
+            ),
+            (
+                """
+                INSERT INTO KMS_ADMIN_KNOWLEDGE_REFS(
+                    ref_id, item_id, ref_type, workspace_type, workspace, external_id, metadata
+                )
+                VALUES($1, $2, $3, $4, $5, $6, $7::jsonb)
+                """,
+                ref_rows,
+            ),
+            (
+                """
+                INSERT INTO KMS_ADMIN_JOBS(
+                    job_id, tenant_id, item_id, job_type, status, lightrag_task_id,
+                    progress, message, metadata
+                )
+                VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+                """,
+                job_rows,
+            ),
+        ]
+    )
+    return {
+        "batch_id": batch_id,
+        "item_ids": item_ids,
+        "answer_ids": answer_ids,
+        "linked_count": len(answer_ids),
+        "task_ids": task_ids,
+    }
 
 
 async def _create_immediate_doc_refs(item_id: str, workspace: str, response: dict) -> bool:
@@ -786,9 +1400,12 @@ async def link_existing_knowledge(
     request: Request,
     user: dict = Depends(get_current_user),
 ) -> dict:
-    tenant_id = _effective_tenant_id(user, payload.tenant_id)
-    kms_workspace = _effective_kms_workspace(user, payload.kms_workspace)
-    faq_workspace = _effective_faq_workspace(user, payload.faq_workspace)
+    tenant_id, kms_workspace, faq_workspace = await _resolve_registered_scope(
+        user,
+        tenant_id=payload.tenant_id,
+        kms_workspace=payload.kms_workspace,
+        faq_workspace=payload.faq_workspace,
+    )
     link_payload = payload.model_copy(
         update={
             "tenant_id": tenant_id,
@@ -901,9 +1518,12 @@ async def list_knowledge(
     kms_workspace: str | None = Query(default=None),
     faq_workspace: str | None = Query(default=None),
 ) -> dict:
-    effective_tenant_id = _effective_tenant_id(user, tenant_id)
-    effective_kms_workspace = _effective_kms_workspace(user, kms_workspace)
-    effective_faq_workspace = _effective_faq_workspace(user, faq_workspace)
+    effective_tenant_id, effective_kms_workspace, effective_faq_workspace = await _resolve_registered_scope(
+        user,
+        tenant_id=tenant_id,
+        kms_workspace=kms_workspace,
+        faq_workspace=faq_workspace,
+    )
     rows = await db.fetch(
         """
         SELECT i.*, COALESCE(jsonb_agg(to_jsonb(r)) FILTER (WHERE r.ref_id IS NOT NULL), '[]'::jsonb) AS refs
@@ -2334,6 +2954,688 @@ async def sync_text_track(
         status,
     )
     return {"item_id": item_id, "status": status, "track": response}
+
+
+@router.get("/faq-graph/config")
+async def get_faq_graph_config(
+    user: dict = Depends(get_current_user),
+    faq_workspace: str | None = Query(default=None),
+) -> dict:
+    effective_workspace = _effective_faq_workspace(user, faq_workspace)
+    try:
+        return await lightrag_client.request_json(
+            "GET",
+            "/api/answers/graph/config",
+            workspace=effective_workspace,
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_lightrag_error(exc)
+
+
+@router.put("/faq-graph/config")
+async def update_faq_graph_config(
+    payload: FaqGraphConfigUpdateRequest,
+    request: Request,
+    user: dict = Depends(get_current_user),
+    faq_workspace: str | None = Query(default=None),
+) -> dict:
+    effective_workspace = _effective_faq_workspace(user, faq_workspace)
+    try:
+        response = await lightrag_client.request_json(
+            "PUT",
+            "/api/answers/graph/config",
+            workspace=effective_workspace,
+            json_body=payload.model_dump(exclude_unset=True),
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_lightrag_error(exc)
+    await audit_log(
+        request,
+        actor_type="user",
+        actor_id=user["user_id"],
+        action="update_faq_graph_config",
+        tenant_id=_effective_tenant_id(user),
+        target_type="workspace",
+        target_id=effective_workspace,
+        detail={
+            "workspace": effective_workspace,
+            "schema_version": response.get("schema_version"),
+        },
+    )
+    return response
+
+
+@router.get("/faq-graph/status")
+async def get_faq_graph_status(
+    user: dict = Depends(get_current_user),
+    faq_workspace: str | None = Query(default=None),
+) -> dict:
+    effective_workspace = _effective_faq_workspace(user, faq_workspace)
+    try:
+        return await lightrag_client.request_json(
+            "GET",
+            "/api/answers/graph/status",
+            workspace=effective_workspace,
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_lightrag_error(exc)
+
+
+@router.post("/faq-graph/preview")
+async def preview_faq_graph(
+    payload: FaqGraphPreviewRequest,
+    user: dict = Depends(get_current_user),
+    faq_workspace: str | None = Query(default=None),
+) -> dict:
+    effective_workspace = _effective_faq_workspace(user, faq_workspace)
+    try:
+        return await lightrag_client.request_json(
+            "POST",
+            "/api/answers/graph/preview",
+            workspace=effective_workspace,
+            json_body=payload.model_dump(),
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_lightrag_error(exc)
+
+
+@router.post("/faq-graph/rebuild")
+async def rebuild_faq_graph(
+    payload: FaqGraphRebuildRequest,
+    request: Request,
+    user: dict = Depends(get_current_user),
+    faq_workspace: str | None = Query(default=None),
+) -> dict:
+    effective_workspace = _effective_faq_workspace(user, faq_workspace)
+    try:
+        response = await lightrag_client.request_json(
+            "POST",
+            "/api/answers/graph/rebuild",
+            workspace=effective_workspace,
+            json_body=payload.model_dump(),
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_lightrag_error(exc)
+    await audit_log(
+        request,
+        actor_type="user",
+        actor_id=user["user_id"],
+        action="rebuild_faq_graph",
+        tenant_id=_effective_tenant_id(user),
+        target_type="workspace",
+        target_id=effective_workspace,
+        detail={
+            "workspace": effective_workspace,
+            "task_id": response.get("task_id"),
+            "answer_count": response.get("answer_count"),
+        },
+    )
+    return response
+
+
+@router.get("/faq-graph/answers/{answer_id}")
+async def get_faq_graph_projection(
+    answer_id: str,
+    user: dict = Depends(get_current_user),
+    faq_workspace: str | None = Query(default=None),
+) -> dict:
+    effective_workspace = _effective_faq_workspace(user, faq_workspace)
+    try:
+        return await lightrag_client.request_json(
+            "GET",
+            f"/api/answers/{answer_id}/graph",
+            workspace=effective_workspace,
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_lightrag_error(exc)
+
+
+@router.get("/faq-graph/tasks/{task_id}")
+async def get_faq_graph_task(
+    task_id: str,
+    user: dict = Depends(get_current_user),
+    faq_workspace: str | None = Query(default=None),
+) -> dict:
+    effective_workspace = _effective_faq_workspace(user, faq_workspace)
+    try:
+        return await lightrag_client.request_json(
+            "GET",
+            f"/api/tasks/{task_id}",
+            workspace=effective_workspace,
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_lightrag_error(exc)
+
+
+@router.get("/faq-aliases")
+async def list_faq_aliases(
+    user: dict = Depends(get_current_user),
+    search: str | None = Query(default=None),
+    faq_workspace: str | None = Query(default=None),
+) -> Any:
+    effective_workspace = _effective_faq_workspace(user, faq_workspace)
+    try:
+        return await lightrag_client.request_json(
+            "GET",
+            "/api/answers/aliases",
+            workspace=effective_workspace,
+            params={"search": search} if search else None,
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_lightrag_error(exc)
+
+
+@router.post("/faq-aliases")
+async def create_faq_alias(
+    payload: FaqAliasCreateRequest,
+    request: Request,
+    user: dict = Depends(get_current_user),
+    faq_workspace: str | None = Query(default=None),
+) -> dict:
+    effective_workspace = _effective_faq_workspace(user, faq_workspace)
+    try:
+        response = await lightrag_client.request_json(
+            "POST",
+            "/api/answers/aliases",
+            workspace=effective_workspace,
+            json_body=payload.model_dump(),
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_lightrag_error(exc)
+    await audit_log(
+        request,
+        actor_type="user",
+        actor_id=user["user_id"],
+        action="create_faq_alias",
+        tenant_id=_effective_tenant_id(user),
+        target_type="faq_alias",
+        target_id=response.get("alias_id"),
+        detail={"workspace": effective_workspace, "canonical_term": payload.canonical_term},
+    )
+    return response
+
+
+@router.delete("/faq-aliases/{alias_id}")
+async def delete_faq_alias(
+    alias_id: str,
+    request: Request,
+    user: dict = Depends(get_current_user),
+    faq_workspace: str | None = Query(default=None),
+) -> dict:
+    effective_workspace = _effective_faq_workspace(user, faq_workspace)
+    try:
+        response = await lightrag_client.request_json(
+            "DELETE",
+            f"/api/answers/aliases/{alias_id}",
+            workspace=effective_workspace,
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_lightrag_error(exc)
+    await audit_log(
+        request,
+        actor_type="user",
+        actor_id=user["user_id"],
+        action="delete_faq_alias",
+        tenant_id=_effective_tenant_id(user),
+        target_type="faq_alias",
+        target_id=alias_id,
+        detail={"workspace": effective_workspace},
+    )
+    return response
+
+
+@router.get("/faq-term-candidates")
+async def list_faq_term_candidates(
+    user: dict = Depends(get_current_user),
+    status: str | None = Query(default="suggested"),
+    search: str | None = Query(default=None),
+    limit: int = Query(default=200, ge=1, le=1000),
+    faq_workspace: str | None = Query(default=None),
+) -> Any:
+    effective_workspace = _effective_faq_workspace(user, faq_workspace)
+    params: dict[str, Any] = {"limit": limit}
+    if status:
+        params["status"] = status
+    if search:
+        params["search"] = search
+    try:
+        return await lightrag_client.request_json(
+            "GET",
+            "/api/answers/aliases/candidates",
+            workspace=effective_workspace,
+            params=params,
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_lightrag_error(exc)
+
+
+@router.post("/faq-term-candidates/analyze")
+async def analyze_faq_term_candidates(
+    payload: FaqTermDiscoveryRequest,
+    request: Request,
+    user: dict = Depends(get_current_user),
+    faq_workspace: str | None = Query(default=None),
+) -> dict:
+    effective_workspace = _effective_faq_workspace(user, faq_workspace)
+    try:
+        response = await lightrag_client.request_json(
+            "POST",
+            "/api/answers/aliases/candidates/analyze",
+            workspace=effective_workspace,
+            json_body=payload.model_dump(),
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_lightrag_error(exc)
+    job_id = await _create_standalone_job(
+        user=user,
+        job_type="faq_term_discovery",
+        response=response,
+        workspace=effective_workspace,
+    )
+    await audit_log(
+        request,
+        actor_type="user",
+        actor_id=user["user_id"],
+        action="analyze_faq_terms",
+        tenant_id=_effective_tenant_id(user),
+        target_type="faq_term_candidate",
+        detail={
+            "workspace": effective_workspace,
+            "job_id": job_id,
+            "task_id": response.get("task_id"),
+            **payload.model_dump(),
+        },
+    )
+    return {**response, "job_id": job_id, "workspace": effective_workspace}
+
+
+@router.post("/faq-term-candidates/{candidate_id}/{action}")
+async def decide_faq_term_candidate(
+    candidate_id: str,
+    action: str,
+    request: Request,
+    user: dict = Depends(get_current_user),
+    faq_workspace: str | None = Query(default=None),
+) -> dict:
+    if action not in {"approve", "reject"}:
+        raise HTTPException(status_code=400, detail="Unsupported term candidate action")
+    effective_workspace = _effective_faq_workspace(user, faq_workspace)
+    try:
+        response = await lightrag_client.request_json(
+            "POST",
+            f"/api/answers/aliases/candidates/{candidate_id}/{action}",
+            workspace=effective_workspace,
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_lightrag_error(exc)
+    await audit_log(
+        request,
+        actor_type="user",
+        actor_id=user["user_id"],
+        action=f"{action}_faq_term",
+        tenant_id=_effective_tenant_id(user),
+        target_type="faq_term_candidate",
+        target_id=candidate_id,
+        detail={
+            "workspace": effective_workspace,
+            "canonical_term": (response.get("candidate") or {}).get("canonical_term"),
+        },
+    )
+    return response
+
+
+@router.post("/faq-structured/profile")
+async def profile_faq_structured_source(
+    payload: FaqStructuredProfileRequest,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    effective_workspace = _effective_faq_workspace(user, payload.faq_workspace)
+    try:
+        return await lightrag_client.request_json(
+            "POST",
+            "/api/answers/structured/profile",
+            workspace=effective_workspace,
+            json_body=payload.model_dump(exclude={"faq_workspace"}, exclude_none=True),
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_lightrag_error(exc)
+
+
+@router.post("/faq-structured/excel/preview")
+async def preview_faq_excel(
+    request: Request,
+    file: UploadFile = File(...),
+    sheet_name: str | None = Form(default=None),
+    header_row: int = Form(default=1),
+    data_start_row: int | None = Form(default=None),
+    sample_limit: int = Form(default=20),
+    max_rows: int = Form(default=1000),
+    faq_workspace: str | None = Form(default=None),
+    user: dict = Depends(get_current_user),
+) -> dict:
+    if header_row < 1 or (data_start_row is not None and data_start_row < 1):
+        raise HTTPException(status_code=400, detail="Excel row numbers must be positive")
+    if sample_limit < 1 or sample_limit > 100:
+        raise HTTPException(status_code=400, detail="sample_limit must be between 1 and 100")
+    if max_rows < 1 or max_rows > 1000:
+        raise HTTPException(status_code=400, detail="max_rows must be between 1 and 1000")
+    file.file.seek(0, 2)
+    file_size = file.file.tell()
+    file.file.seek(0)
+    if file_size > 200 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Excel files must be 200 MB or smaller")
+    effective_workspace = _effective_faq_workspace(user, faq_workspace)
+    data = {
+        "header_row": str(header_row),
+        "sample_limit": str(sample_limit),
+        "max_rows": str(max_rows),
+    }
+    if sheet_name:
+        data["sheet_name"] = sheet_name
+    if data_start_row is not None:
+        data["data_start_row"] = str(data_start_row)
+    try:
+        response = await lightrag_client.request_form(
+            "POST",
+            "/api/answers/structured/excel/preview",
+            workspace=effective_workspace,
+            data=data,
+            files={
+                "file": (
+                    file.filename or "faq-source.xlsx",
+                    file.file,
+                    file.content_type
+                    or "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+            timeout=300.0,
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_lightrag_error(exc)
+    await audit_log(
+        request,
+        actor_type="user",
+        actor_id=user["user_id"],
+        action="preview_faq_excel",
+        tenant_id=_effective_tenant_id(user),
+        target_type="faq_structured_source",
+        detail={
+            "workspace": effective_workspace,
+            "file_name": file.filename,
+            "file_size": file_size,
+            "sheet_name": response.get("selected_sheet"),
+            "row_count": response.get("row_count"),
+        },
+    )
+    return response
+
+
+@router.post("/faq-structured/materialize")
+async def materialize_faq_structured_source(
+    payload: FaqStructuredMaterializeRequest,
+    request: Request,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    effective_workspace = _effective_faq_workspace(user, payload.faq_workspace)
+    light_rag_payload = payload.model_dump(
+        mode="json",
+        exclude={
+            "tenant_id",
+            "category_id",
+            "enabled",
+            "valid_from",
+            "valid_until",
+            "faq_workspace",
+        },
+        exclude_none=True,
+    )
+    light_rag_payload["metadata"] = {
+        **payload.metadata,
+        "created_from": "integrated_kms_admin",
+        "created_by": user["user_id"],
+    }
+    try:
+        response = await lightrag_client.request_json(
+            "POST",
+            "/api/answers/structured/materialize",
+            workspace=effective_workspace,
+            json_body=light_rag_payload,
+            timeout=600.0,
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_lightrag_error(exc)
+    ledger = await _link_materialized_faq_answers(
+        response=response,
+        payload=payload,
+        user=user,
+        faq_workspace=effective_workspace,
+        source_label=payload.file_name or payload.title,
+    )
+    await audit_log(
+        request,
+        actor_type="user",
+        actor_id=user["user_id"],
+        action="create_structured_faq_batch",
+        tenant_id=_effective_tenant_id(user, payload.tenant_id),
+        target_type="faq_structured_batch",
+        target_id=ledger["batch_id"],
+        detail={
+            "workspace": effective_workspace,
+            "linked_count": ledger["linked_count"],
+            "conversion_purpose": payload.conversion_purpose,
+            "materialization_mode": payload.materialization_mode,
+            "task_ids": ledger["task_ids"],
+        },
+    )
+    return {"materialized": response, "ledger": ledger, "workspace": effective_workspace}
+
+
+@router.get("/faq-connectors")
+async def list_faq_connectors(
+    user: dict = Depends(get_current_user),
+    connector_type: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    search: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    faq_workspace: str | None = Query(default=None),
+) -> Any:
+    effective_workspace = _effective_faq_workspace(user, faq_workspace)
+    params = {
+        key: value
+        for key, value in {
+            "connector_type": connector_type,
+            "status": status,
+            "search": search,
+            "limit": limit,
+        }.items()
+        if value is not None
+    }
+    try:
+        return await lightrag_client.request_json(
+            "GET",
+            "/api/answers/connectors",
+            workspace=effective_workspace,
+            params=params,
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_lightrag_error(exc)
+
+
+@router.post("/faq-connectors")
+async def create_faq_connector(
+    payload: FaqConnectorCreateRequest,
+    request: Request,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    effective_workspace = _effective_faq_workspace(user, payload.faq_workspace)
+    try:
+        response = await lightrag_client.request_json(
+            "POST",
+            "/api/answers/connectors",
+            workspace=effective_workspace,
+            json_body=payload.model_dump(exclude={"faq_workspace"}, exclude_none=True),
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_lightrag_error(exc)
+    await audit_log(
+        request,
+        actor_type="user",
+        actor_id=user["user_id"],
+        action="create_faq_connector",
+        tenant_id=_effective_tenant_id(user),
+        target_type="faq_connector",
+        target_id=response.get("connector_id"),
+        detail={
+            "workspace": effective_workspace,
+            "connector_type": payload.connector_type,
+            "name": payload.name,
+        },
+    )
+    return response
+
+
+@router.patch("/faq-connectors/{connector_id}")
+async def update_faq_connector(
+    connector_id: str,
+    payload: FaqConnectorUpdateRequest,
+    request: Request,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    effective_workspace = _effective_faq_workspace(user, payload.faq_workspace)
+    try:
+        response = await lightrag_client.request_json(
+            "PATCH",
+            f"/api/answers/connectors/{connector_id}",
+            workspace=effective_workspace,
+            json_body=payload.model_dump(exclude={"faq_workspace"}, exclude_none=True),
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_lightrag_error(exc)
+    await audit_log(
+        request,
+        actor_type="user",
+        actor_id=user["user_id"],
+        action="update_faq_connector",
+        tenant_id=_effective_tenant_id(user),
+        target_type="faq_connector",
+        target_id=connector_id,
+        detail={"workspace": effective_workspace},
+    )
+    return response
+
+
+@router.post("/faq-connectors/{connector_id}/sample")
+async def sample_faq_connector(
+    connector_id: str,
+    payload: FaqConnectorSampleRequest,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    effective_workspace = _effective_faq_workspace(user, payload.faq_workspace)
+    try:
+        return await lightrag_client.request_json(
+            "POST",
+            f"/api/answers/connectors/{connector_id}/sample",
+            workspace=effective_workspace,
+            json_body={"limit": payload.limit},
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_lightrag_error(exc)
+
+
+@router.post("/faq-connectors/{connector_id}/profile")
+async def profile_faq_connector(
+    connector_id: str,
+    payload: FaqConnectorSampleRequest,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    effective_workspace = _effective_faq_workspace(user, payload.faq_workspace)
+    try:
+        return await lightrag_client.request_json(
+            "POST",
+            f"/api/answers/connectors/{connector_id}/profile",
+            workspace=effective_workspace,
+            json_body={"limit": payload.limit},
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_lightrag_error(exc)
+
+
+@router.post("/faq-connectors/{connector_id}/mapping/preview")
+async def preview_faq_connector_mapping(
+    connector_id: str,
+    payload: FaqConnectorMappingRequest,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    effective_workspace = _effective_faq_workspace(user, payload.faq_workspace)
+    try:
+        return await lightrag_client.request_json(
+            "POST",
+            f"/api/answers/connectors/{connector_id}/mapping/preview",
+            workspace=effective_workspace,
+            json_body=payload.model_dump(exclude={"faq_workspace"}),
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_lightrag_error(exc)
+
+
+@router.post("/faq-connectors/{connector_id}/materialize")
+async def materialize_faq_connector(
+    connector_id: str,
+    payload: FaqConnectorMaterializeRequest,
+    request: Request,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    effective_workspace = _effective_faq_workspace(user, payload.faq_workspace)
+    connector_payload = payload.model_dump(
+        mode="json",
+        exclude={
+            "tenant_id",
+            "category_id",
+            "enabled",
+            "valid_from",
+            "valid_until",
+            "faq_workspace",
+        },
+        exclude_none=True,
+    )
+    connector_payload["metadata"] = {
+        **payload.metadata,
+        "created_from": "integrated_kms_admin",
+        "created_by": user["user_id"],
+    }
+    try:
+        response = await lightrag_client.request_json(
+            "POST",
+            f"/api/answers/connectors/{connector_id}/materialize",
+            workspace=effective_workspace,
+            json_body=connector_payload,
+            timeout=600.0,
+        )
+    except httpx.HTTPStatusError as exc:
+        _raise_lightrag_error(exc)
+    ledger = await _link_materialized_faq_answers(
+        response=response,
+        payload=payload,
+        user=user,
+        faq_workspace=effective_workspace,
+        source_label=payload.title or connector_id,
+    )
+    await audit_log(
+        request,
+        actor_type="user",
+        actor_id=user["user_id"],
+        action="materialize_faq_connector",
+        tenant_id=_effective_tenant_id(user, payload.tenant_id),
+        target_type="faq_connector",
+        target_id=connector_id,
+        detail={
+            "workspace": effective_workspace,
+            "batch_id": ledger["batch_id"],
+            "linked_count": ledger["linked_count"],
+            "conversion_purpose": payload.conversion_purpose,
+        },
+    )
+    return {"connector_result": response, "ledger": ledger, "workspace": effective_workspace}
 
 
 @router.patch("/{item_id}")

@@ -2785,6 +2785,7 @@ class LightRAG:
                     history_messages=param.conversation_history,
                     enable_cot=True,
                     stream=param.stream,
+                    _llm_purpose="search_answer",
                 )
                 if type(response) is str:
                     return {

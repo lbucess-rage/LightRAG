@@ -5,6 +5,7 @@ import httpx
 from kms_admin.routers import jobs
 from kms_admin.routers.jobs import (
     _job_metadata,
+    _job_workspace,
     _normalize_event_row,
     _normalize_job_row,
     _should_persist_stream_event,
@@ -55,6 +56,30 @@ def test_job_json_fields_are_normalized_from_strings():
     assert job["metadata"]["tasks"] == [{"task_id": "task-1"}]
     assert job["metadata"]["request_data"]["title"] == "문서"
     assert event["detail"] == {"rollback_status": "completed", "documents": ["doc-1"]}
+
+
+def test_faq_job_workspace_prefers_metadata_workspace():
+    assert (
+        _job_workspace(
+            {
+                "job_type": "faq_structured_batch",
+                "kms_workspace": "kms-default",
+                "faq_workspace": "faq-from-item",
+                "metadata": {"workspace": "faq-from-task"},
+            }
+        )
+        == "faq-from-task"
+    )
+    assert (
+        _job_workspace(
+            {
+                "job_type": "faq_term_discovery",
+                "faq_workspace": "faq-from-item",
+                "metadata": {},
+            }
+        )
+        == "faq-from-item"
+    )
 
 
 def test_stream_event_persistence_policy_samples_progress_and_terminal_states():
@@ -131,6 +156,12 @@ def test_link_existing_ref_creates_ready_item_ref_and_completed_job(monkeypatch)
 
     class FakeDb:
         async def fetchrow(self, query, *params):
+            if "FROM KMS_ADMIN_TENANTS" in query:
+                return {
+                    "tenant_id": "default",
+                    "kms_workspace": "kevcs",
+                    "faq_workspace": "faq",
+                }
             if "SELECT tenant_id FROM KMS_ADMIN_KNOWLEDGE_ITEMS" in query:
                 return {"tenant_id": "default"}
             return None

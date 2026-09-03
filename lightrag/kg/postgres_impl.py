@@ -1299,6 +1299,8 @@ class PostgreSQLDB:
                 "LIGHTRAG_WORKSPACES",       # PK: workspace_id (no 'workspace' or 'id' columns)
                 "LIGHTRAG_WORKSPACE_SCHEMA", # PK: workspace (no 'id' column)
                 "LIGHTRAG_TASKS",            # PK: workspace + task_id (no 'id' column)
+                "LIGHTRAG_LLM_PROFILES",     # PK: profile_id (global profile table)
+                "LIGHTRAG_WORKSPACE_LLM_POLICIES", # PK: workspace_id + purpose
             }
 
             # Create missing indexes
@@ -2045,43 +2047,50 @@ class PostgreSQLDB:
         Returns:
             True if deleted successfully
         """
-        try:
-            if delete_data:
-                # Delete all data from workspace across all tables
-                tables_to_clean = [
-                    "LIGHTRAG_DOC_FULL",
-                    "LIGHTRAG_DOC_CHUNKS",
-                    "LIGHTRAG_DOC_STATUS",
-                    "LIGHTRAG_VDB_CHUNKS",
-                    "LIGHTRAG_VDB_ENTITY",
-                    "LIGHTRAG_VDB_RELATION",
-                    "LIGHTRAG_LLM_CACHE",
-                    "LIGHTRAG_FULL_ENTITIES",
-                    "LIGHTRAG_FULL_RELATIONS",
-                    "LIGHTRAG_ENTITY_CHUNKS",
-                    "LIGHTRAG_RELATION_CHUNKS",
-                    "LIGHTRAG_PROMPTS",
-                    "LIGHTRAG_USER_PROMPT_TEMPLATES",
-                    "LIGHTRAG_ANSWER_SOURCE_LINKS",
-                    "LIGHTRAG_ANSWER_SOURCE_SNAPSHOTS",
-                    "LIGHTRAG_ANSWER_EVENTS",
-                    "LIGHTRAG_ANSWER_GUIDANCE",
-                    "LIGHTRAG_ANSWER_REVISIONS",
-                    "LIGHTRAG_ANSWER_ITEMS",
-                ]
-                for table in tables_to_clean:
-                    try:
-                        delete_sql = SQL_TEMPLATES["drop_specifiy_table_workspace"].format(
-                            table_name=table
-                        )
-                        await self.execute(delete_sql, {"workspace": workspace_id})
-                        logger.debug(f"Deleted data from {table} for workspace {workspace_id}")
-                    except Exception as e:
-                        logger.warning(f"Failed to delete from {table}: {e}")
 
-            # Delete workspace record
-            sql = SQL_TEMPLATES["delete_workspace"]
-            await self.execute(sql, {"workspace_id": workspace_id})
+        async def _delete_operation(connection: asyncpg.Connection) -> None:
+            async with connection.transaction():
+                if delete_data:
+                    workspace_tables = await connection.fetch(
+                        """
+                        SELECT c.table_schema, c.table_name
+                        FROM information_schema.columns c
+                        JOIN information_schema.tables t
+                          ON t.table_schema = c.table_schema
+                         AND t.table_name = c.table_name
+                        WHERE c.column_name = 'workspace'
+                          AND t.table_type = 'BASE TABLE'
+                          AND c.table_schema = current_schema()
+                          AND (
+                              lower(c.table_name) LIKE 'lightrag\\_%' ESCAPE '\\'
+                              OR lower(c.table_name) LIKE 'kms\\_admin\\_%' ESCAPE '\\'
+                          )
+                        ORDER BY c.table_name
+                        """
+                    )
+
+                    for row in workspace_tables:
+                        schema_name = str(row["table_schema"]).replace('"', '""')
+                        table_name = str(row["table_name"]).replace('"', '""')
+                        await connection.execute(
+                            f'DELETE FROM "{schema_name}"."{table_name}" '
+                            "WHERE workspace = $1",
+                            workspace_id,
+                        )
+                        logger.debug(
+                            "Deleted workspace data from %s.%s for %s",
+                            schema_name,
+                            table_name,
+                            workspace_id,
+                        )
+
+                await connection.execute(
+                    SQL_TEMPLATES["delete_workspace"],
+                    workspace_id,
+                )
+
+        try:
+            await self._run_with_retry(_delete_operation)
             logger.info(f"Deleted workspace: {workspace_id}")
             return True
         except Exception as e:
@@ -5951,6 +5960,65 @@ TABLES = {
                     CONSTRAINT LIGHTRAG_WORKSPACES_PK PRIMARY KEY (workspace_id)
                     )"""
     },
+    "LIGHTRAG_LLM_PROFILES": {
+        "ddl": """CREATE TABLE LIGHTRAG_LLM_PROFILES (
+                    profile_id VARCHAR(100) NOT NULL,
+                    name VARCHAR(255) NOT NULL,
+                    description TEXT,
+                    provider VARCHAR(50) NOT NULL DEFAULT 'openai_compatible',
+                    base_url TEXT NOT NULL,
+                    model VARCHAR(255) NOT NULL,
+                    api_key_encrypted TEXT,
+                    timeout_seconds INTEGER NOT NULL DEFAULT 120,
+                    context_window INTEGER NOT NULL DEFAULT 131072,
+                    max_tokens INTEGER NOT NULL DEFAULT 2048,
+                    temperature FLOAT8 NOT NULL DEFAULT 0.7,
+                    top_p FLOAT8 NOT NULL DEFAULT 0.8,
+                    presence_penalty FLOAT8 NOT NULL DEFAULT 0.0,
+                    thinking_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                    supports_thinking BOOLEAN NOT NULL DEFAULT TRUE,
+                    supports_tools BOOLEAN NOT NULL DEFAULT FALSE,
+                    supports_structured_output BOOLEAN NOT NULL DEFAULT TRUE,
+                    supports_vision BOOLEAN NOT NULL DEFAULT FALSE,
+                    verify_tls BOOLEAN NOT NULL DEFAULT TRUE,
+                    extra_options JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    create_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
+                    update_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT LIGHTRAG_LLM_PROFILES_PK PRIMARY KEY (profile_id)
+                    )"""
+    },
+    "LIGHTRAG_WORKSPACE_LLM_POLICIES": {
+        "ddl": """CREATE TABLE LIGHTRAG_WORKSPACE_LLM_POLICIES (
+                    workspace_id VARCHAR(255) NOT NULL,
+                    purpose VARCHAR(64) NOT NULL,
+                    profile_id VARCHAR(100) NOT NULL,
+                    thinking_mode VARCHAR(16) NOT NULL DEFAULT 'inherit',
+                    timeout_seconds INTEGER,
+                    max_tokens INTEGER,
+                    temperature FLOAT8,
+                    top_p FLOAT8,
+                    presence_penalty FLOAT8,
+                    response_format VARCHAR(32),
+                    fallback_profile_id VARCHAR(100),
+                    extra_options JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    create_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
+                    update_time TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT LIGHTRAG_WORKSPACE_LLM_POLICIES_PK
+                        PRIMARY KEY (workspace_id, purpose),
+                    CONSTRAINT LIGHTRAG_WORKSPACE_LLM_POLICIES_WORKSPACE_FK
+                        FOREIGN KEY (workspace_id) REFERENCES LIGHTRAG_WORKSPACES(workspace_id)
+                        ON DELETE CASCADE,
+                    CONSTRAINT LIGHTRAG_WORKSPACE_LLM_POLICIES_PROFILE_FK
+                        FOREIGN KEY (profile_id) REFERENCES LIGHTRAG_LLM_PROFILES(profile_id)
+                        ON DELETE RESTRICT,
+                    CONSTRAINT LIGHTRAG_WORKSPACE_LLM_POLICIES_FALLBACK_FK
+                        FOREIGN KEY (fallback_profile_id) REFERENCES LIGHTRAG_LLM_PROFILES(profile_id)
+                        ON DELETE SET NULL,
+                    CONSTRAINT LIGHTRAG_WORKSPACE_LLM_POLICIES_THINKING_CHECK
+                        CHECK (thinking_mode IN ('inherit', 'enabled', 'disabled'))
+                    )"""
+    },
     "LIGHTRAG_WORKSPACE_SCHEMA": {
         "ddl": """CREATE TABLE LIGHTRAG_WORKSPACE_SCHEMA (
                     workspace VARCHAR(255) NOT NULL,
@@ -6174,7 +6242,8 @@ SQL_TEMPLATES = {
                      """,
     "entities": """
                 SELECT e.entity_name,
-                       EXTRACT(EPOCH FROM e.create_time)::BIGINT AS created_at
+                       EXTRACT(EPOCH FROM e.create_time)::BIGINT AS created_at,
+                       (1 - (e.content_vector <=> '[{embedding_string}]'::vector)) AS similarity
                 FROM LIGHTRAG_VDB_ENTITY e
                 WHERE e.workspace = $1
                   AND e.content_vector <=> '[{embedding_string}]'::vector < $2

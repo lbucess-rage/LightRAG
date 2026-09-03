@@ -64,7 +64,7 @@ class LightRAGClient:
         *,
         workspace: str | None = None,
         data: dict[str, Any] | None = None,
-        files: dict[str, tuple[str, bytes, str | None]] | None = None,
+        files: dict[str, tuple[str, Any, str | None]] | None = None,
         timeout: float = 120.0,
     ) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=timeout) as client:
@@ -79,6 +79,27 @@ class LightRAGClient:
             if not response.content:
                 return {}
             return response.json()
+
+    async def request_bytes(
+        self,
+        method: str,
+        path: str,
+        *,
+        workspace: str | None = None,
+        timeout: float = 120.0,
+    ) -> tuple[bytes, str, str | None]:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            response = await client.request(
+                method,
+                f"{self.base_url}{path}",
+                headers=self._headers(workspace, json_content=False),
+            )
+            response.raise_for_status()
+            return (
+                response.content,
+                response.headers.get("content-type", "application/octet-stream"),
+                response.headers.get("content-disposition"),
+            )
 
     async def stream_ndjson(
         self,

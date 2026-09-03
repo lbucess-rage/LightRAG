@@ -2,7 +2,7 @@
 
 import json
 import re
-from typing import Any, Literal, Optional
+from typing import Any, Awaitable, Callable, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
@@ -115,6 +115,14 @@ class WorkspaceStatsResponse(BaseModel):
     relation_count: int
     is_busy: bool = False
     busy_start_time: Optional[float] = None
+
+
+class WorkspaceDeleteResponse(BaseModel):
+    """Response model for a completed workspace deletion."""
+
+    message: str
+    data_deleted: bool
+    graph_cleanup: dict[str, Any]
 
 
 class CopySettingsRequest(BaseModel):
@@ -263,6 +271,30 @@ def _clean_workspace_metadata(metadata: Any) -> dict:
     return next_metadata
 
 
+async def _drop_workspace_graph(workspace_rag: Any, workspace_id: str) -> dict[str, Any]:
+    """Drop graph data only when the RAG instance belongs to the target workspace."""
+    actual_workspace = getattr(workspace_rag, "workspace", None)
+    if actual_workspace != workspace_id:
+        raise RuntimeError(
+            "Workspace graph deletion aborted because the resolved RAG instance "
+            f"belongs to '{actual_workspace}', not '{workspace_id}'."
+        )
+
+    graph_storage = getattr(workspace_rag, "chunk_entity_relation_graph", None)
+    if graph_storage is None or not hasattr(graph_storage, "drop"):
+        raise RuntimeError(
+            f"Graph storage is not available for workspace '{workspace_id}'."
+        )
+
+    result = await graph_storage.drop()
+    if isinstance(result, dict) and result.get("status") == "error":
+        raise RuntimeError(
+            f"Failed to delete graph data for workspace '{workspace_id}': "
+            f"{result.get('message', 'unknown graph storage error')}"
+        )
+    return result if isinstance(result, dict) else {"status": "success"}
+
+
 def _workspace_response(row: dict, *, is_busy: bool = False) -> WorkspaceResponse:
     metadata = _clean_workspace_metadata(row.get("metadata"))
     return WorkspaceResponse(
@@ -336,7 +368,12 @@ def _parse_metadata_filters(metadata_filter: Optional[list[str]]) -> dict | None
 # =====================================================
 
 
-def create_workspace_routes(rag, api_key: Optional[str] = None):
+def create_workspace_routes(
+    rag,
+    api_key: Optional[str] = None,
+    workspace_rag_getter: Optional[Callable[[str], Awaitable[Any]]] = None,
+    workspace_rag_releaser: Optional[Callable[[str], Awaitable[None]]] = None,
+):
     """Create workspace management routes."""
     combined_auth = get_combined_auth_dependency(api_key)
 
@@ -574,15 +611,25 @@ def create_workspace_routes(rag, api_key: Optional[str] = None):
 
     @router.delete(
         "/{workspace_id}",
+        response_model=WorkspaceDeleteResponse,
         dependencies=[Depends(combined_auth)],
         summary="Delete workspace",
-        description="Delete a workspace and all its data. Cannot delete default workspace or workspace that is currently busy.",
+        description=(
+            "Delete a non-default, idle workspace. With delete_data=true, all "
+            "LightRAG and KMS Admin PostgreSQL tables containing the workspace "
+            "column are cleared in one transaction. KMS and hybrid workspaces "
+            "also delete their graph storage. With delete_data=false, only the "
+            "workspace registration is removed and stored data is preserved."
+        ),
     )
     async def delete_workspace(
         workspace_id: str,
         delete_data: bool = Query(
             default=True,
-            description="Whether to delete all data in the workspace",
+            description=(
+                "Delete workspace data as well as its registration. Set to false "
+                "only when intentionally preserving storage data."
+            ),
         ),
     ):
         """Delete a workspace."""
@@ -614,12 +661,53 @@ def create_workspace_routes(rag, api_key: Optional[str] = None):
                     detail=f"Workspace '{workspace_id}' is currently processing. Please wait until processing is complete.",
                 )
 
-            # Delete workspace
+            graph_cleanup: dict[str, Any] = {
+                "status": "skipped",
+                "message": "Graph cleanup was not requested.",
+            }
+            workspace_mode = _normalize_workspace_mode(
+                workspace.get("workspace_mode"),
+                _clean_workspace_metadata(workspace.get("metadata")),
+            )
+            if delete_data and workspace_mode in {"kms", "hybrid"}:
+                target_rag = (
+                    await workspace_rag_getter(workspace_id)
+                    if workspace_rag_getter is not None
+                    else rag
+                )
+                graph_cleanup = await _drop_workspace_graph(target_rag, workspace_id)
+            elif delete_data:
+                graph_cleanup = {
+                    "status": "skipped",
+                    "message": "Answer catalog workspaces do not use graph storage.",
+                }
+
             success = await db.delete_workspace(workspace_id, delete_data=delete_data)
             if not success:
-                raise HTTPException(status_code=500, detail="Failed to delete workspace")
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        "Failed to delete workspace data from PostgreSQL. "
+                        "The workspace record was preserved."
+                    ),
+                )
 
-            return {"message": f"Workspace '{workspace_id}' deleted successfully"}
+            if workspace_rag_releaser is not None:
+                try:
+                    await workspace_rag_releaser(workspace_id)
+                except Exception as release_error:
+                    logger.warning(
+                        "Workspace '%s' was deleted, but its cached RAG instance "
+                        "could not be released: %s",
+                        workspace_id,
+                        release_error,
+                    )
+
+            return {
+                "message": f"Workspace '{workspace_id}' deleted successfully",
+                "data_deleted": delete_data,
+                "graph_cleanup": graph_cleanup,
+            }
         except HTTPException:
             raise
         except Exception as e:

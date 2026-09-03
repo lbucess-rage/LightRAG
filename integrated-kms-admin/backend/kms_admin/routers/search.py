@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -95,6 +95,7 @@ class IntegratedSearchRequest(BaseModel):
     faq_workspace: str | None = None
     kms_options: dict[str, Any] = Field(default_factory=dict)
     faq_options: dict[str, Any] = Field(default_factory=dict)
+    display_options: dict[str, Any] = Field(default_factory=dict)
     client_trace_id: str | None = None
 
 
@@ -139,13 +140,41 @@ async def _internal_scope(payload: IntegratedSearchRequest, user: dict) -> Works
                 kms_workspace=tenant["kms_workspace"],
                 faq_workspace=tenant["faq_workspace"],
             )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Active tenant workspace pair not found",
+        )
 
     requested_kms_workspace = payload.kms_workspace if user.get("role") == "admin" else None
     requested_faq_workspace = payload.faq_workspace if user.get("role") == "admin" else None
+    if requested_kms_workspace or requested_faq_workspace:
+        tenant = await db.fetchrow(
+            """
+            SELECT tenant_id, kms_workspace, faq_workspace
+            FROM KMS_ADMIN_TENANTS
+            WHERE kms_workspace = $1
+              AND faq_workspace = $2
+              AND is_active = TRUE
+            ORDER BY create_time ASC
+            LIMIT 1
+            """,
+            requested_kms_workspace or user.get("kms_workspace"),
+            requested_faq_workspace or user.get("faq_workspace"),
+        )
+        if not tenant:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Requested workspaces are not a registered active pair",
+            )
+        return WorkspaceScope(
+            tenant_id=tenant["tenant_id"],
+            kms_workspace=tenant["kms_workspace"],
+            faq_workspace=tenant["faq_workspace"],
+        )
     return WorkspaceScope(
-        tenant_id=user.get("tenant_id") if not requested_kms_workspace and not requested_faq_workspace else None,
-        kms_workspace=requested_kms_workspace or user.get("kms_workspace") or settings.default_kms_workspace,
-        faq_workspace=requested_faq_workspace or user.get("faq_workspace") or settings.default_faq_workspace,
+        tenant_id=user.get("tenant_id"),
+        kms_workspace=user.get("kms_workspace") or settings.default_kms_workspace,
+        faq_workspace=user.get("faq_workspace") or settings.default_faq_workspace,
     )
 
 

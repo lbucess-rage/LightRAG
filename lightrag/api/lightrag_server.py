@@ -62,6 +62,8 @@ from lightrag.api.routers.graph_routes import (
     set_rag_workspace_getter as set_graph_rag_workspace_getter,
 )
 from lightrag.api.routers.prompt_routes import create_prompt_routes
+from lightrag.api.routers.llm_profile_routes import create_llm_profile_routes
+from lightrag.api.llm_runtime import WorkspaceLLMRouter
 from lightrag.api.routers.user_prompt_template_routes import create_user_prompt_template_routes
 from lightrag.api.routers.entity_management_routes import (
     create_entity_management_routes,
@@ -138,6 +140,7 @@ load_dotenv(dotenv_path=".env", override=False)
 _rag_instance_cache: dict[str, LightRAG] = {}
 _rag_factory_config: dict = {}  # Stores configuration for creating new RAG instances
 _default_rag_instance: LightRAG | None = None
+_workspace_llm_router: WorkspaceLLMRouter | None = None
 
 
 def set_rag_factory_config(config: dict):
@@ -155,6 +158,12 @@ def set_default_rag_instance(rag: LightRAG):
         _rag_instance_cache[rag.workspace] = rag
 
 
+def set_workspace_llm_router(router: WorkspaceLLMRouter):
+    """Set the runtime router used by every workspace RAG instance."""
+    global _workspace_llm_router
+    _workspace_llm_router = router
+
+
 async def get_rag_for_workspace(workspace: str) -> LightRAG:
     """Get or create a RAG instance for the specified workspace.
 
@@ -165,6 +174,7 @@ async def get_rag_for_workspace(workspace: str) -> LightRAG:
         LightRAG instance for the workspace (initialized)
     """
     global _rag_instance_cache, _rag_factory_config, _default_rag_instance
+    global _workspace_llm_router
 
     # Return cached instance if available
     if workspace in _rag_instance_cache:
@@ -183,6 +193,9 @@ async def get_rag_for_workspace(workspace: str) -> LightRAG:
         logger.info(f"Creating new RAG instance for workspace: {workspace}")
         config = _rag_factory_config.copy()
         config["workspace"] = workspace
+        if _workspace_llm_router is not None:
+            config["llm_model_func"] = _workspace_llm_router.for_workspace(workspace)
+            config["llm_model_name"] = "workspace-policy-router"
 
         new_rag = LightRAG(**config)
 
@@ -200,6 +213,16 @@ async def get_rag_for_workspace(workspace: str) -> LightRAG:
         logger.error(f"Failed to create RAG instance for workspace {workspace}: {e}")
         # Fall back to default instance
         return _default_rag_instance
+
+
+async def release_rag_for_workspace(workspace: str) -> None:
+    """Finalize and remove a cached non-default workspace RAG instance."""
+    global _rag_instance_cache, _default_rag_instance
+
+    cached_rag = _rag_instance_cache.pop(workspace, None)
+    if cached_rag is None or cached_rag is _default_rag_instance:
+        return
+    await cached_rag.finalize_storages()
 
 
 def get_default_rag() -> LightRAG | None:
@@ -1221,13 +1244,37 @@ def create_app(args):
         name=args.simulated_model_name, tag=args.simulated_model_tag
     )
 
+    default_llm_model_func = create_llm_model_func(args.llm_binding)
+
+    async def get_llm_policy_db():
+        current_rag = _default_rag_instance
+        if current_rag is None:
+            return None
+        if hasattr(current_rag, "llm_response_cache") and hasattr(
+            current_rag.llm_response_cache, "db"
+        ):
+            return current_rag.llm_response_cache.db
+        if hasattr(current_rag, "text_chunks") and hasattr(
+            current_rag.text_chunks, "db"
+        ):
+            return current_rag.text_chunks.db
+        return None
+
+    workspace_llm_router = WorkspaceLLMRouter(
+        default_llm_model_func,
+        get_llm_policy_db,
+    )
+    set_workspace_llm_router(workspace_llm_router)
+
     # Initialize RAG with unified configuration
     try:
         rag = LightRAG(
             working_dir=args.working_dir,
             workspace=args.workspace,
-            llm_model_func=create_llm_model_func(args.llm_binding),
-            llm_model_name=args.llm_model,
+            llm_model_func=workspace_llm_router.for_workspace(
+                args.workspace or "base"
+            ),
+            llm_model_name="workspace-policy-router",
             llm_model_max_async=args.max_async,
             summary_max_tokens=args.summary_max_tokens,
             summary_context_size=args.summary_context_size,
@@ -1261,8 +1308,8 @@ def create_app(args):
         # Store factory config for creating workspace-specific RAG instances
         rag_factory_config = {
             "working_dir": args.working_dir,
-            "llm_model_func": create_llm_model_func(args.llm_binding),
-            "llm_model_name": args.llm_model,
+            "llm_model_func": default_llm_model_func,
+            "llm_model_name": "workspace-policy-router",
             "llm_model_max_async": args.max_async,
             "summary_max_tokens": args.summary_max_tokens,
             "summary_context_size": args.summary_context_size,
@@ -1319,6 +1366,7 @@ def create_app(args):
     app.include_router(create_query_routes(rag, api_key, args.top_k))
     app.include_router(create_graph_routes(rag, api_key))
     app.include_router(create_prompt_routes(rag, api_key))
+    app.include_router(create_llm_profile_routes(rag, api_key))
     app.include_router(create_user_prompt_template_routes(rag, api_key))
     app.include_router(create_entity_management_routes(rag, api_key))
     app.include_router(create_deletion_routes(rag, api_key, doc_manager))
@@ -1326,7 +1374,14 @@ def create_app(args):
     app.include_router(create_history_routes(rag, api_key))
     app.include_router(create_answer_routes(rag, api_key))
     logger.info("Operational deletion, chunk, history, and answer routes initialized")
-    app.include_router(create_workspace_routes(rag, api_key))
+    app.include_router(
+        create_workspace_routes(
+            rag,
+            api_key,
+            get_rag_for_workspace,
+            release_rag_for_workspace,
+        )
+    )
 
     # Add Schema API routes
     app.include_router(schema_router, prefix="/api/schema")
@@ -1340,6 +1395,7 @@ def create_app(args):
             return await rag.llm_model_func(
                 prompt,
                 system_prompt=system_prompt,
+                _llm_purpose="schema_design",
             )
 
         discovery_engine = SchemaDiscoveryEngine(llm_func=schema_llm_func)
@@ -1376,7 +1432,12 @@ def create_app(args):
 
         # Set LLM function for table/equation processing (reuse RAG's LLM)
         async def multimodal_llm_func(prompt: str, system_prompt: str = None, **kwargs) -> str:
-            return await rag.llm_model_func(prompt, system_prompt=system_prompt)
+            return await rag.llm_model_func(
+                prompt,
+                system_prompt=system_prompt,
+                _llm_purpose="multimodal",
+                **kwargs,
+            )
 
         set_multimodal_llm_func(multimodal_llm_func)
         set_url_llm_model_func(multimodal_llm_func)

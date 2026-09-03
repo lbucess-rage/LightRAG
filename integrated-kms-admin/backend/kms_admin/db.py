@@ -40,6 +40,17 @@ class Database:
         assert self.pool is not None
         return await self.pool.execute(sql, *args)
 
+    async def execute_many_transaction(
+        self,
+        operations: list[tuple[str, list[tuple[Any, ...]]]],
+    ) -> None:
+        assert self.pool is not None
+        async with self.pool.acquire() as connection:
+            async with connection.transaction():
+                for sql, args in operations:
+                    if args:
+                        await connection.executemany(sql, args)
+
     async def migrate(self) -> None:
         statements = [
             """

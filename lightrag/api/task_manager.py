@@ -29,6 +29,10 @@ class TaskType(str, Enum):
     MULTIMODAL_PROCESS = "multimodal_process"
     URL_INGEST = "url_ingest"
     BOARD_INGEST = "board_ingest"
+    FAQ_GUIDANCE_ENRICHMENT = "faq_guidance_enrichment"
+    FAQ_TERM_DISCOVERY = "faq_term_discovery"
+    FAQ_VECTOR_REBUILD = "faq_vector_rebuild"
+    FAQ_GRAPH_REBUILD = "faq_graph_rebuild"
 
 
 class TaskStatus(str, Enum):
@@ -227,6 +231,8 @@ class TaskService:
         task = self._registry.get_task(task_id)
         if not task:
             return
+        if task.status in (TaskStatus.FAILED, TaskStatus.CANCELLED):
+            return
 
         task.status = TaskStatus.COMPLETED
         task.progress = 100.0
@@ -364,6 +370,22 @@ class TaskService:
         queue = self._registry.subscribe(task_id)
         try:
             while True:
+                current = self._registry.get_task(task_id)
+                if current and current.status in (
+                    TaskStatus.COMPLETED,
+                    TaskStatus.FAILED,
+                    TaskStatus.CANCELLED,
+                ):
+                    yield json.dumps(
+                        TaskProgressEvent(
+                            task_id=task_id,
+                            status=current.status,
+                            progress=current.progress,
+                            message=current.message,
+                            detail=current.result,
+                        ).model_dump()
+                    ) + "\n"
+                    return
                 try:
                     event: TaskProgressEvent = await asyncio.wait_for(
                         queue.get(), timeout=heartbeat_interval

@@ -1,6 +1,7 @@
 from ..utils import verbose_debug, VERBOSE_DEBUG
 import os
 import logging
+import httpx
 
 from collections.abc import AsyncIterator
 
@@ -184,6 +185,7 @@ async def openai_complete_if_cache(
     use_azure: bool = False,
     azure_deployment: str | None = None,
     api_version: str | None = None,
+    verify_tls: bool | None = None,
     **kwargs: Any,
 ) -> str:
     """Complete a prompt using OpenAI's API with caching support and Chain of Thought (COT) integration.
@@ -255,6 +257,13 @@ async def openai_complete_if_cache(
 
     # Extract client configuration options
     client_configs = kwargs.pop("openai_client_configs", {})
+    if verify_tls is not None and "http_client" not in client_configs:
+        # This function is retried by tenacity. Build the HTTP client inside each
+        # attempt so a client closed by a failed attempt is never reused.
+        client_configs = {
+            **client_configs,
+            "http_client": httpx.AsyncClient(verify=verify_tls),
+        }
 
     # Handle keyword extraction mode
     if keyword_extraction:
@@ -301,7 +310,12 @@ async def openai_complete_if_cache(
 
     try:
         # Don't use async with context manager, use client directly
-        if "response_format" in kwargs:
+        response_format = kwargs.get("response_format")
+        is_parsed_response = (
+            isinstance(response_format, type)
+            and hasattr(response_format, "model_json_schema")
+        )
+        if is_parsed_response:
             response = await openai_async_client.chat.completions.parse(
                 model=api_model, messages=messages, **kwargs
             )
@@ -365,7 +379,11 @@ async def openai_complete_if_cache(
 
                     delta = chunk.choices[0].delta
                     content = getattr(delta, "content", None)
-                    reasoning_content = getattr(delta, "reasoning_content", "")
+                    reasoning_content = getattr(
+                        delta,
+                        "reasoning_content",
+                        getattr(delta, "reasoning", ""),
+                    )
 
                     # Handle COT logic for streaming (only if enabled)
                     if enable_cot:
@@ -527,7 +545,11 @@ async def openai_complete_if_cache(
             else:
                 # Handle regular content responses
                 content = getattr(message, "content", None)
-                reasoning_content = getattr(message, "reasoning_content", "")
+                reasoning_content = getattr(
+                    message,
+                    "reasoning_content",
+                    getattr(message, "reasoning", ""),
+                )
 
                 # Handle COT logic for non-streaming responses (only if enabled)
                 final_content = ""
