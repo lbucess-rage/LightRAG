@@ -95,6 +95,7 @@ class IntegratedSearchRequest(BaseModel):
     faq_workspace: str | None = None
     kms_options: dict[str, Any] = Field(default_factory=dict)
     faq_options: dict[str, Any] = Field(default_factory=dict)
+    display_options: dict[str, Any] = Field(default_factory=dict)
     client_trace_id: str | None = None
 
 

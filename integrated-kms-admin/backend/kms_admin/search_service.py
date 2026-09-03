@@ -30,6 +30,80 @@ class CandidateScope:
     eligibility: dict[str, Any]
 
 
+FAQ_DISPLAY_DEFAULTS: dict[str, Any] = {"min_score": 0.27, "gap": 0.02, "list_size": 3}
+
+
+async def _tenant_faq_display_config(tenant_id: str | None) -> dict[str, Any]:
+    if not tenant_id:
+        return {}
+    row = await db.fetchrow(
+        "SELECT metadata FROM KMS_ADMIN_TENANTS WHERE tenant_id = $1",
+        tenant_id,
+    )
+    if not row:
+        return {}
+    metadata = row.get("metadata")
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except (TypeError, ValueError):
+            return {}
+    if not isinstance(metadata, dict):
+        return {}
+    cfg = metadata.get("faq_display")
+    return cfg if isinstance(cfg, dict) else {}
+
+
+def resolve_faq_display_config(tenant_cfg: dict[str, Any], request_cfg: Any) -> dict[str, Any]:
+    cfg = dict(FAQ_DISPLAY_DEFAULTS)
+    for source in (tenant_cfg, request_cfg if isinstance(request_cfg, dict) else {}):
+        for key in FAQ_DISPLAY_DEFAULTS:
+            value = source.get(key)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                cfg[key] = value
+    cfg["list_size"] = max(1, int(cfg["list_size"]))
+    return cfg
+
+
+def compute_faq_display(faq_response: dict[str, Any] | None, cfg: dict[str, Any]) -> dict[str, Any]:
+    items: list[dict[str, Any]] = []
+    for candidate in (faq_response or {}).get("candidates") or []:
+        answer = candidate.get("answer") or {}
+        answer_id = answer.get("answer_id")
+        if not answer_id or any(item["answer_id"] == answer_id for item in items):
+            continue
+        items.append(
+            {
+                "answer_id": answer_id,
+                "title": answer.get("title"),
+                "score": float(candidate.get("score") or 0.0),
+                "body": answer.get("body"),
+                "content_format": answer.get("content_format"),
+            }
+        )
+    if not items and (faq_response or {}).get("answer_id"):
+        items.append(
+            {
+                "answer_id": faq_response["answer_id"],
+                "title": faq_response.get("title"),
+                "score": float(faq_response.get("confidence") or 0.0),
+                "body": faq_response.get("full_content") or faq_response.get("response"),
+                "content_format": faq_response.get("content_format"),
+            }
+        )
+    items.sort(key=lambda item: -item["score"])
+    verdict: dict[str, Any] = {"thresholds": cfg}
+    if not items:
+        verdict.update({"mode": "none", "reason": "no_candidates", "items": []})
+    elif items[0]["score"] < cfg["min_score"]:
+        verdict.update({"mode": "none", "reason": "below_min_score", "items": []})
+    elif len(items) == 1 or items[0]["score"] - items[1]["score"] >= cfg["gap"]:
+        verdict.update({"mode": "solo", "reason": None, "items": items[:1]})
+    else:
+        verdict.update({"mode": "list", "reason": None, "items": items[: cfg["list_size"]]})
+    return verdict
+
+
 BRIEF_ANSWER_RESPONSE_TYPE = (
     "Brief answer: MAXIMUM 5 bullet points using '- ' (hyphen+space). "
     "Each point is one concise line. Fewer is better."
@@ -314,6 +388,7 @@ async def integrated_search(
     generative_answer = None
     faq_results: list[dict[str, Any]] = []
     faq_metadata: dict[str, Any] = {}
+    faq_display: dict[str, Any] | None = None
     generative_trace_id = None
     faq_trace_id = None
     errors: list[dict[str, Any]] = []
@@ -373,7 +448,13 @@ async def integrated_search(
                 if faq_response.get(key) is not None
             }
             faq_results = [faq_response] if faq_response.get("matched") else faq_response.get("candidates", [])
+            display_cfg = resolve_faq_display_config(
+                await _tenant_faq_display_config(scope.tenant_id),
+                payload.get("display_options"),
+            )
+            faq_display = compute_faq_display(faq_response, display_cfg)
         except httpx.HTTPStatusError as exc:
+            faq_display = {"mode": "error", "reason": "faq_search_failed", "items": [], "thresholds": None}
             errors.append(
                 {
                     "source": "faq",
@@ -381,6 +462,8 @@ async def integrated_search(
                     "detail": http_error_detail(exc),
                 }
             )
+    if faq_display is None and include_faq:
+        faq_display = {"mode": "none", "reason": "no_scope", "items": [], "thresholds": None}
 
     keywords = extract_keywords(
         query,
@@ -393,6 +476,7 @@ async def integrated_search(
         "generative_answer": generative_answer,
         "faq_results": faq_results,
         "faq_metadata": faq_metadata,
+        "faq_display": faq_display,
         "keywords": keywords,
         "references": (generative_answer or {}).get("references", []),
         "latency_ms": latency_ms,
@@ -535,11 +619,16 @@ async def integrated_search_stream(
                 if faq_response.get(key) is not None
             }
             faq_results = [faq_response] if faq_response.get("matched") else faq_response.get("candidates", [])
+            display_cfg = resolve_faq_display_config(
+                await _tenant_faq_display_config(scope.tenant_id),
+                payload.get("display_options"),
+            )
             yield {
                 "event": "faq_results",
                 "search_id": search_id,
                 "results": faq_results,
                 "metadata": faq_metadata,
+                "display": compute_faq_display(faq_response, display_cfg),
             }
         except httpx.HTTPStatusError as exc:
             yield {
