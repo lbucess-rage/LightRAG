@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from ..db import db
 from ..dependencies import audit_log, get_current_user, require_admin
 from ..lightrag_client import lightrag_client
+from ..search_service import FAQ_DISPLAY_DEFAULTS
 
 router = APIRouter(prefix="/api/tenants", tags=["tenants"])
 
@@ -499,6 +500,103 @@ async def provision_tenant(
         "created_workspaces": created_ws,
         "copied_categories": copied,
     }
+
+
+class FaqDisplayRequest(BaseModel):
+    """FAQ 표시 기준값 — 미지정 필드는 기존 값 유지. 전부 테넌트 단위."""
+    min_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    gap: float | None = Field(default=None, ge=0.0, le=1.0)
+    list_size: int | None = Field(default=None, ge=1, le=10)
+
+
+async def _tenant_metadata(tenant_id: str) -> dict:
+    row = await db.fetchrow("SELECT metadata FROM KMS_ADMIN_TENANTS WHERE tenant_id = $1", tenant_id)
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
+    metadata = row.get("metadata")
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except (TypeError, ValueError):
+            metadata = {}
+    return metadata if isinstance(metadata, dict) else {}
+
+
+@router.get("/{tenant_id}/faq-display")
+async def get_faq_display(tenant_id: str, user: dict = Depends(get_current_user)) -> dict:
+    metadata = await _tenant_metadata(tenant_id)
+    raw = metadata.get("faq_display")
+    overrides = raw if isinstance(raw, dict) else {}
+    effective = dict(FAQ_DISPLAY_DEFAULTS)
+    for key in FAQ_DISPLAY_DEFAULTS:
+        value = overrides.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            effective[key] = value
+    return {
+        "tenant_id": tenant_id,
+        "defaults": FAQ_DISPLAY_DEFAULTS,
+        "overrides": overrides,
+        "effective": effective,
+    }
+
+
+@router.put("/{tenant_id}/faq-display")
+async def set_faq_display(
+    tenant_id: str,
+    payload: FaqDisplayRequest,
+    request: Request,
+    admin: dict = Depends(require_admin),
+) -> dict:
+    values = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
+    if not values:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="No fields to update")
+    metadata = await _tenant_metadata(tenant_id)
+    raw = metadata.get("faq_display")
+    overrides = dict(raw) if isinstance(raw, dict) else {}
+    overrides.update(values)
+    metadata["faq_display"] = overrides
+    await db.execute(
+        "UPDATE KMS_ADMIN_TENANTS SET metadata = $2::jsonb, update_time = NOW() WHERE tenant_id = $1",
+        tenant_id,
+        json.dumps(metadata),
+    )
+    await audit_log(
+        request,
+        actor_type="user",
+        actor_id=admin["user_id"],
+        action="set_faq_display",
+        tenant_id=tenant_id,
+        target_type="tenant",
+        target_id=tenant_id,
+        detail=values,
+    )
+    return {"message": "updated", "tenant_id": tenant_id, "faq_display": overrides}
+
+
+@router.delete("/{tenant_id}/faq-display")
+async def reset_faq_display(
+    tenant_id: str,
+    request: Request,
+    admin: dict = Depends(require_admin),
+) -> dict:
+    metadata = await _tenant_metadata(tenant_id)
+    metadata.pop("faq_display", None)
+    await db.execute(
+        "UPDATE KMS_ADMIN_TENANTS SET metadata = $2::jsonb, update_time = NOW() WHERE tenant_id = $1",
+        tenant_id,
+        json.dumps(metadata),
+    )
+    await audit_log(
+        request,
+        actor_type="user",
+        actor_id=admin["user_id"],
+        action="reset_faq_display",
+        tenant_id=tenant_id,
+        target_type="tenant",
+        target_id=tenant_id,
+        detail={},
+    )
+    return {"message": "reset", "tenant_id": tenant_id, "effective": FAQ_DISPLAY_DEFAULTS}
 
 
 @router.delete("/{tenant_id}")

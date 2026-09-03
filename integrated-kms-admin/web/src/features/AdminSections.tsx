@@ -31,6 +31,7 @@ import {
   SaveIcon,
   SearchIcon,
   ShieldIcon,
+  SlidersHorizontalIcon,
   TagIcon,
   Trash2Icon,
   UploadIcon,
@@ -6997,6 +6998,12 @@ export function Tenants() {
   const [diagTarget, setDiagTarget] = useState<Tenant | null>(null)
   const [diagData, setDiagData] = useState<any>(null)
   const [diagLoading, setDiagLoading] = useState(false)
+  const [dispTarget, setDispTarget] = useState<Tenant | null>(null)
+  const [dispCfg, setDispCfg] = useState<{ min_score: string; gap: string; list_size: string }>({ min_score: '', gap: '', list_size: '' })
+  const [dispDefaults, setDispDefaults] = useState<any>(null)
+  const [dispOverridden, setDispOverridden] = useState(false)
+  const [dispLoading, setDispLoading] = useState(false)
+  const [dispSaving, setDispSaving] = useState(false)
 
   const loadTenants = async () => {
     setLoading(true)
@@ -7148,6 +7155,53 @@ export function Tenants() {
     }
   }
 
+  const openDisplayConfig = async (tenant: Tenant) => {
+    setDispTarget(tenant)
+    setDispLoading(true)
+    try {
+      const response = await api.get(`/api/tenants/${tenant.tenant_id}/faq-display`)
+      const eff = response.data.effective || {}
+      setDispCfg({ min_score: String(eff.min_score ?? ''), gap: String(eff.gap ?? ''), list_size: String(eff.list_size ?? '') })
+      setDispDefaults(response.data.defaults || null)
+      setDispOverridden(Object.keys(response.data.overrides || {}).length > 0)
+    } catch (event: any) {
+      setError(event?.response?.data?.detail || 'FAQ 표시 기준을 조회하지 못했습니다.')
+      setDispTarget(null)
+    } finally {
+      setDispLoading(false)
+    }
+  }
+
+  const saveDisplayConfig = async () => {
+    if (!dispTarget) return
+    setDispSaving(true)
+    try {
+      await api.put(`/api/tenants/${dispTarget.tenant_id}/faq-display`, {
+        min_score: Number(dispCfg.min_score),
+        gap: Number(dispCfg.gap),
+        list_size: Number(dispCfg.list_size),
+      })
+      setDispTarget(null)
+    } catch (event: any) {
+      setError(event?.response?.data?.detail || 'FAQ 표시 기준을 저장하지 못했습니다.')
+    } finally {
+      setDispSaving(false)
+    }
+  }
+
+  const resetDisplayConfig = async () => {
+    if (!dispTarget) return
+    setDispSaving(true)
+    try {
+      await api.delete(`/api/tenants/${dispTarget.tenant_id}/faq-display`)
+      setDispTarget(null)
+    } catch (event: any) {
+      setError(event?.response?.data?.detail || 'FAQ 표시 기준을 초기화하지 못했습니다.')
+    } finally {
+      setDispSaving(false)
+    }
+  }
+
   const deleteSharedWs = deleteTarget
     ? tenants.some(
         (tenant) =>
@@ -7250,6 +7304,9 @@ export function Tenants() {
                     <div className="row wrap" style={{ gap: 6 }}>
                       <Button type="button" size="sm" variant="outline" onClick={() => runDiagnosis(tenant)}>
                         <ShieldIcon className="size-4" /> 진단
+                      </Button>
+                      <Button type="button" size="sm" variant="outline" onClick={() => openDisplayConfig(tenant)}>
+                        <SlidersHorizontalIcon className="size-4" /> 표시 기준
                       </Button>
                       <Button type="button" size="sm" variant="outline" onClick={() => startEdit(tenant)}>
                         <EditIcon className="size-4" /> 수정
@@ -7446,6 +7503,54 @@ export function Tenants() {
           </div>
         </Modal>
       )}
+      {dispTarget && (
+        <Modal
+          title={`FAQ 표시 기준 — ${dispTarget.name}`}
+          icon={SlidersHorizontalIcon}
+          onClose={() => setDispTarget(null)}
+          footer={
+            <>
+              <Button type="button" variant="outline" onClick={resetDisplayConfig} disabled={dispSaving || dispLoading}>
+                <RotateCwIcon className="size-4" /> 기본값 복귀
+              </Button>
+              <Button type="button" variant="outline" onClick={() => setDispTarget(null)}>취소</Button>
+              <Button type="button" onClick={saveDisplayConfig} disabled={dispSaving || dispLoading}>
+                <SaveIcon className="size-4" /> 저장
+              </Button>
+            </>
+          }
+        >
+          {dispLoading ? (
+            <p className="muted" style={{ margin: 0 }}>불러오는 중...</p>
+          ) : (
+            <div className="grid" style={{ gap: 14 }}>
+              <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>
+                이 고객센터의 검색 응답(faq_display) 판정 기준입니다. 저장 즉시 다음 검색부터 적용되며(재시작 없음), 다른 고객센터에는 영향이 없습니다.
+                {dispOverridden ? ' 현재 개별 설정을 사용 중입니다.' : ' 현재 기본값을 사용 중입니다.'}
+              </p>
+              <label className="grid" style={{ gap: 4 }}>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>표시 하한선 (min_score)</span>
+                <Input type="number" step="0.01" min="0" max="1" value={dispCfg.min_score}
+                  onChange={(event) => setDispCfg({ ...dispCfg, min_score: event.target.value })} />
+                <span className="muted" style={{ fontSize: 12 }}>1위 점수가 이 값 미만이면 "추천 없음" 처리 (기본 {dispDefaults?.min_score})</span>
+              </label>
+              <label className="grid" style={{ gap: 4 }}>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>단독·목록 간격 (gap)</span>
+                <Input type="number" step="0.005" min="0" max="1" value={dispCfg.gap}
+                  onChange={(event) => setDispCfg({ ...dispCfg, gap: event.target.value })} />
+                <span className="muted" style={{ fontSize: 12 }}>1·2위 점수 차가 이 값 이상이면 단독 표시, 미만이면 후보 목록 (기본 {dispDefaults?.gap})</span>
+              </label>
+              <label className="grid" style={{ gap: 4 }}>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>목록 개수 (list_size)</span>
+                <Input type="number" step="1" min="1" max="10" value={dispCfg.list_size}
+                  onChange={(event) => setDispCfg({ ...dispCfg, list_size: event.target.value })} />
+                <span className="muted" style={{ fontSize: 12 }}>목록 모드일 때 보여줄 후보 수 (기본 {dispDefaults?.list_size})</span>
+              </label>
+            </div>
+          )}
+        </Modal>
+      )}
+
       {diagTarget && (
         <Modal
           title={`고객센터 진단 — ${diagTarget.name}`}
