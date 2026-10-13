@@ -107,6 +107,8 @@ class FaqKnowledgeRequest(KnowledgeBaseRequest):
     guidance: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     status: str = "draft"
+    content_format: str = "html"      # 표시 형식: html(기본, HTML카드) / markdown
+    display_policy: str = "both"      # 표시 정책: both / summary / full
 
 
 class FaqSourceGuidanceRequest(BaseModel):
@@ -140,6 +142,8 @@ class FaqAnswerUpdateRequest(BaseModel):
     valid_until: datetime | None = None
     tags: list[str] | None = None
     metadata: dict[str, Any] | None = None
+    content_format: str | None = None   # 미지정 시 기존값 유지(admin 경유 html 전환용)
+    display_policy: str | None = None
 
 
 class FaqAssetCreateRequest(BaseModel):
@@ -2773,6 +2777,8 @@ async def create_faq_knowledge(
                 "valid_from": payload.valid_from.isoformat() if payload.valid_from else None,
                 "valid_until": payload.valid_until.isoformat() if payload.valid_until else None,
                 "tags": payload.tags,
+                "content_format": payload.content_format,
+                "display_policy": payload.display_policy,
                 "metadata": {**payload.metadata, "kms_admin_item_id": item_id},
                 "guidance": payload.guidance,
             },
