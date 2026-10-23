@@ -328,6 +328,11 @@ class Database:
             FROM KMS_ADMIN_USER_WORKSPACES
             WHERE kms_workspace IS NOT NULL
               AND faq_workspace IS NOT NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM KMS_ADMIN_TENANTS t
+                WHERE t.kms_workspace = KMS_ADMIN_USER_WORKSPACES.kms_workspace
+                  AND t.faq_workspace = KMS_ADMIN_USER_WORKSPACES.faq_workspace
+              )
             ON CONFLICT (tenant_id) DO NOTHING
             """
         )

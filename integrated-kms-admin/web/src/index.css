@@ -1705,6 +1705,24 @@
   text-align: center;
 }
 
+/* 클릭 정렬 가능한 헤더(수정일·제목) */
+.th-sort {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.th-sort:hover {
+  color: var(--fg-primary);
+}
+
 /* API 관리 카드 메타: 아이콘과 글자 수직 정렬 */
 .client-meta > span {
   display: inline-flex;

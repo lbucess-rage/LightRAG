@@ -887,9 +887,21 @@ function roleMeta(role?: string) {
   return roles[normalized] || roles.user
 }
 
+// 백엔드 시각은 UTC 저장. 화면은 KST(Asia/Seoul)로 표기. TZ 지시자(Z/offset)가 없으면 UTC로 간주.
+const KST_FMT = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Seoul',
+  year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', hour12: false
+})
 function shortDate(value?: string | null) {
   if (!value) return '-'
-  return String(value).replace('T', ' ').slice(0, 16)
+  const s = String(value)
+  const hasTz = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(s)
+  const d = new Date(hasTz ? s : s.replace(' ', 'T') + 'Z')
+  if (Number.isNaN(d.getTime())) return s.replace('T', ' ').slice(0, 16)
+  const p: Record<string, string> = {}
+  for (const part of KST_FMT.formatToParts(d)) p[part.type] = part.value
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}`
 }
 
 function prettyJson(value: unknown) {
@@ -3470,6 +3482,10 @@ export function KnowledgeManagement() {
   const [faqSearch, setFaqSearch] = useState('')
   const [knowledgePage, setKnowledgePage] = useState(1)
   const [knowledgePageSize, setKnowledgePageSize] = useState(10)
+  // 목록 정렬: 기본은 최신 수정순(내림차순). 헤더 클릭으로 토글.
+  const [knowledgeSort, setKnowledgeSort] = useState<{ key: 'updated' | 'title'; dir: 'asc' | 'desc' }>({ key: 'updated', dir: 'desc' })
+  const toggleKnowledgeSort = (key: 'updated' | 'title') =>
+    setKnowledgeSort((cur) => (cur.key === key ? { key, dir: cur.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'updated' ? 'desc' : 'asc' }))
   const [faqWorkspaceError, setFaqWorkspaceError] = useState('')
   const [documentDetail, setDocumentDetail] = useState<KmsDocumentDetail | null>(null)
   const [documentDetailLoadingId, setDocumentDetailLoadingId] = useState<string | null>(null)
@@ -3844,14 +3860,28 @@ export function KnowledgeManagement() {
 
   const visibleKnowledgeRows = useMemo(() => {
     const query = faqSearch.trim().toLowerCase()
-    return knowledgeRows.filter((row) => {
+    const rows = knowledgeRows.filter((row) => {
       if (!(activeKnowledgeTab === 'all' || row.kind === activeKnowledgeTab)) return false
       if (faqStatus !== 'all' && row.kind === 'faq' && String(row.status || '').toLowerCase() !== faqStatus) return false
       if (documentStatus !== 'all' && row.kind === 'document' && String(row.status || '').toUpperCase() !== documentStatus) return false
       if (query && !`${row.title || ''} ${row.category || ''} ${row.source || ''} ${row.summary || ''}`.toLowerCase().includes(query)) return false
       return true
     })
-  }, [activeKnowledgeTab, documentStatus, faqSearch, faqStatus, knowledgeRows])
+    const toMs = (v?: string | null) => {
+      if (!v) return 0
+      const s = String(v)
+      const hasTz = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(s)
+      const t = new Date(hasTz ? s : s.replace(' ', 'T') + 'Z').getTime()
+      return Number.isNaN(t) ? 0 : t
+    }
+    const mul = knowledgeSort.dir === 'asc' ? 1 : -1
+    rows.sort((a, b) =>
+      knowledgeSort.key === 'title'
+        ? mul * String(a.title || '').localeCompare(String(b.title || ''), 'ko')
+        : mul * (toMs(a.updated) - toMs(b.updated))
+    )
+    return rows
+  }, [activeKnowledgeTab, documentStatus, faqSearch, faqStatus, knowledgeRows, knowledgeSort])
   const knowledgeTotalPages = Math.max(1, Math.ceil(visibleKnowledgeRows.length / knowledgePageSize))
   const pagedKnowledgeRows = useMemo(
     () => visibleKnowledgeRows.slice((knowledgePage - 1) * knowledgePageSize, knowledgePage * knowledgePageSize),
@@ -4714,14 +4744,22 @@ export function KnowledgeManagement() {
             <table className="tbl tbl-center">
               <thead>
                 <tr>
-                  <th style={{ paddingLeft: 14 }}>제목</th>
+                  <th style={{ paddingLeft: 14 }}>
+                    <button type="button" className="th-sort" onClick={() => toggleKnowledgeSort('title')} title="제목순 정렬">
+                      제목 {knowledgeSort.key === 'title' ? (knowledgeSort.dir === 'asc' ? '▲' : '▼') : '↕'}
+                    </button>
+                  </th>
                   <th>유형</th>
                   <th>카테고리</th>
                   <th>상태</th>
                   <th>검색 노출</th>
                   <th>유효기간</th>
                   <th className="num">지표</th>
-                  <th>수정일</th>
+                  <th>
+                    <button type="button" className="th-sort" onClick={() => toggleKnowledgeSort('updated')} title="수정일순 정렬">
+                      수정일 {knowledgeSort.key === 'updated' ? (knowledgeSort.dir === 'asc' ? '▲' : '▼') : '↕'}
+                    </button>
+                  </th>
                   <th>작업</th>
                 </tr>
               </thead>
