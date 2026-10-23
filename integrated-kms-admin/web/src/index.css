@@ -610,6 +610,54 @@
     -webkit-line-clamp: 3;
   }
 
+/* HTML로 지식화된 FAQ 본문을 검색결과에서 렌더링할 때 넘침 방지(자체 스타일은 유지) */
+.faq-html-body {
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+.faq-html-body img,
+.faq-html-body table {
+  max-width: 100%;
+  height: auto;
+}
+
+/* 통합검색: 렌더링 답변 아래 접어두는 HTML 원문 보기 */
+.faq-html-source {
+  margin-top: 10px;
+}
+.faq-html-source > summary {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-secondary);
+}
+.faq-html-source > summary::-webkit-details-marker {
+  display: none;
+}
+.faq-html-source > summary::before {
+  content: '▸ ';
+}
+.faq-html-source[open] > summary {
+  margin-bottom: 8px;
+}
+.faq-html-source[open] > summary::before {
+  content: '▾ ';
+}
+.faq-html-source pre {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--fg-secondary);
+}
+
   @media (max-width: 760px) {
     .source-drawer {
       width: 100vw;
@@ -1585,6 +1633,7 @@
   justify-content: space-between;
   gap: 16px;
   padding: 16px;
+  margin-bottom: var(--gap);
 }
 
 .help-admin-toolbar p {
@@ -1600,12 +1649,42 @@
   min-width: 1120px;
 }
 
+/* 헤더: 가운데 정렬 + 상단 여백(기본 .tbl th는 padding-top:0이라 카드 위에 붙어 답답) */
+.help-admin-table thead th {
+  text-align: center;
+  padding-top: 18px;
+}
+
+/* 상태 드롭다운이 좁아져 글자가 안 보이던 문제 방지(최소폭 보장) */
+.help-admin-table .select {
+  min-width: 104px;
+}
+
 .help-topic-cell {
   display: flex;
-  max-width: 420px;
+  width: 100%;
+  max-width: 700px;
   min-width: 0;
   flex-direction: column;
   gap: 5px;
+}
+
+/* 메뉴 라벨: 회색 배경 뱃지 대신 은은한 eyebrow(배경 없음)로 통일감 유지 */
+.help-menu-tag {
+  align-self: flex-start;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--fg-muted);
+}
+
+/* 읽기 화면 "〇〇 기준": 회색 배경 뱃지 대신 은은한 라벨 */
+.help-basis-tag {
+  flex-shrink: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  white-space: nowrap;
 }
 
 .help-topic-cell b {
@@ -1623,30 +1702,23 @@
 
 .help-role-toggles {
   display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  min-width: 280px;
-}
-
-.help-role-toggle {
-  display: inline-flex;
+  flex-direction: column;
   align-items: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 9px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  background: #fff;
-  color: var(--fg-primary);
-  font-size: 12px;
-  font-weight: 800;
-  cursor: pointer;
+  gap: 8px;
 }
 
-.help-role-toggle input {
-  width: 14px;
-  height: 14px;
-  accent-color: var(--accent);
+/* 라벨과 스위치를 가깝게. 라벨 폭 고정으로 세 스위치 세로 정렬 유지 */
+.help-role-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.help-role-name {
+  min-width: 76px;
+  text-align: right;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .help-shot-paths {

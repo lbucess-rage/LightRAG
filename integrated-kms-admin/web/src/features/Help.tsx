@@ -3,13 +3,10 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
   BookOpenIcon,
-  CheckCircleIcon,
   ChevronRightIcon,
-  EyeOffIcon,
   FileImageIcon,
   HelpCircleIcon,
   SearchIcon,
-  SettingsIcon,
   ShieldIcon,
   UsersIcon
 } from 'lucide-react'
@@ -213,17 +210,6 @@ function roleLabel(role?: string) {
   if (role === 'admin') return '시스템 관리자'
   if (role === 'manager') return '지식 관리자'
   return '일반 사용자'
-}
-
-function statusLabel(status: HelpTopic['status']) {
-  return statusOptions.find((option) => option.value === status)?.label || status
-}
-
-function statusBadgeClass(status: HelpTopic['status']) {
-  if (status === 'published') return 'badge green'
-  if (status === 'review') return 'badge amber'
-  if (status === 'hidden') return 'badge gray'
-  return 'badge'
 }
 
 function normalizeRole(role?: string): HelpRole {
@@ -435,7 +421,7 @@ export function HelpCenter({ focusHelpId = '' }: { focusHelpId?: string }) {
                   <h2>{selected.title}</h2>
                   <p>{selected.summary}</p>
                 </div>
-                <span className="badge gray">{roleLabel(effectiveRole)} 기준</span>
+                <span className="help-basis-tag">{roleLabel(effectiveRole)} 기준</span>
               </div>
               <div className="help-screenshots">
                 {selected.screenshots.map((screenshot) => (
@@ -523,7 +509,6 @@ export function HelpAdmin() {
               <th>상태</th>
               <th>권한별 노출</th>
               <th>스크린샷</th>
-              <th>수정</th>
             </tr>
           </thead>
           <tbody>
@@ -531,7 +516,7 @@ export function HelpAdmin() {
               <tr key={topic.help_id}>
                 <td>
                   <div className="help-topic-cell">
-                    <span className="badge gray">{topic.menu_label}</span>
+                    <span className="help-menu-tag">{topic.menu_label}</span>
                     <b>{topic.title}</b>
                     <small>{topic.help_id}</small>
                     <p>{topic.summary}</p>
@@ -550,26 +535,31 @@ export function HelpAdmin() {
                       </option>
                     ))}
                   </select>
-                  <div className={statusBadgeClass(topic.status)}>{statusLabel(topic.status)}</div>
                 </td>
                 <td>
                   <div className="help-role-toggles">
-                    {roleOptions.map(({ role, label, icon: Icon }) => (
-                      <label key={role} className="help-role-toggle">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(topic.visibility?.[role])}
-                          disabled={savingId === topic.help_id}
-                          onChange={(event) =>
-                            patchTopic(topic.help_id, {
-                              visibility: { [role]: event.target.checked }
-                            })
-                          }
-                        />
-                        <Icon className="size-4" />
-                        <span>{label}</span>
-                      </label>
-                    ))}
+                    {roleOptions.map(({ role, label }) => {
+                      const on = Boolean(topic.visibility?.[role])
+                      return (
+                        <div key={role} className="help-role-row">
+                          <span className="help-role-name" style={{ color: on ? 'var(--accent)' : 'var(--fg-muted)' }}>{label}</span>
+                          <label
+                            className="switch"
+                            title={`${label}: ${on ? '노출 중 — 끄면 숨김' : '숨김 — 켜면 노출'}`}
+                            style={{ opacity: savingId === topic.help_id ? 0.5 : 1 }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={on}
+                              disabled={savingId === topic.help_id}
+                              onChange={() => patchTopic(topic.help_id, { visibility: { [role]: !on } })}
+                            />
+                            <span className="track" />
+                            <span className="thumb" />
+                          </label>
+                        </div>
+                      )
+                    })}
                   </div>
                 </td>
                 <td>
@@ -579,21 +569,6 @@ export function HelpAdmin() {
                     ))}
                     {!topic.screenshots.length && <span>스크린샷 미지정</span>}
                   </div>
-                </td>
-                <td>
-                  {savingId === topic.help_id ? (
-                    <span className="badge blue">
-                      <SettingsIcon className="size-3" /> 저장중
-                    </span>
-                  ) : topic.status === 'published' ? (
-                    <span className="badge green">
-                      <CheckCircleIcon className="size-3" /> 게시
-                    </span>
-                  ) : (
-                    <span className="badge gray">
-                      <EyeOffIcon className="size-3" /> {statusLabel(topic.status)}
-                    </span>
-                  )}
                 </td>
               </tr>
             ))}

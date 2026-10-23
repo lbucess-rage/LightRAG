@@ -3075,12 +3075,13 @@ function FaqAnswerSettings({
               {showPreview ? <EyeOffIcon className="size-4" /> : <EyeIcon className="size-4" />} 미리보기
             </Button>
           </div>
-          <Textarea value={form.body} onChange={(event) => update({ body: event.target.value })} style={{ minHeight: 160 }} />
+          {/* 미리보기(완성형)를 위에, 원문(HTML) 입력은 아래에 — HTML 원문만 보여 오류처럼 느껴지던 문제 해소 */}
           {showPreview && (() => {
             const fmt = String((answer as unknown as { content_format?: string }).content_format || '').toLowerCase()
             const isHtml = fmt === 'html' || (!fmt && /<[a-zA-Z][^>]*>|style=/.test(form.body))
             return (
-              <div style={{ marginTop: 8, border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', background: '#ffffff', padding: 12, maxHeight: 320, overflow: 'auto' }}>
+              <div style={{ marginBottom: 8, border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', background: '#ffffff', padding: 12, maxHeight: 320, overflow: 'auto' }}>
+                <div className="eyebrow" style={{ marginBottom: 6 }}>미리보기</div>
                 {isHtml ? (
                   <div dangerouslySetInnerHTML={{ __html: form.body }} />
                 ) : (
@@ -3089,6 +3090,8 @@ function FaqAnswerSettings({
               </div>
             )
           })()}
+          <div className="eyebrow" style={{ marginBottom: 6 }}>원문 (HTML 입력)</div>
+          <Textarea value={form.body} onChange={(event) => update({ body: event.target.value })} style={{ minHeight: 160 }} />
         </div>
         <div className="field">
           <span>첨부 자료</span>
@@ -7545,7 +7548,7 @@ export function Tenants() {
         </div>
       )}
 
-      <div className="kpi-grid" style={{ marginBottom: 'var(--gap)' }}>
+      <div className="kpi-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 'var(--gap)', marginBottom: 'var(--gap)' }}>
         {[
           ['전체 고객센터', tenants.length, '개', NetworkIcon],
           ['사용 중', activeTenants.length, '개', CheckCircleIcon],

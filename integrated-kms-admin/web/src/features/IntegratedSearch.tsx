@@ -156,6 +156,26 @@ function faqBody(item: any) {
   return item.response || item.body || item.answer?.body || item.answer?.approved_summary || item.approved_summary || '본문이 없습니다.'
 }
 
+// FAQ 본문은 지식화 시 HTML로 저장될 수 있다. 검색 결과에서는 '완성된 답변'으로 보여야 하므로
+// HTML이면 렌더링해서 보여주고(코드베이스 공통 방식: AdminSections 미리보기와 동일 판정), 아니면 Markdown.
+function isHtmlBody(body: string, fmt?: string) {
+  const f = String(fmt || '').toLowerCase()
+  if (f === 'html') return true
+  if (f === 'markdown' || f === 'md' || f === 'text' || f === 'plain') return false
+  return /<[a-zA-Z][^>]*>|style=/.test(body)
+}
+
+function RichAnswer({ body, fmt, className }: { body: string; fmt?: string; className?: string }) {
+  if (isHtmlBody(body, fmt)) {
+    return <div className="faq-html-body" dangerouslySetInnerHTML={{ __html: body }} />
+  }
+  return (
+    <div className={className}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
+    </div>
+  )
+}
+
 function faqAssets(item: any) {
   if (Array.isArray(item?.assets)) return item.assets
   if (Array.isArray(item?.answer?.assets)) return item.answer.assets
@@ -1155,9 +1175,21 @@ function FaqResult({ item, rank }: { item: any; rank: number }) {
             <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--accent)' }}>{faqTitle(item)}</span>
             <span className="badge gray">{item.category || item.cat || 'FAQ'}</span>
           </div>
-          <div className="rich" style={{ marginTop: 8 }}>
-            <p>{faqBody(item)}</p>
-          </div>
+          {(() => {
+            const body = faqBody(item)
+            const fmt = item.content_format || item.answer?.content_format
+            return (
+              <div style={{ marginTop: 8 }}>
+                <RichAnswer className="rich" body={body} fmt={fmt} />
+                {isHtmlBody(body, fmt) && (
+                  <details className="faq-html-source">
+                    <summary>HTML 형식 원문 보기</summary>
+                    <pre>{body}</pre>
+                  </details>
+                )}
+              </div>
+            )
+          })()}
           <FaqAssetGallery assets={assets} />
           <div className="row wrap" style={{ gap: 12, marginTop: 12 }}>
             {pct !== null && (
@@ -1226,7 +1258,7 @@ function FaqResult({ item, rank }: { item: any; rank: number }) {
                             {isSelected && <span className="badge green">선택 답변</span>}
                             {candidatePct !== null && <span className="badge outline">점수 {candidatePct}%</span>}
                           </div>
-                          <div className="faq-candidate-body">{faqCandidateBody(candidate)}</div>
+                          <RichAnswer className="faq-candidate-body" body={faqCandidateBody(candidate)} fmt={candidate.content_format || candidate.answer?.content_format} />
                           {guidance.length > 0 && (
                             <div className="row wrap" style={{ gap: 6, marginTop: 8 }}>
                               {guidance.slice(0, 6).map((guide: unknown, guideIndex: number) => (
