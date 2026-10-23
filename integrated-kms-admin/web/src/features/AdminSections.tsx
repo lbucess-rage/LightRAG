@@ -14,6 +14,7 @@ import {
   DatabaseIcon,
   DownloadIcon,
   EditIcon,
+  EyeIcon,
   EyeOffIcon,
   FileTextIcon,
   FolderIcon,
@@ -24,6 +25,7 @@ import {
   KeyRoundIcon,
   LayersIcon,
   LinkIcon,
+  ListIcon,
   NetworkIcon,
   PlusIcon,
   RefreshCwIcon,
@@ -38,6 +40,9 @@ import {
   UsersIcon,
   XIcon
 } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { toast } from 'sonner'
 import { api } from '@/api/client'
 import TenantSelect from '@/components/TenantSelect'
 import WorkspaceSelect, { modeLabel, type Workspace, type WorkspaceMode } from '@/components/WorkspaceSelect'
@@ -819,7 +824,7 @@ function apiErrorMessage(error: unknown, fallback: string) {
 function badgeTone(status?: string) {
   const normalized = String(status || '').toLowerCase()
   if (['processed', 'completed', 'ready', 'published', 'success'].includes(normalized)) return 'green'
-  if (['processing', 'running', 'pending', 'draft'].includes(normalized)) return 'blue'
+  if (['processing', 'running', 'pending'].includes(normalized)) return 'blue'
   if (['failed', 'error', 'cancelled'].includes(normalized)) return 'red'
   if (['archived', 'expired', 'review'].includes(normalized)) return 'amber'
   return 'gray'
@@ -1333,7 +1338,7 @@ function Modal({ title, icon: Icon, onClose, children, footer, lg, xl }: ModalPr
     <div className="overlay" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <div className={`modal${xl ? ' xl' : lg ? ' lg' : ''}`}>
         <div className="modal-h">
-          {Icon && <Icon className="size-5" style={{ color: 'var(--accent)' }} />}
+          {Icon && <Icon className="size-5" style={{ color: '#8a94a6' }} />}
           <span className="t">{title}</span>
           <button className="x" type="button" onClick={onClose} aria-label="닫기">
             <XIcon className="size-5" />
@@ -1487,7 +1492,7 @@ function KnowledgeCreateModal({
             </div>
 
             <div className="row" style={{ gap: 10, padding: 12, background: 'var(--accent-soft)', borderRadius: 'var(--radius-md)', border: '1px solid #c9d8f7' }}>
-              <ShieldIcon className="size-4" style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 1 }} />
+              <ShieldIcon className="size-4" style={{ color: '#8a94a6', flexShrink: 0, marginTop: 1 }} />
               <div style={{ fontSize: 12, color: 'var(--fg-primary-soft)', lineHeight: 1.55 }}>
                 카테고리, 유효기간, 사용 여부는 어드민 원장에 먼저 저장되고 통합 검색 시 유효한 지식만 후보로 전달됩니다.
               </div>
@@ -2221,7 +2226,7 @@ function KmsDocumentExplorer({ detail, onClose }: { detail: KmsDocumentDetail; o
           </div>
           <div style={{ padding: 13, borderRadius: 'var(--radius-md)', border: '1px solid var(--border-default)', background: '#fff' }}>
             <div className="row" style={{ gap: 8, marginBottom: 10 }}>
-              <RotateCwIcon className="size-4" style={{ color: 'var(--accent)' }} />
+              <RotateCwIcon className="size-4" style={{ color: '#8a94a6' }} />
               <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-primary)' }}>삭제 스냅샷</span>
               <div className="grow" />
               <Button type="button" size="sm" variant="ghost" onClick={loadDeletionJobs}>
@@ -2470,7 +2475,7 @@ function KmsDocumentExplorer({ detail, onClose }: { detail: KmsDocumentDetail; o
             <div className="col" style={{ gap: 12 }}>
               <div style={{ padding: 13, borderRadius: 'var(--radius-md)', border: '1px solid var(--border-default)', background: '#fff' }}>
                 <div className="row" style={{ gap: 8, marginBottom: 10 }}>
-                  <NetworkIcon className="size-4" style={{ color: 'var(--accent)' }} />
+                  <NetworkIcon className="size-4" style={{ color: '#8a94a6' }} />
                   <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-primary)' }}>
                     엔티티 {Number(graphEntityPagination.total_count ?? graphEntities.length).toLocaleString()}
                   </span>
@@ -2578,7 +2583,7 @@ function KmsDocumentExplorer({ detail, onClose }: { detail: KmsDocumentDetail; o
               {relatedEntityId && (
                 <div style={{ padding: 13, borderRadius: 'var(--radius-md)', border: '1px solid var(--border-default)', background: 'var(--bg-subtle)' }}>
                   <div className="row" style={{ gap: 8, marginBottom: 10 }}>
-                    <NetworkIcon className="size-4" style={{ color: 'var(--accent)' }} />
+                    <NetworkIcon className="size-4" style={{ color: '#8a94a6' }} />
                     <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       관련 엔티티: {relatedEntityId}
                     </span>
@@ -2610,7 +2615,7 @@ function KmsDocumentExplorer({ detail, onClose }: { detail: KmsDocumentDetail; o
             <div className="col" style={{ gap: 12 }}>
               <div style={{ padding: 13, borderRadius: 'var(--radius-md)', border: '1px solid var(--border-default)', background: '#fff' }}>
                 <div className="row" style={{ gap: 8, marginBottom: 10 }}>
-                  <LinkIcon className="size-4" style={{ color: 'var(--accent)' }} />
+                  <LinkIcon className="size-4" style={{ color: '#8a94a6' }} />
                   <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg-primary)' }}>
                     관계 {Number(graphRelationPagination.total_count ?? graphRelations.length).toLocaleString()}
                   </span>
@@ -2727,7 +2732,7 @@ function KmsDocumentReingestModal({
     >
       <form id="document-reingest-form" className="col" style={{ gap: 14 }} onSubmit={onSubmit}>
         <div className="row" style={{ gap: 10, padding: 12, borderRadius: 'var(--radius-md)', background: 'var(--accent-soft)', border: '1px solid #c9d8f7' }}>
-          <ShieldIcon className="size-4" style={{ color: 'var(--accent)', flexShrink: 0 }} />
+          <ShieldIcon className="size-4" style={{ color: '#8a94a6', flexShrink: 0 }} />
           <div style={{ fontSize: 12, color: 'var(--fg-primary-soft)', lineHeight: 1.55 }}>
             새 본문을 먼저 LightRAG에 지식화하고, 새 문서가 확인된 뒤 기존 문서를 정리합니다. 실패하면 기존 문서는 유지됩니다.
           </div>
@@ -2843,6 +2848,7 @@ function FaqAnswerSettings({
   const [saving, setSaving] = useState(false)
   const [guidanceSaving, setGuidanceSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
+  const [showPreview, setShowPreview] = useState(true)
   const [assets, setAssets] = useState<FaqAsset[]>(answer.assets || [])
   const [assetFile, setAssetFile] = useState<File | null>(null)
   const [assetUrl, setAssetUrl] = useState('')
@@ -3061,10 +3067,29 @@ function FaqAnswerSettings({
             <Input type="datetime-local" value={form.valid_until} onChange={(event) => update({ valid_until: event.target.value })} />
           </label>
         </div>
-        <label className="field">
-          <span>답변 본문</span>
+        <div className="field">
+          <div className="row" style={{ alignItems: 'center', marginBottom: 4 }}>
+            <span>답변 본문</span>
+            <div className="grow" />
+            <Button type="button" size="sm" variant="ghost" onClick={() => setShowPreview((value) => !value)}>
+              {showPreview ? <EyeOffIcon className="size-4" /> : <EyeIcon className="size-4" />} 미리보기
+            </Button>
+          </div>
           <Textarea value={form.body} onChange={(event) => update({ body: event.target.value })} style={{ minHeight: 160 }} />
-        </label>
+          {showPreview && (() => {
+            const fmt = String((answer as unknown as { content_format?: string }).content_format || '').toLowerCase()
+            const isHtml = fmt === 'html' || (!fmt && /<[a-zA-Z][^>]*>|style=/.test(form.body))
+            return (
+              <div style={{ marginTop: 8, border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', background: '#ffffff', padding: 12, maxHeight: 320, overflow: 'auto' }}>
+                {isHtml ? (
+                  <div dangerouslySetInnerHTML={{ __html: form.body }} />
+                ) : (
+                  <div className="rich"><ReactMarkdown remarkPlugins={[remarkGfm]}>{form.body}</ReactMarkdown></div>
+                )}
+              </div>
+            )
+          })()}
+        </div>
         <div className="field">
           <span>첨부 자료</span>
           <div className="muted" style={{ fontSize: 12, lineHeight: 1.55 }}>
@@ -3235,7 +3260,7 @@ function FaqAnswerSettings({
         </div>
         {dirty && (
           <div style={{ display: 'flex', gap: 10, padding: 13, borderRadius: 'var(--radius-md)', background: 'var(--accent-soft)', border: '1px solid #c9d8f7', fontSize: 12.5, color: 'var(--fg-primary-soft)', lineHeight: 1.55 }}>
-            <RefreshCwIcon className="size-4" style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 1 }} />
+            <RefreshCwIcon className="size-4" style={{ color: '#8a94a6', flexShrink: 0, marginTop: 1 }} />
             <span>
               변경 내용은 저장 후 FAQ 답변 API에 반영됩니다. 본문이나 요약을 바꾼 경우 벡터 재생성을 함께 실행해야 검색 후보 품질이 유지됩니다.
             </span>
@@ -3292,7 +3317,7 @@ function ExistingKnowledgeLinkModal({
     >
       <form id="existing-link-form" className="col" style={{ gap: 16 }} onSubmit={onSubmit}>
         <div style={{ display: 'flex', gap: 10, padding: 13, borderRadius: 'var(--radius-md)', background: 'var(--accent-soft)', border: '1px solid #c9d8f7', color: 'var(--fg-primary-soft)', fontSize: 12.5, lineHeight: 1.55 }}>
-          <ShieldIcon className="size-4" style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 1 }} />
+          <ShieldIcon className="size-4" style={{ color: '#8a94a6', flexShrink: 0, marginTop: 1 }} />
           <span>
             기존 LightRAG 문서와 FAQ 답변을 재지식화하지 않고 어드민 원장에 연결합니다.
             연결 후 카테고리, 유효기간, 사용 여부가 통합 검색 후보 선정에 적용됩니다.
@@ -3339,7 +3364,7 @@ function ExistingKnowledgeLinkModal({
         <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <label className="row" style={{ gap: 10, padding: 12, border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)' }}>
             <input type="checkbox" checked={form.include_kms} onChange={(event) => updateForm({ include_kms: event.target.checked })} />
-            <FileTextIcon className="size-4" style={{ color: 'var(--accent)' }} />
+            <FileTextIcon className="size-4" style={{ color: '#8a94a6' }} />
             <span className="grow">
               <span style={{ display: 'block', fontSize: 13.5, fontWeight: 700, color: 'var(--fg-primary)' }}>KMS 문서</span>
               <span className="muted" style={{ fontSize: 11.5 }}>현재 목록 미연결 {unlinkedDocumentCount.toLocaleString()}건</span>
@@ -3347,7 +3372,7 @@ function ExistingKnowledgeLinkModal({
           </label>
           <label className="row" style={{ gap: 10, padding: 12, border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)' }}>
             <input type="checkbox" checked={form.include_faq} onChange={(event) => updateForm({ include_faq: event.target.checked })} />
-            <BookOpenIcon className="size-4" style={{ color: 'var(--accent)' }} />
+            <BookOpenIcon className="size-4" style={{ color: '#8a94a6' }} />
             <span className="grow">
               <span style={{ display: 'block', fontSize: 13.5, fontWeight: 700, color: 'var(--fg-primary)' }}>FAQ 답변</span>
               <span className="muted" style={{ fontSize: 11.5 }}>현재 목록 미연결 {unlinkedFaqCount.toLocaleString()}건</span>
@@ -3455,6 +3480,8 @@ export function KnowledgeManagement() {
   const [faqCandidateLoading, setFaqCandidateLoading] = useState(false)
   const [faqCandidateError, setFaqCandidateError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [listLoading, setListLoading] = useState(true)
+  const [togglingId, setTogglingId] = useState<string | null>(null)
   const [syncing, setSyncing] = useState(false)
   const [formError, setFormError] = useState('')
   const [faqBulkCreateOpen, setFaqBulkCreateOpen] = useState(false)
@@ -3478,6 +3505,8 @@ export function KnowledgeManagement() {
   })
 
   const load = async (options: { syncRunning?: boolean } = {}) => {
+    setListLoading(true)
+    try {
     const scopeParams = new URLSearchParams({
       tenant_id: effectiveTenantId,
       kms_workspace: effectiveKmsWorkspace,
@@ -3498,7 +3527,7 @@ export function KnowledgeManagement() {
         // The list should still render when the background LightRAG task endpoint is temporarily unavailable.
       }
     }
-    const [knowledgeResponse, categoryResponse, documentResponse, faqResponse, jobsResponse] = await Promise.all([
+    const [knowledgeR, categoryR, documentR, faqR, jobsR] = await Promise.allSettled([
       api.get(`/api/knowledge?${scopeParams.toString()}`),
       api.get('/api/categories', { params: { tenant_id: effectiveTenantId } }),
       fetchAllKnowledgePages<KmsDocument>({
@@ -3517,12 +3546,20 @@ export function KnowledgeManagement() {
       }),
       api.get('/api/jobs', { params: { tenant_id: effectiveTenantId } })
     ])
-    setItems(knowledgeResponse.data.items || [])
-    setCategories(categoryResponse.data.categories || [])
-    setDocuments(documentResponse.items || [])
-    setFaqAnswers(faqResponse.items || [])
-    setFaqWorkspaceError(faqResponse.lastData?.workspace_error || '')
-    setJobs(jobsResponse.data.jobs || [])
+    setItems(knowledgeR.status === 'fulfilled' ? ((knowledgeR.value as any).data.items || []) : [])
+    setCategories(categoryR.status === 'fulfilled' ? ((categoryR.value as any).data.categories || []) : [])
+    setDocuments(documentR.status === 'fulfilled' ? ((documentR.value as any).items || []) : [])
+    if (faqR.status === 'fulfilled') {
+      setFaqAnswers((faqR.value as any).items || [])
+      setFaqWorkspaceError((faqR.value as any).lastData?.workspace_error || '')
+    } else {
+      setFaqAnswers([])
+      setFaqWorkspaceError('이 고객센터는 FAQ 워크스페이스가 없거나 비어 있어 표시할 FAQ가 없습니다.')
+    }
+    setJobs(jobsR.status === 'fulfilled' ? ((jobsR.value as any).data.jobs || []) : [])
+    } finally {
+      setListLoading(false)
+    }
   }
 
   useEffect(() => {
@@ -3727,7 +3764,7 @@ export function KnowledgeManagement() {
         title: answer?.title || item.title || '제목 없음',
         kind,
         source: sourceLabel(sourceType),
-        status: job?.status || answer?.status || document?.status || item.status,
+        status: answer?.status || document?.status || item.status,
         category: categoryById.get(item.category_id) || '카테고리 없음',
         enabled: Boolean(item.enabled),
         validFrom: item.valid_from,
@@ -3794,10 +3831,16 @@ export function KnowledgeManagement() {
     latestJobByItem
   ])
 
-  const visibleKnowledgeRows = useMemo(
-    () => knowledgeRows.filter((row) => activeKnowledgeTab === 'all' || row.kind === activeKnowledgeTab),
-    [activeKnowledgeTab, knowledgeRows]
-  )
+  const visibleKnowledgeRows = useMemo(() => {
+    const query = faqSearch.trim().toLowerCase()
+    return knowledgeRows.filter((row) => {
+      if (!(activeKnowledgeTab === 'all' || row.kind === activeKnowledgeTab)) return false
+      if (faqStatus !== 'all' && row.kind === 'faq' && String(row.status || '').toLowerCase() !== faqStatus) return false
+      if (documentStatus !== 'all' && row.kind === 'document' && String(row.status || '').toUpperCase() !== documentStatus) return false
+      if (query && !`${row.title || ''} ${row.category || ''} ${row.source || ''} ${row.summary || ''}`.toLowerCase().includes(query)) return false
+      return true
+    })
+  }, [activeKnowledgeTab, documentStatus, faqSearch, faqStatus, knowledgeRows])
   const knowledgeTotalPages = Math.max(1, Math.ceil(visibleKnowledgeRows.length / knowledgePageSize))
   const pagedKnowledgeRows = useMemo(
     () => visibleKnowledgeRows.slice((knowledgePage - 1) * knowledgePageSize, knowledgePage * knowledgePageSize),
@@ -4148,6 +4191,30 @@ export function KnowledgeManagement() {
     }
     closeFaqEdit()
     await load()
+  }
+
+  const toggleItemEnabled = async (row: any) => {
+    const it = row.ledgerItem
+    if (!it) return
+    setTogglingId(row.id)
+    try {
+      await api.patch(`/api/knowledge/${encodeURIComponent(row.id)}`, {
+        tenant_id: it.tenant_id,
+        title: it.title,
+        body: it.body,
+        category_id: it.category_id,
+        enabled: !row.enabled,
+        valid_from: it.valid_from ?? null,
+        valid_until: it.valid_until ?? null,
+        metadata: it.metadata ?? {}
+      })
+      toast.success(!row.enabled ? '사용으로 변경했습니다.' : '미사용으로 변경했습니다.')
+      await load()
+    } catch (error) {
+      toast.error(apiErrorMessage(error, '사용여부 변경에 실패했습니다.'))
+    } finally {
+      setTogglingId(null)
+    }
   }
 
   const requiresBody = ['faq', 'faq_source_draft', 'text', 'texts'].includes(sourceType)
@@ -4641,7 +4708,7 @@ export function KnowledgeManagement() {
                   <th>출처</th>
                   <th>카테고리</th>
                   <th>상태</th>
-                  <th>사용</th>
+                  <th>검색 노출</th>
                   <th>유효기간</th>
                   <th className="num">지표</th>
                   <th>수정일</th>
@@ -4674,8 +4741,24 @@ export function KnowledgeManagement() {
                     </td>
                     <td><span className="badge gray">{row.source}</span></td>
                     <td className="muted">{row.category}</td>
-                    <td><span className={`badge ${badgeTone(row.status)}`}>{statusLabel(row.status)}</span></td>
-                    <td>{row.enabled ? <span className="badge green"><span className="d" />사용</span> : <span className="badge gray">미사용</span>}</td>
+                    <td>
+                      <span className={`badge ${badgeTone(row.status)}`}>{statusLabel(row.status)}</span>
+                      {row.job && isRunningJob(row.job) && <span className="badge blue" style={{ marginLeft: 4 }}><span className="d" />처리중</span>}
+                    </td>
+                    <td>
+                      {row.ledgerItem ? (
+                        <div className="row" style={{ gap: 6, alignItems: 'center' }} onClick={(event) => event.stopPropagation()}>
+                          <label className="switch" title="켜면 이 팀(카테고리) 검색에 노출, 끄면 제외" style={{ opacity: togglingId === row.id ? 0.5 : 1 }}>
+                            <input type="checkbox" checked={row.enabled} disabled={togglingId === row.id} onChange={() => toggleItemEnabled(row)} />
+                            <span className="track" />
+                            <span className="thumb" />
+                          </label>
+                          <span style={{ fontSize: 12, color: row.enabled ? 'var(--accent)' : 'var(--fg-muted)' }}>{row.enabled ? '노출' : '제외'}</span>
+                        </div>
+                      ) : (
+                        row.enabled ? <span className="badge green"><span className="d" />사용</span> : <span className="badge gray">미사용</span>
+                      )}
+                    </td>
                     <td><span className="num muted" style={{ fontSize: 12 }}>{shortDate(row.validFrom)} ~ {shortDate(row.validUntil)}</span></td>
                     <td className="num" style={{ fontWeight: 600, color: 'var(--fg-primary)' }}>{row.metricValue} <span className="muted" style={{ fontSize: 11 }}>{row.metricLabel}</span></td>
                     <td className="num muted" style={{ fontSize: 12 }}>{shortDate(row.updated)}</td>
@@ -4720,7 +4803,13 @@ export function KnowledgeManagement() {
                 ))}
                 {!visibleKnowledgeRows.length && (
                   <tr>
-                    <td colSpan={10} className="empty">등록된 지식이 없습니다.</td>
+                    <td colSpan={10} className="empty">
+                      {listLoading
+                        ? '불러오는 중…'
+                        : knowledgeRows.length === 0
+                          ? '표시할 지식이 없습니다.'
+                          : '조건에 맞는 지식이 없습니다.'}
+                    </td>
                   </tr>
                 )}
               </tbody>
@@ -4736,8 +4825,20 @@ export function KnowledgeManagement() {
                     {row.kind === 'faq' ? 'FAQ' : '문서'}
                   </span>
                   <span className={`badge ${badgeTone(row.status)}`}>{statusLabel(row.status)}</span>
+                  {row.job && isRunningJob(row.job) && <span className="badge blue"><span className="d" />처리중</span>}
                   <div className="grow" />
-                  {row.enabled ? <span className="badge green"><span className="d" />사용</span> : <span className="badge gray">미사용</span>}
+                  {row.ledgerItem ? (
+                    <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+                      <label className="switch" title="켜면 이 팀(카테고리) 검색에 노출, 끄면 제외" style={{ opacity: togglingId === row.id ? 0.5 : 1 }}>
+                        <input type="checkbox" checked={row.enabled} disabled={togglingId === row.id} onChange={() => toggleItemEnabled(row)} />
+                        <span className="track" />
+                        <span className="thumb" />
+                      </label>
+                      <span style={{ fontSize: 12, color: row.enabled ? 'var(--accent)' : 'var(--fg-muted)' }}>{row.enabled ? '노출' : '제외'}</span>
+                    </div>
+                  ) : (
+                    row.enabled ? <span className="badge green"><span className="d" />사용</span> : <span className="badge gray">미사용</span>
+                  )}
                 </div>
                 <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--fg-primary)', lineHeight: 1.45 }}>{row.title}</div>
                 <div className="row" style={{ gap: 8, marginTop: 6 }}>
@@ -4788,7 +4889,15 @@ export function KnowledgeManagement() {
                 </div>
               </div>
             ))}
-            {!visibleKnowledgeRows.length && <div className="empty">등록된 지식이 없습니다.</div>}
+            {!visibleKnowledgeRows.length && (
+              <div className="empty">
+                {listLoading
+                  ? '불러오는 중…'
+                  : knowledgeRows.length === 0
+                    ? '표시할 지식이 없습니다.'
+                    : '조건에 맞는 지식이 없습니다.'}
+              </div>
+            )}
           </div>
         )}
         {visibleKnowledgeRows.length > 0 && (
@@ -4937,6 +5046,12 @@ export function Categories() {
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const [addingParentId, setAddingParentId] = useState<string | null | undefined>(undefined)
   const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [knowledgeModal, setKnowledgeModal] = useState<{ category: Category; items: Array<{ item_id: string; title?: string; body?: string; answer_id?: string }>; loading: boolean } | null>(null)
+  const [knowledgeFilter, setKnowledgeFilter] = useState('')
+  const [catFaqWs, setCatFaqWs] = useState('')
+  const [catFaqEditing, setCatFaqEditing] = useState<FaqAnswer | null>(null)
+  const [catFaqGuidance, setCatFaqGuidance] = useState<FaqGuidance[]>([])
+  const [catFaqGuidanceLoading, setCatFaqGuidanceLoading] = useState(false)
   const [form, setForm] = useState({
     name: '',
     parent_id: '',
@@ -4976,6 +5091,79 @@ export function Categories() {
   const directKnowledgeCount = (category: Category) => Number(category.direct_knowledge_count || 0)
   const totalKnowledgeCount = (category: Category) =>
     Number(category.total_knowledge_count ?? category.direct_knowledge_count ?? 0)
+
+  const openKnowledgeModal = async (category: Category) => {
+    setKnowledgeFilter('')
+    setKnowledgeModal({ category, items: [], loading: true })
+    try {
+      const response = await api.get('/api/knowledge', { params: { tenant_id: selectedTenantId } })
+      const scope = response.data.scope || {}
+      const faqWs = scope.faq_workspace || ''
+      setCatFaqWs(faqWs)
+      const all = (response.data.items || []) as Array<{ item_id: string; title?: string; body?: string; category_id?: string; refs?: Array<{ external_id?: string; metadata?: { answer_id?: string; body?: string } }> }>
+      const items = all
+        .filter((item) => item.category_id === category.category_id)
+        .map((item) => ({
+          item_id: item.item_id,
+          title: item.title,
+          body: item.body || (item.refs || []).map((ref) => ref?.metadata?.body).find(Boolean) || '',
+          answer_id:
+            (item.refs || []).map((ref) => ref?.metadata?.answer_id).find(Boolean) ||
+            (item.refs || []).map((ref) => ref?.external_id).find((value) => value && !value.startsWith('doc-')) ||
+            undefined
+        }))
+      // 항목 본문이 비어있고 FAQ answer가 연결된 경우(연결형 지식) answer 본문을 가져와 미리보기를 채움
+      await Promise.all(
+        items.map(async (item) => {
+          if ((item.body || '').trim() || !item.answer_id || !faqWs) return
+          try {
+            const res = await api.get(`/api/knowledge/faq-answers/${encodeURIComponent(item.answer_id)}`, { params: { faq_workspace: faqWs } })
+            item.body = res.data?.body || res.data?.approved_summary || ''
+          } catch {
+            /* 미리보기 생략 */
+          }
+        })
+      )
+      setKnowledgeModal({ category, items, loading: false })
+    } catch {
+      setKnowledgeModal({ category, items: [], loading: false })
+    }
+  }
+
+  const openCatFaqEdit = async (answerId?: string) => {
+    if (!answerId) return
+    setCatFaqGuidanceLoading(true)
+    try {
+      const [answerResponse, guidanceResponse] = await Promise.all([
+        api.get(`/api/knowledge/faq-answers/${encodeURIComponent(answerId)}`, { params: { faq_workspace: catFaqWs } }),
+        api.get(`/api/knowledge/faq-answers/${encodeURIComponent(answerId)}/guidance`, { params: { faq_workspace: catFaqWs } })
+      ])
+      setCatFaqEditing(answerResponse.data)
+      setCatFaqGuidance(guidanceResponse.data.guidance || [])
+    } finally {
+      setCatFaqGuidanceLoading(false)
+    }
+  }
+  const reloadCatFaqGuidance = async (answerId: string) => {
+    const response = await api.get(`/api/knowledge/faq-answers/${encodeURIComponent(answerId)}/guidance`, { params: { faq_workspace: catFaqWs } })
+    setCatFaqGuidance(response.data.guidance || [])
+  }
+  const createCatFaqGuidance = async (answerId: string, payload: { guidance_type: string; text: string; weight: number }) => {
+    await api.post(`/api/knowledge/faq-answers/${encodeURIComponent(answerId)}/guidance`, payload, { params: { faq_workspace: catFaqWs } })
+    await reloadCatFaqGuidance(answerId)
+  }
+  const deleteCatFaqGuidance = async (answerId: string, guidanceId: string) => {
+    await api.delete(`/api/knowledge/faq-answers/${encodeURIComponent(answerId)}/guidance/${encodeURIComponent(guidanceId)}`, { params: { faq_workspace: catFaqWs } })
+    await reloadCatFaqGuidance(answerId)
+  }
+  const saveCatFaqAnswer = async (answerId: string, payload: Record<string, unknown>, rebuild: boolean) => {
+    await api.patch(`/api/knowledge/faq-answers/${encodeURIComponent(answerId)}`, payload, { params: { faq_workspace: catFaqWs } })
+    if (rebuild) {
+      await api.post(`/api/knowledge/faq-answers/${encodeURIComponent(answerId)}/vectors-rebuild`, undefined, { params: { faq_workspace: catFaqWs } })
+    }
+    setCatFaqEditing(null)
+    setCatFaqGuidance([])
+  }
 
   const descendantsOf = (categoryId: string): Set<string> => {
     const result = new Set<string>()
@@ -5132,7 +5320,7 @@ export function Categories() {
   const DraftRow = ({ parentId }: { parentId: string | null }) => (
     <div className="cat-row" style={{ background: 'var(--accent-soft)' }}>
       <span style={{ width: 20, flexShrink: 0 }} />
-      <TagIcon className="size-4" style={{ color: 'var(--accent)', flexShrink: 0 }} />
+      <TagIcon className="size-4" style={{ color: '#8a94a6', flexShrink: 0 }} />
       <input
         className="cat-input grow"
         autoFocus
@@ -5220,6 +5408,19 @@ export function Categories() {
             >
               지식 {categoryKnowledgeCount.toLocaleString()}
             </span>
+          )}
+          {!isRenaming && directKnowledgeCount(category) > 0 && (
+            <button
+              className="cat-act"
+              type="button"
+              title="지식 보기"
+              onClick={(event) => {
+                event.stopPropagation()
+                openKnowledgeModal(category)
+              }}
+            >
+              <ListIcon className="size-4" />
+            </button>
           )}
           {!isRenaming && (
             <div className="cat-acts" onClick={(event) => event.stopPropagation()}>
@@ -5469,6 +5670,72 @@ export function Categories() {
           </CardContent>
         </Card>
       </div>
+      {knowledgeModal && (
+        <Modal
+          lg
+          title={`지식 목록 · ${knowledgeModal.category.name}`}
+          icon={LayersIcon}
+          onClose={() => { setKnowledgeModal(null); setKnowledgeFilter('') }}
+        >
+          {knowledgeModal.loading ? (
+            <div className="empty" style={{ padding: 24 }}>불러오는 중입니다…</div>
+          ) : knowledgeModal.items.length === 0 ? (
+            <div className="empty" style={{ padding: 24 }}>이 카테고리에 등록된 지식이 없습니다.</div>
+          ) : (() => {
+            const keyword = knowledgeFilter.trim().toLowerCase()
+            const plain = (body?: string) => (body || '').replace(/<[^>]+>/g, ' ').replace(/&[a-z#0-9]+;/gi, ' ').replace(/\s+/g, ' ').trim()
+            const filtered = keyword
+              ? knowledgeModal.items.filter((item) => (item.title || '').toLowerCase().includes(keyword) || plain(item.body).toLowerCase().includes(keyword))
+              : knowledgeModal.items
+            // 목록 영역은 전체 건수 기준 고정 높이로 두어, 검색해도 모달 높이가 흔들리지 않게 함
+            const boxHeight = Math.min(Math.max(knowledgeModal.items.length, 1), 7) * 62
+            return (
+              <div className="col" style={{ gap: 8 }}>
+                <Input
+                  value={knowledgeFilter}
+                  onChange={(event) => setKnowledgeFilter(event.target.value)}
+                  placeholder="제목·본문에서 검색"
+                />
+                <div className="muted" style={{ fontSize: 12 }}>
+                  직속 지식 {knowledgeModal.items.length}건{keyword ? ` · 검색 ${filtered.length}건` : ''}
+                </div>
+                <div style={{ height: boxHeight, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {filtered.length === 0 ? (
+                    <div className="empty" style={{ padding: 16 }}>검색 결과가 없습니다.</div>
+                  ) : filtered.map((item) => (
+                    <div
+                      key={item.item_id}
+                      onClick={() => openCatFaqEdit(item.answer_id)}
+                      title={item.answer_id ? '클릭하여 설정 편집' : undefined}
+                      style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', padding: '10px 12px', cursor: item.answer_id ? 'pointer' : 'default' }}
+                    >
+                      <div style={{ fontWeight: 700, color: 'var(--fg-primary)', marginBottom: 4 }}>{item.title || '(제목 없음)'}</div>
+                      <div className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}>
+                        {plain(item.body).slice(0, 80) || '(본문 없음)'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
+        </Modal>
+      )}
+      {catFaqEditing && (
+        <FaqAnswerSettings
+          answer={catFaqEditing}
+          workspace={catFaqWs}
+          onClose={() => {
+            setCatFaqEditing(null)
+            setCatFaqGuidance([])
+          }}
+          onSave={saveCatFaqAnswer}
+          guidance={catFaqGuidance}
+          guidanceLoading={catFaqGuidanceLoading}
+          onCreateGuidance={createCatFaqGuidance}
+          onDeleteGuidance={deleteCatFaqGuidance}
+        />
+      )}
     </div>
   )
 }
@@ -5936,7 +6203,7 @@ export function ExternalClients() {
               <SearchIcon className="size-4" /> 샘플 실행
             </Button>
             <div style={{ display: 'flex', gap: 9, marginTop: 12, padding: 12, background: 'var(--accent-soft)', borderRadius: 'var(--radius-md)', fontSize: 12, color: 'var(--fg-primary-soft)', lineHeight: 1.5 }}>
-              <HelpCircleIcon className="size-4" style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 1 }} />
+              <HelpCircleIcon className="size-4" style={{ color: '#8a94a6', flexShrink: 0, marginTop: 1 }} />
               스트리밍 응답은 <b className="mono">/api/external/search/stream</b> NDJSON 엔드포인트를 사용합니다.
             </div>
             <div style={{ display: 'flex', gap: 9, marginTop: 10, padding: 12, background: 'var(--warning-soft)', borderRadius: 'var(--radius-md)', fontSize: 12, color: '#9a5b08', lineHeight: 1.55 }}>
@@ -5984,7 +6251,7 @@ export function ExternalClients() {
         >
           <div className="col" style={{ gap: 14 }}>
             <div style={{ display: 'flex', gap: 9, padding: 12, background: 'var(--accent-soft)', borderRadius: 'var(--radius-md)', fontSize: 12, color: 'var(--fg-primary-soft)', lineHeight: 1.55 }}>
-              <HelpCircleIcon className="size-4" style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 1 }} />
+              <HelpCircleIcon className="size-4" style={{ color: '#8a94a6', flexShrink: 0, marginTop: 1 }} />
               외부 시스템이 호출하는 API와 동일하게 API Key 헤더로 테스트합니다. 워크스페이스는 API Key에 매핑된 고객센터 기준으로 적용되며, 요청 JSON의 카테고리와 옵션만 바꿔가며 확인할 수 있습니다.
             </div>
 
@@ -6035,7 +6302,7 @@ export function ExternalClients() {
             <div className="grid" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 12 }}>
               <div className="card" style={{ padding: 14 }}>
                 <div className="row" style={{ gap: 8, marginBottom: 8 }}>
-                  <FolderIcon className="size-4" style={{ color: 'var(--accent)' }} />
+                  <FolderIcon className="size-4" style={{ color: '#8a94a6' }} />
                   <b>카테고리 정보 조회</b>
                   <span className="badge gray">GET /api/external/categories</span>
                 </div>
@@ -6095,7 +6362,7 @@ export function ExternalClients() {
 
               <div className="card" style={{ padding: 14 }}>
                 <div className="row" style={{ gap: 8, marginBottom: 8 }}>
-                  <CalendarIcon className="size-4" style={{ color: 'var(--accent)' }} />
+                  <CalendarIcon className="size-4" style={{ color: '#8a94a6' }} />
                   <b>유효기간 적용 방식</b>
                   <span className="badge green">서버 정책</span>
                 </div>
@@ -6117,7 +6384,7 @@ export function ExternalClients() {
             <div className="col" style={{ gap: 12 }}>
             <div className="card" style={{ padding: 14 }}>
               <div className="row" style={{ gap: 8, marginBottom: 8 }}>
-                <CalendarIcon className="size-4" style={{ color: 'var(--accent)' }} />
+                <CalendarIcon className="size-4" style={{ color: '#8a94a6' }} />
                 <b>유효기간 적용 방식</b>
                 <span className="badge green">서버 정책</span>
               </div>
@@ -6362,7 +6629,7 @@ export function ExternalClients() {
         >
           <form id="api-key-reveal-form" className="col" style={{ gap: 14 }} onSubmit={revealKey}>
             <div style={{ display: 'flex', gap: 9, padding: 12, background: 'var(--accent-soft)', borderRadius: 'var(--radius-md)', fontSize: 12, color: 'var(--fg-primary-soft)', lineHeight: 1.55 }}>
-              <ShieldIcon className="size-4" style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 1 }} />
+              <ShieldIcon className="size-4" style={{ color: '#8a94a6', flexShrink: 0, marginTop: 1 }} />
               API Key 원문 확인은 관리자 비밀번호 재확인이 필요하며, 성공/실패 이력은 감사 로그에 저장됩니다.
             </div>
             <div className="mono muted" style={{ fontSize: 12 }}>{revealClient.client_id}</div>
@@ -6980,6 +7247,8 @@ const emptyTenantForm = {
 
 export function Tenants() {
   const [tenants, setTenants] = useState<Tenant[]>([])
+  const [usageByTenant, setUsageByTenant] = useState<Record<string, { lastSearch?: string | null; calls: number }>>({})
+  const [lastEditByTenant, setLastEditByTenant] = useState<Record<string, string | null>>({})
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -7011,6 +7280,46 @@ export function Tenants() {
     try {
       const response = await api.get('/api/tenants')
       setTenants(response.data.tenants || [])
+      // 사용 현황(최근 검색일·누적 호출)은 외부 API 클라이언트 기록에서 집계
+      try {
+        const clientsRes = await api.get('/api/external-clients')
+        const clients = (Array.isArray(clientsRes.data)
+          ? clientsRes.data
+          : clientsRes.data.clients || clientsRes.data.items || []) as Array<{ tenant_id?: string | null; last_search_at?: string | null; call_count?: number }>
+        const usage: Record<string, { lastSearch?: string | null; calls: number }> = {}
+        for (const client of clients) {
+          if (!client.tenant_id) continue
+          const cur = usage[client.tenant_id] || { lastSearch: null, calls: 0 }
+          if (client.last_search_at && (!cur.lastSearch || client.last_search_at > cur.lastSearch)) cur.lastSearch = client.last_search_at
+          cur.calls += Number(client.call_count || 0)
+          usage[client.tenant_id] = cur
+        }
+        setUsageByTenant(usage)
+      } catch {
+        /* 사용 현황 조회 실패는 목록 표시에 영향 주지 않음 */
+      }
+      // 최근 지식수정일: 고객센터별 지식 목록의 최신 update_time 집계 (프론트 집계, 재시작 불요).
+      // 목록 표시를 막지 않도록 비동기로 채움(채워지기 전엔 '…' 표시).
+      const tenantList = (response.data.tenants || []) as Tenant[]
+      void Promise.all(
+        tenantList.map(async (tenant) => {
+          try {
+            const kres = await api.get('/api/knowledge', { params: { tenant_id: tenant.tenant_id } })
+            const items = (kres.data.items || []) as Array<{ update_time?: string | null }>
+            let latest: string | null = null
+            for (const item of items) {
+              if (item.update_time && (!latest || item.update_time > latest)) latest = item.update_time
+            }
+            return [tenant.tenant_id, latest] as const
+          } catch {
+            return [tenant.tenant_id, null] as const
+          }
+        })
+      ).then((pairs) => {
+        const map: Record<string, string | null> = {}
+        for (const [id, value] of pairs) map[id] = value
+        setLastEditByTenant(map)
+      })
     } catch (event: any) {
       setError(event?.response?.data?.detail || '고객센터 목록을 조회하지 못했습니다.')
     } finally {
@@ -7262,7 +7571,18 @@ export function Tenants() {
           </Button>
         </CardHeader>
         <CardContent>
-          <table className="tbl">
+          <div style={{ overflowX: 'auto' }}>
+          <table className="tbl" style={{ tableLayout: 'fixed', width: '100%', minWidth: 1146 }}>
+            <colgroup>
+              <col style={{ width: 190 }} />
+              <col style={{ width: 150 }} />
+              <col style={{ width: 150 }} />
+              <col style={{ width: 64 }} />
+              <col style={{ width: 92 }} />
+              <col style={{ width: 100 }} />
+              <col style={{ width: 100 }} />
+              <col style={{ width: 300 }} />
+            </colgroup>
             <thead>
               <tr>
                 <th style={{ paddingLeft: 6 }}>고객센터</th>
@@ -7270,23 +7590,25 @@ export function Tenants() {
                 <th>FAQ 워크스페이스</th>
                 <th>상태</th>
                 <th>생성일</th>
+                <th>최근 지식수정</th>
+                <th>최근 검색</th>
                 <th>작업</th>
               </tr>
             </thead>
             <tbody>
               {tenants.map((tenant) => (
                 <tr key={tenant.tenant_id}>
-                  <td style={{ paddingLeft: 6 }}>
-                    <div className="ttl">{tenant.name}</div>
-                    <div className="mono muted" style={{ fontSize: 11 }}>{tenant.tenant_id}</div>
+                  <td style={{ paddingLeft: 6, overflow: 'hidden' }}>
+                    <div className="ttl" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={tenant.name}>{tenant.name}</div>
+                    <div className="mono muted" style={{ fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{tenant.tenant_id}</div>
                   </td>
-                  <td className="mono">
+                  <td className="mono" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={tenant.kms_workspace}>
                     {tenant.kms_workspace}
                     {tenant.kms_workspace_exists === false && (
                       <span className="badge" title="LightRAG에 이 워크스페이스가 없습니다. 수정에서 다른 워크스페이스로 다시 연결하거나 고객센터를 정리하세요." style={{ marginLeft: 6, background: '#fee2e2', color: '#b91c1c' }}>없음</span>
                     )}
                   </td>
-                  <td className="mono">
+                  <td className="mono" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={tenant.faq_workspace}>
                     {tenant.faq_workspace}
                     {tenant.faq_workspace_exists === false && (
                       <span className="badge" title="LightRAG에 이 워크스페이스가 없습니다. 수정에서 다른 워크스페이스로 다시 연결하거나 고객센터를 정리하세요." style={{ marginLeft: 6, background: '#fee2e2', color: '#b91c1c' }}>없음</span>
@@ -7300,54 +7622,67 @@ export function Tenants() {
                     )}
                   </td>
                   <td className="num muted" style={{ fontSize: 12 }}>{shortDate(tenant.create_time)}</td>
+                  <td className="num muted" style={{ fontSize: 12 }}>
+                    {lastEditByTenant[tenant.tenant_id] !== undefined
+                      ? (lastEditByTenant[tenant.tenant_id] ? shortDate(lastEditByTenant[tenant.tenant_id]) : '—')
+                      : '…'}
+                  </td>
+                  <td className="num muted" style={{ fontSize: 12 }} title={usageByTenant[tenant.tenant_id]?.calls ? `누적 호출 ${usageByTenant[tenant.tenant_id]?.calls.toLocaleString()}회` : undefined}>
+                    {usageByTenant[tenant.tenant_id]?.lastSearch ? shortDate(usageByTenant[tenant.tenant_id]?.lastSearch) : '—'}
+                  </td>
                   <td>
-                    <div className="row wrap" style={{ gap: 6 }}>
-                      <Button type="button" size="sm" variant="outline" onClick={() => runDiagnosis(tenant)}>
-                        <ShieldIcon className="size-4" /> 진단
-                      </Button>
-                      <Button type="button" size="sm" variant="outline" onClick={() => openDisplayConfig(tenant)}>
-                        <SlidersHorizontalIcon className="size-4" /> 표시 기준
-                      </Button>
-                      <Button type="button" size="sm" variant="outline" onClick={() => startEdit(tenant)}>
-                        <EditIcon className="size-4" /> 수정
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => {
-                          setCopyTarget(tenant)
-                          setCopySourceTenantId(copySourceOptions[0]?.tenant_id || '')
-                          setError('')
-                        }}
-                      >
-                        <FolderIcon className="size-4" /> 카테고리 복사
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        style={{ color: '#b91c1c' }}
-                        onClick={() => {
-                          setDeleteTarget(tenant)
-                          setDeleteConfirmText('')
-                          setDeleteWithWorkspaces(false)
-                          setError('')
-                        }}
-                      >
-                        <Trash2Icon className="size-4" /> 삭제
-                      </Button>
+                    {/* 설정·점검(표시기준·카테고리복사·진단)과 관리(수정·삭제)를 간격으로 구분. 전부 테두리 있는 변형으로 통일. */}
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <Button type="button" size="sm" variant="outline" onClick={() => openDisplayConfig(tenant)}>
+                          표시 기준
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setCopyTarget(tenant)
+                            setCopySourceTenantId(copySourceOptions[0]?.tenant_id || '')
+                            setError('')
+                          }}
+                        >
+                          카테고리 복사
+                        </Button>
+                        <Button type="button" size="sm" variant="outline" onClick={() => runDiagnosis(tenant)}>
+                          진단
+                        </Button>
+                      </div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <Button type="button" size="sm" variant="outline" onClick={() => startEdit(tenant)}>
+                          수정
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => {
+                            setDeleteTarget(tenant)
+                            setDeleteConfirmText('')
+                            setDeleteWithWorkspaces(false)
+                            setError('')
+                          }}
+                        >
+                          삭제
+                        </Button>
+                      </div>
                     </div>
                   </td>
                 </tr>
               ))}
               {!tenants.length && (
                 <tr>
-                  <td colSpan={6} className="empty">등록된 고객센터가 없습니다.</td>
+                  <td colSpan={8} className="empty">등록된 고객센터가 없습니다.</td>
                 </tr>
               )}
             </tbody>
           </table>
+          </div>
         </CardContent>
       </Card>
 
@@ -7914,19 +8249,24 @@ export function Users() {
               <td className="num muted" style={{ fontSize: 12 }}>{shortDate(user.last_login_at)}</td>
               <td className="num muted" style={{ fontSize: 12 }}>{shortDate(user.create_time)}</td>
               <td>
-                <div className="row wrap" style={{ gap: 4 }}>
-                  <Button type="button" size="sm" variant="outline" onClick={() => startEdit(user)}>
-                    <EditIcon className="size-4" /> 수정
-                  </Button>
-                  <Button type="button" size="sm" variant="ghost" onClick={() => setPasswordUserId(user.user_id)}>
-                    <KeyRoundIcon className="size-4" /> 비밀번호
-                  </Button>
-                  <Button type="button" size="sm" variant="ghost" onClick={() => openHistory(user)}>
-                    이력
-                  </Button>
-                  <Button type="button" size="sm" variant="ghost" onClick={() => downloadHistory(user.user_id)}>
-                    <DownloadIcon className="size-4" /> CSV
-                  </Button>
+                {/* 계정관리(수정·비밀번호)와 사용이력(이력·CSV)을 간격으로 구분. 전부 테두리 있는 변형으로 통일. */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <Button type="button" size="sm" variant="outline" onClick={() => startEdit(user)}>
+                      수정
+                    </Button>
+                    <Button type="button" size="sm" variant="outline" onClick={() => setPasswordUserId(user.user_id)}>
+                      비밀번호
+                    </Button>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <Button type="button" size="sm" variant="outline" onClick={() => openHistory(user)}>
+                      이력
+                    </Button>
+                    <Button type="button" size="sm" variant="outline" onClick={() => downloadHistory(user.user_id)}>
+                      CSV
+                    </Button>
+                  </div>
                 </div>
               </td>
             </tr>
@@ -8088,7 +8428,7 @@ export function Users() {
               </div>
             </label>
             <div style={{ display: 'flex', gap: 9, padding: 12, background: 'var(--accent-soft)', borderRadius: 'var(--radius-md)', fontSize: 12, color: 'var(--fg-primary-soft)', lineHeight: 1.5 }}>
-              <HelpCircleIcon className="size-4" style={{ color: 'var(--accent)', flexShrink: 0 }} />
+              <HelpCircleIcon className="size-4" style={{ color: '#8a94a6', flexShrink: 0 }} />
               비밀번호는 서버 pepper와 함께 해시되어 저장됩니다.
             </div>
           </form>
@@ -8490,22 +8830,29 @@ export function Jobs() {
                   <td className="mono muted" style={{ fontSize: 11 }}>{job.lightrag_task_id || '-'}</td>
                   <td className="num muted" style={{ fontSize: 12 }}>{shortDate(job.update_time)}</td>
                   <td>
-                    <div className="row wrap" style={{ gap: 4 }}>
-                      <Button type="button" size="sm" variant="outline" onClick={() => openEvents(job)}>
-                        상세
-                      </Button>
-                      <Button type="button" size="sm" variant="ghost" onClick={() => syncOne(job)} disabled={syncingJobId === job.job_id}>
-                        <RefreshCwIcon className={syncingJobId === job.job_id ? 'spin size-4' : 'size-4'} /> 동기화
-                      </Button>
-                      {canCancel && (
-                        <Button type="button" size="sm" variant="destructive" onClick={() => cancelOne(job)} disabled={cancellingJobId === job.job_id}>
-                          중단
+                    {/* 조회(상세·동기화)와 위험 관리(중단·롤백)를 간격으로 구분. 전부 테두리 있는 변형으로 통일. */}
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <Button type="button" size="sm" variant="outline" onClick={() => openEvents(job)}>
+                          상세
                         </Button>
-                      )}
-                      {canRollback && (
-                        <Button type="button" size="sm" variant="destructive" onClick={() => rollbackOne(job)} disabled={rollingBackJobId === job.job_id}>
-                          롤백
+                        <Button type="button" size="sm" variant="outline" onClick={() => syncOne(job)} disabled={syncingJobId === job.job_id}>
+                          {syncingJobId === job.job_id ? <RefreshCwIcon className="spin size-4" /> : null}동기화
                         </Button>
+                      </div>
+                      {(canCancel || canRollback) && (
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          {canCancel && (
+                            <Button type="button" size="sm" variant="destructive" onClick={() => cancelOne(job)} disabled={cancellingJobId === job.job_id}>
+                              중단
+                            </Button>
+                          )}
+                          {canRollback && (
+                            <Button type="button" size="sm" variant="destructive" onClick={() => rollbackOne(job)} disabled={rollingBackJobId === job.job_id}>
+                              롤백
+                            </Button>
+                          )}
+                        </div>
                       )}
                     </div>
                   </td>

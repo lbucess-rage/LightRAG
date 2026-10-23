@@ -1664,12 +1664,25 @@
 }
 
 .scope-select {
-  min-width: min(520px, 44vw);
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
   gap: 5px;
 }
 
+.scope-select select {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .scope-select.compact {
-  min-width: min(460px, 40vw);
+  min-width: 0;
+  max-width: 420px;
+  width: 100%;
 }
 
 .scope-pair {
@@ -1684,15 +1697,19 @@
 }
 
 .scope-pair b {
+  min-width: 0;
+  max-width: 120px;
   overflow: hidden;
   color: var(--fg-primary);
   font-weight: 700;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .scope-readonly {
   display: flex;
-  min-width: min(420px, 40vw);
+  min-width: 0;
+  max-width: 100%;
   align-items: center;
   gap: 9px;
   padding: 8px 10px;
@@ -1741,4 +1758,19 @@
     align-items: stretch;
     flex-direction: column;
   }
+}
+
+/* 사용여부 토글 가시성 — 흰 동그라미만 보이던 문제: 끔=회색+테두리 / 켬=색상, thumb 외곽선 (2026-10-22) */
+label.switch .track {
+  background: #cdd3dd;
+  border: 1px solid #a7b0bf;
+  box-sizing: border-box;
+}
+label.switch input:checked + .track {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+label.switch .thumb {
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  box-sizing: border-box;
 }

@@ -18,7 +18,9 @@ module.exports = {
         ...optionalEnv('ADMIN_BOOTSTRAP_ID'),
         ...optionalEnv('ADMIN_BOOTSTRAP_PASSWORD'),
         KMS_ADMIN_LOG_BACKUP_DAYS: process.env.KMS_ADMIN_LOG_BACKUP_DAYS || '30',
-        LIGHTRAG_BASE_URL: process.env.LIGHTRAG_BASE_URL || 'http://127.0.0.1:9422'
+        LIGHTRAG_BASE_URL: process.env.LIGHTRAG_BASE_URL || 'http://127.0.0.1:9422',
+        RECO_LLM_URL: process.env.RECO_LLM_URL || 'http://10.62.130.84:18008/v1/chat/completions',
+        RECO_LLM_MODEL: process.env.RECO_LLM_MODEL || 'lbu-slm-v6-qw'
       },
       autorestart: true,
       max_restarts: 10,

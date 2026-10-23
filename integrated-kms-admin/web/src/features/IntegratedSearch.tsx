@@ -1079,7 +1079,7 @@ function AiAnswer({ result, kmsWorkspace }: { result: any; kmsWorkspace: string 
       <div style={{ background: 'linear-gradient(180deg, var(--accent-soft), #fff)', padding: 'var(--pad-card)' }}>
         <div className="row" style={{ gap: 9, marginBottom: 12 }}>
           <span className="row" style={{ gap: 7, color: 'var(--accent)', fontWeight: 700, fontSize: 13 }}>
-            <SparklesIcon className="size-4" /> AI 생성형 답변
+            <SparklesIcon className="size-4" style={{ color: "#8a94a6" }} /> AI 생성형 답변
           </span>
           <span className="badge green">
             <CheckIcon className="size-3" /> 완료
@@ -1100,7 +1100,7 @@ function AiAnswer({ result, kmsWorkspace }: { result: any; kmsWorkspace: string 
             <div className="row wrap" style={{ gap: 7 }}>
               {keywords.map((keyword: string) => (
                 <span key={keyword} className="badge blue">
-                  <TagIcon className="size-3" /> {keyword}
+                  <TagIcon className="size-3" style={{ color: "#8a94a6" }} /> {keyword}
                 </span>
               ))}
             </div>
@@ -1271,7 +1271,7 @@ function SearchReadyPreview({ includeGenerative, includeFaq }: { includeGenerati
           <div style={{ background: 'linear-gradient(180deg, var(--accent-soft), #fff)', padding: 'var(--pad-card)' }}>
             <div className="row" style={{ gap: 9, marginBottom: 12 }}>
               <span className="row" style={{ gap: 7, color: 'var(--accent)', fontWeight: 700, fontSize: 13 }}>
-                <SparklesIcon className="size-4" /> AI 생성형 답변
+                <SparklesIcon className="size-4" style={{ color: "#8a94a6" }} /> AI 생성형 답변
               </span>
               <span className="badge gray">대기</span>
               <div className="grow" />
@@ -1537,7 +1537,7 @@ export default function IntegratedSearch() {
           전체
         </button>
         <button type="button" className={tab === 'ai' ? 'on' : ''} onClick={() => setTab('ai')}>
-          <SparklesIcon className="size-4" /> AI 답변
+          <SparklesIcon className="size-4" style={{ color: "#8a94a6" }} /> AI 답변
         </button>
         <button type="button" className={tab === 'faq' ? 'on' : ''} onClick={() => setTab('faq')}>
           <BookOpenIcon className="size-4" /> FAQ
@@ -1587,7 +1587,7 @@ export default function IntegratedSearch() {
         <div className="card-b">
           <div className="col" style={{ gap: 8, fontSize: 12.5 }}>
             <div className="row">
-              <SparklesIcon className="size-3" style={{ color: 'var(--accent)' }} />
+              <SparklesIcon className="size-3" style={{ color: '#8a94a6' }} />
               <span className="grow">생성형 KMS</span>
               <span className={includeGenerative ? 'badge green' : 'badge gray'}>
                 <span className="d" /> {includeGenerative ? 'ON' : 'OFF'}
@@ -1645,7 +1645,7 @@ export default function IntegratedSearch() {
               {keywords.length ? (
                 keywords.map((keyword: string) => (
                   <span key={keyword} className="badge blue">
-                    <TagIcon className="size-3" /> {keyword}
+                    <TagIcon className="size-3" style={{ color: "#8a94a6" }} /> {keyword}
                   </span>
                 ))
               ) : (
@@ -1736,7 +1736,7 @@ export default function IntegratedSearch() {
               checked={includeGenerative}
               onChange={(event) => setIncludeGenerative(event.target.checked)}
             />
-            <SparklesIcon className="size-4" style={{ color: 'var(--accent)' }} /> AI 생성형 답변
+            <SparklesIcon className="size-4" style={{ color: '#8a94a6' }} /> AI 생성형 답변
           </label>
           <label className="check">
             <input type="checkbox" checked={includeFaq} onChange={(event) => setIncludeFaq(event.target.checked)} />
@@ -2060,7 +2060,7 @@ export default function IntegratedSearch() {
                   전체
                 </button>
                 <button className={tab === 'ai' ? 'on' : ''} onClick={() => setTab('ai')}>
-                  <SparklesIcon className="size-4" /> AI 답변
+                  <SparklesIcon className="size-4" style={{ color: "#8a94a6" }} /> AI 답변
                 </button>
                 <button className={tab === 'faq' ? 'on' : ''} onClick={() => setTab('faq')}>
                   <BookOpenIcon className="size-4" /> FAQ <span className="ct">{faqResults.length}</span>

@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import settings
 from .db import db
 from .logging_config import configure_logging
-from .routers import api_clients, auth, categories, help, jobs, knowledge, lightrag, search, system, tenants, users
+from .routers import api_clients, auth, categories, help, jobs, knowledge, lightrag, recommend, search, system, tenants, users
 
 
 @asynccontextmanager
@@ -50,6 +50,7 @@ def create_app() -> FastAPI:
     app.include_router(lightrag.router)
     app.include_router(jobs.router)
     app.include_router(search.router)
+    app.include_router(recommend.router)
     app.include_router(system.router)
     app.include_router(help.router)
 

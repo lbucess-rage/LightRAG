@@ -60,7 +60,7 @@ export default function WorkspaceScopeSelect({
         <Building2Icon className="size-4" />
         <div style={{ minWidth: 0 }}>
           <strong>{displayName}</strong>
-          <span>{effectiveKmsWorkspace} / {effectiveFaqWorkspace}</span>
+          <span title={`${effectiveKmsWorkspace} / ${effectiveFaqWorkspace}`}>{effectiveKmsWorkspace} / {effectiveFaqWorkspace}</span>
         </div>
       </div>
     )
@@ -81,14 +81,14 @@ export default function WorkspaceScopeSelect({
         {tenantId && !current && <option value={tenantId}>{displayName}</option>}
         {tenants.map((tenant) => (
           <option key={tenant.tenant_id} value={tenant.tenant_id}>
-            {tenant.name} · {tenant.kms_workspace} / {tenant.faq_workspace}
+            {tenant.name}
           </option>
         ))}
       </select>
       <small className="scope-pair">
-        KMS <b>{effectiveKmsWorkspace}</b>
+        KMS <b title={effectiveKmsWorkspace}>{effectiveKmsWorkspace}</b>
         <span aria-hidden="true">·</span>
-        FAQ <b>{effectiveFaqWorkspace}</b>
+        FAQ <b title={effectiveFaqWorkspace}>{effectiveFaqWorkspace}</b>
       </small>
     </label>
   )
