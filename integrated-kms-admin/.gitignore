@@ -1,3 +1,8 @@
+# Secret env files (keep .example templates tracked)
+.env
+.env.*
+!.env.*.example
+
 backend/.pytest_cache/
 backend/.ruff_cache/
 backend/.venv/
