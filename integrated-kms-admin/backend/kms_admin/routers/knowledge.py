@@ -2247,8 +2247,8 @@ async def update_faq_answer(
         UPDATE KMS_ADMIN_KNOWLEDGE_ITEMS i
         SET title = COALESCE($2, i.title),
             body = COALESCE($3, i.body),
-            valid_from = COALESCE($4, i.valid_from),
-            valid_until = COALESCE($5, i.valid_until),
+            valid_from = $4,
+            valid_until = $5,
             status = COALESCE($6, i.status),
             metadata = i.metadata || $7::jsonb,
             update_time = NOW()

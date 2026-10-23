@@ -3067,6 +3067,14 @@ function FaqAnswerSettings({
             <Input type="datetime-local" value={form.valid_until} onChange={(event) => update({ valid_until: event.target.value })} />
           </label>
         </div>
+        {(form.valid_from || form.valid_until) && (
+          <div className="row" style={{ marginTop: -8 }}>
+            <div className="grow" />
+            <Button type="button" size="sm" variant="ghost" onClick={() => update({ valid_from: '', valid_until: '' })}>
+              <Trash2Icon className="size-3" /> 유효기간 삭제
+            </Button>
+          </div>
+        )}
         <div className="field">
           <div className="row" style={{ alignItems: 'center', marginBottom: 4 }}>
             <span>답변 본문</span>
@@ -4703,19 +4711,18 @@ export function KnowledgeManagement() {
 
         {view === 'table' ? (
           <div className="table-scroll knowledge-table-scroll">
-            <table className="tbl">
+            <table className="tbl tbl-center">
               <thead>
                 <tr>
                   <th style={{ paddingLeft: 14 }}>제목</th>
                   <th>유형</th>
-                  <th>출처</th>
                   <th>카테고리</th>
                   <th>상태</th>
                   <th>검색 노출</th>
                   <th>유효기간</th>
                   <th className="num">지표</th>
                   <th>수정일</th>
-                  <th></th>
+                  <th>작업</th>
                 </tr>
               </thead>
               <tbody>
@@ -4742,7 +4749,6 @@ export function KnowledgeManagement() {
                         {row.kind === 'faq' ? 'FAQ' : '문서'}
                       </span>
                     </td>
-                    <td><span className="badge gray">{row.source}</span></td>
                     <td className="muted">{row.category}</td>
                     <td>
                       <span className={`badge ${badgeTone(row.status)}`}>{statusLabel(row.status)}</span>
@@ -4750,13 +4756,13 @@ export function KnowledgeManagement() {
                     </td>
                     <td>
                       {row.ledgerItem ? (
-                        <div className="row" style={{ gap: 6, alignItems: 'center' }} onClick={(event) => event.stopPropagation()}>
+                        <div className="row" style={{ gap: 6, alignItems: 'center', flexWrap: 'nowrap' }} onClick={(event) => event.stopPropagation()}>
                           <label className="switch" title="켜면 이 팀(카테고리) 검색에 노출, 끄면 제외" style={{ opacity: togglingId === row.id ? 0.5 : 1 }}>
                             <input type="checkbox" checked={row.enabled} disabled={togglingId === row.id} onChange={() => toggleItemEnabled(row)} />
                             <span className="track" />
                             <span className="thumb" />
                           </label>
-                          <span style={{ fontSize: 12, color: row.enabled ? 'var(--accent)' : 'var(--fg-muted)' }}>{row.enabled ? '노출' : '제외'}</span>
+                          <span style={{ fontSize: 12, whiteSpace: 'nowrap', color: row.enabled ? 'var(--accent)' : 'var(--fg-muted)' }}>{row.enabled ? '노출' : '제외'}</span>
                         </div>
                       ) : (
                         row.enabled ? <span className="badge green"><span className="d" />사용</span> : <span className="badge gray">미사용</span>
@@ -4806,7 +4812,7 @@ export function KnowledgeManagement() {
                 ))}
                 {!visibleKnowledgeRows.length && (
                   <tr>
-                    <td colSpan={10} className="empty">
+                    <td colSpan={9} className="empty">
                       {listLoading
                         ? '불러오는 중…'
                         : knowledgeRows.length === 0
@@ -6131,7 +6137,7 @@ export function ExternalClients() {
                     </button>
                   </div>
                 </div>
-                <div className="row wrap" style={{ gap: 18, marginTop: 14, fontSize: 12.5 }}>
+                <div className="client-meta row wrap" style={{ gap: '8px 18px', marginTop: 14, fontSize: 12.5 }}>
                   <span className="muted"><DatabaseIcon className="size-3" /> {client.tenant_name || client.tenant_id || '고객센터 미지정'}</span>
                   <span className="muted mono" style={{ fontSize: 11 }}>{client.kms_workspace} / {client.faq_workspace}</span>
                   <span className="muted"><ShieldIcon className="size-3" /> {(client.scopes || []).join(', ')}</span>
@@ -6139,18 +6145,20 @@ export function ExternalClients() {
                   <span className="muted"><SearchIcon className="size-3" /> 호출 {Number(client.call_count || 0).toLocaleString()}회</span>
                   <span className="muted"><ClockIcon className="size-3" /> 최근 {shortDate(client.last_search_at || client.last_used_at)}</span>
                   <div className="grow" />
-                  <Button type="button" size="sm" variant="outline" onClick={() => openClientHistory(client)}>
-                    이력
-                  </Button>
-                  <Button type="button" size="sm" variant="outline" onClick={() => openRevealKey(client)}>
-                    <KeyRoundIcon className="size-4" /> 키 확인
-                  </Button>
-                  <Button type="button" size="sm" variant="ghost" onClick={() => toggleActive(client)}>
-                    {client.is_active ? '비활성' : '활성'}
-                  </Button>
-                  <Button type="button" size="sm" variant="destructive" onClick={() => revokeKey(client.client_id)}>
-                    폐기
-                  </Button>
+                  <div className="row-actions">
+                    <Button type="button" size="sm" variant="outline" onClick={() => openClientHistory(client)}>
+                      이력
+                    </Button>
+                    <Button type="button" size="sm" variant="outline" onClick={() => openRevealKey(client)}>
+                      키 확인
+                    </Button>
+                    <Button type="button" size="sm" variant="outline" onClick={() => toggleActive(client)}>
+                      {client.is_active ? '비활성' : '활성'}
+                    </Button>
+                    <Button type="button" size="sm" variant="destructive" onClick={() => revokeKey(client.client_id)}>
+                      폐기
+                    </Button>
+                  </div>
                 </div>
               </div>
             ))
@@ -7575,7 +7583,7 @@ export function Tenants() {
         </CardHeader>
         <CardContent>
           <div style={{ overflowX: 'auto' }}>
-          <table className="tbl" style={{ tableLayout: 'fixed', width: '100%', minWidth: 1146 }}>
+          <table className="tbl tbl-center" style={{ tableLayout: 'fixed', width: '100%', minWidth: 1146 }}>
             <colgroup>
               <col style={{ width: 190 }} />
               <col style={{ width: 150 }} />
@@ -7634,46 +7642,42 @@ export function Tenants() {
                     {usageByTenant[tenant.tenant_id]?.lastSearch ? shortDate(usageByTenant[tenant.tenant_id]?.lastSearch) : '—'}
                   </td>
                   <td>
-                    {/* 설정·점검(표시기준·카테고리복사·진단)과 관리(수정·삭제)를 간격으로 구분. 전부 테두리 있는 변형으로 통일. */}
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', alignItems: 'center' }}>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <Button type="button" size="sm" variant="outline" onClick={() => openDisplayConfig(tenant)}>
-                          표시 기준
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            setCopyTarget(tenant)
-                            setCopySourceTenantId(copySourceOptions[0]?.tenant_id || '')
-                            setError('')
-                          }}
-                        >
-                          카테고리 복사
-                        </Button>
-                        <Button type="button" size="sm" variant="outline" onClick={() => runDiagnosis(tenant)}>
-                          진단
-                        </Button>
-                      </div>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <Button type="button" size="sm" variant="outline" onClick={() => startEdit(tenant)}>
-                          수정
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="destructive"
-                          onClick={() => {
-                            setDeleteTarget(tenant)
-                            setDeleteConfirmText('')
-                            setDeleteWithWorkspaces(false)
-                            setError('')
-                          }}
-                        >
-                          삭제
-                        </Button>
-                      </div>
+                    {/* 전부 테두리 있는 변형 + 동일 간격. 순서: 표시기준·카테고리복사·진단·수정·삭제 */}
+                    <div className="row-actions">
+                      <Button type="button" size="sm" variant="outline" onClick={() => openDisplayConfig(tenant)}>
+                        표시 기준
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setCopyTarget(tenant)
+                          setCopySourceTenantId(copySourceOptions[0]?.tenant_id || '')
+                          setError('')
+                        }}
+                      >
+                        카테고리 복사
+                      </Button>
+                      <Button type="button" size="sm" variant="outline" onClick={() => runDiagnosis(tenant)}>
+                        진단
+                      </Button>
+                      <Button type="button" size="sm" variant="outline" onClick={() => startEdit(tenant)}>
+                        수정
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => {
+                          setDeleteTarget(tenant)
+                          setDeleteConfirmText('')
+                          setDeleteWithWorkspaces(false)
+                          setError('')
+                        }}
+                      >
+                        삭제
+                      </Button>
                     </div>
                   </td>
                 </tr>
@@ -8215,7 +8219,7 @@ export function Users() {
       </div>
 
       <div className="card" style={{ padding: '16px 8px 8px' }}>
-        <table className="tbl">
+        <table className="tbl tbl-center">
           <thead>
             <tr>
               <th style={{ paddingLeft: 14 }}>아이디 / 이름</th>
@@ -8252,24 +8256,20 @@ export function Users() {
               <td className="num muted" style={{ fontSize: 12 }}>{shortDate(user.last_login_at)}</td>
               <td className="num muted" style={{ fontSize: 12 }}>{shortDate(user.create_time)}</td>
               <td>
-                {/* 계정관리(수정·비밀번호)와 사용이력(이력·CSV)을 간격으로 구분. 전부 테두리 있는 변형으로 통일. */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', alignItems: 'center' }}>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <Button type="button" size="sm" variant="outline" onClick={() => startEdit(user)}>
-                      수정
-                    </Button>
-                    <Button type="button" size="sm" variant="outline" onClick={() => setPasswordUserId(user.user_id)}>
-                      비밀번호
-                    </Button>
-                  </div>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <Button type="button" size="sm" variant="outline" onClick={() => openHistory(user)}>
-                      이력
-                    </Button>
-                    <Button type="button" size="sm" variant="outline" onClick={() => downloadHistory(user.user_id)}>
-                      CSV
-                    </Button>
-                  </div>
+                {/* 수정·비밀번호·이력·CSV — 전부 테두리 있는 변형 + 동일 간격 */}
+                <div className="row-actions">
+                  <Button type="button" size="sm" variant="outline" onClick={() => startEdit(user)}>
+                    수정
+                  </Button>
+                  <Button type="button" size="sm" variant="outline" onClick={() => setPasswordUserId(user.user_id)}>
+                    비밀번호
+                  </Button>
+                  <Button type="button" size="sm" variant="outline" onClick={() => openHistory(user)}>
+                    이력
+                  </Button>
+                  <Button type="button" size="sm" variant="outline" onClick={() => downloadHistory(user.user_id)}>
+                    CSV
+                  </Button>
                 </div>
               </td>
             </tr>
@@ -8799,7 +8799,7 @@ export function Jobs() {
       </div>
 
       <div className="card" style={{ padding: '16px 8px 8px' }}>
-        <table className="tbl">
+        <table className="tbl tbl-center">
           <thead>
             <tr>
               <th style={{ paddingLeft: 14 }}>작업</th>
@@ -8833,29 +8833,23 @@ export function Jobs() {
                   <td className="mono muted" style={{ fontSize: 11 }}>{job.lightrag_task_id || '-'}</td>
                   <td className="num muted" style={{ fontSize: 12 }}>{shortDate(job.update_time)}</td>
                   <td>
-                    {/* 조회(상세·동기화)와 위험 관리(중단·롤백)를 간격으로 구분. 전부 테두리 있는 변형으로 통일. */}
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', alignItems: 'center' }}>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <Button type="button" size="sm" variant="outline" onClick={() => openEvents(job)}>
-                          상세
+                    {/* 상세·동기화·중단·롤백 — 전부 테두리 있는 변형 + 동일 간격 */}
+                    <div className="row-actions">
+                      <Button type="button" size="sm" variant="outline" onClick={() => openEvents(job)}>
+                        상세
+                      </Button>
+                      <Button type="button" size="sm" variant="outline" onClick={() => syncOne(job)} disabled={syncingJobId === job.job_id}>
+                        {syncingJobId === job.job_id ? <RefreshCwIcon className="spin size-4" /> : null}동기화
+                      </Button>
+                      {canCancel && (
+                        <Button type="button" size="sm" variant="destructive" onClick={() => cancelOne(job)} disabled={cancellingJobId === job.job_id}>
+                          중단
                         </Button>
-                        <Button type="button" size="sm" variant="outline" onClick={() => syncOne(job)} disabled={syncingJobId === job.job_id}>
-                          {syncingJobId === job.job_id ? <RefreshCwIcon className="spin size-4" /> : null}동기화
+                      )}
+                      {canRollback && (
+                        <Button type="button" size="sm" variant="destructive" onClick={() => rollbackOne(job)} disabled={rollingBackJobId === job.job_id}>
+                          롤백
                         </Button>
-                      </div>
-                      {(canCancel || canRollback) && (
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          {canCancel && (
-                            <Button type="button" size="sm" variant="destructive" onClick={() => cancelOne(job)} disabled={cancellingJobId === job.job_id}>
-                              중단
-                            </Button>
-                          )}
-                          {canRollback && (
-                            <Button type="button" size="sm" variant="destructive" onClick={() => rollbackOne(job)} disabled={rollingBackJobId === job.job_id}>
-                              롤백
-                            </Button>
-                          )}
-                        </div>
                       )}
                     </div>
                   </td>

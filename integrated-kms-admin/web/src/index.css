@@ -937,6 +937,11 @@
   min-width: 1120px;
 }
 
+/* 지표(11버전)·유효기간·수정일이 세로로 쪼개지지 않게 */
+.knowledge-table-scroll .tbl .num {
+  white-space: nowrap;
+}
+
 .field > span,
 .field > label {
   font-size: 12.5px;
@@ -1685,6 +1690,26 @@
   font-weight: 600;
   color: var(--fg-muted);
   white-space: nowrap;
+}
+
+/* 표 작업칸: 모든 버튼 동일 간격(그룹별 간격차 제거) */
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 표 헤더 가운데 정렬 (도움말 관리와 동일) */
+.tbl-center thead th {
+  text-align: center;
+}
+
+/* API 관리 카드 메타: 아이콘과 글자 수직 정렬 */
+.client-meta > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .help-topic-cell b {
