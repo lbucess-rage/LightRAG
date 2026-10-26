@@ -1808,6 +1808,20 @@ async def delete_kms_document(
         target_id=doc_id,
         detail={"workspace": effective_workspace},
     )
+    # 원장(어드민 장부)에서도 이 doc 참조 항목 제거 — LightRAG만 지우고 원장이 남던 갭 해소
+    # (refs는 items에 ON DELETE CASCADE라 item 삭제 시 함께 제거)
+    await db.execute(
+        """
+        DELETE FROM KMS_ADMIN_KNOWLEDGE_ITEMS i
+        USING KMS_ADMIN_KNOWLEDGE_REFS r
+        WHERE r.item_id = i.item_id
+          AND r.ref_type = 'doc_id'
+          AND r.external_id = $1
+          AND r.workspace = $2
+        """,
+        doc_id,
+        effective_workspace,
+    )
     return response
 
 
@@ -2388,13 +2402,13 @@ async def run_faq_answer_action(
     )
     if action in {"publish", "archive", "vectors-rebuild"}:
         status_value = "ready" if action in {"publish", "vectors-rebuild"} else "archived"
-        enabled_value = action != "archive"
+        # 검색노출(enabled)은 카테고리(팀)별 독립 제어 → answer 공유 복제들의 enabled를 덮지 않는다.
+        # publish/archive는 status만 갱신(archive는 LightRAG answer 벡터 제거로 검색에서 제외됨).
         await db.execute(
             """
             UPDATE KMS_ADMIN_KNOWLEDGE_ITEMS i
             SET status = $2,
-                enabled = $3,
-                metadata = i.metadata || $4::jsonb,
+                metadata = i.metadata || $3::jsonb,
                 update_time = NOW()
             FROM KMS_ADMIN_KNOWLEDGE_REFS r
             WHERE r.item_id = i.item_id
@@ -2404,7 +2418,6 @@ async def run_faq_answer_action(
             """,
             answer_id,
             status_value,
-            enabled_value,
             json.dumps({"last_faq_action": action, "last_faq_action_response": response}),
         )
     return response
