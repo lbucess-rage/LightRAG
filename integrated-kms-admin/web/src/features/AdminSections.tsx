@@ -361,88 +361,87 @@ const knowledgeSources: Array<{
 }> = [
   {
     type: 'faq',
-    label: 'FAQ 답변',
+    label: 'FAQ 방식',
     workspace: 'FAQ',
-    description: '질문에 바로 노출할 승인형 답변을 추가합니다.',
+    description: '질문에 바로 보여줄 완성된 답변을 등록합니다. (LG·더본·KEVCS가 쓰는 기본 방식)',
     icon: HelpCircleIcon
   },
   {
     type: 'faq_source_draft',
     label: 'FAQ 소스 초안',
     workspace: 'FAQ',
-    description: '원문과 가이드 후보를 함께 저장해 검수 가능한 답변 초안을 만듭니다.',
+    description: "답변 초안을 원문·가이드와 함께 저장해, 검수 후 'FAQ 방식'으로 승인합니다. (승인 전 단계)",
     icon: BookOpenIcon
   },
   {
     type: 'text',
     label: '텍스트',
     workspace: 'KMS',
-    description: '짧은 본문 하나를 생성형 KMS 문서로 지식화합니다.',
+    description: '본문을 직접 입력해 문서 1건으로 등록합니다. (짧은 안내문을 손으로 넣을 때)',
     icon: FileTextIcon
   },
   {
     type: 'texts',
-    label: '여러 텍스트',
+    label: '텍스트 묶음',
     workspace: 'KMS',
-    description: '여러 본문을 한 번에 문서 후보로 등록합니다.',
+    description: "여러 본문을 줄 단위로 한꺼번에 등록합니다. ('텍스트'의 여러 건 버전)",
     icon: LayersIcon
   },
   {
     type: 'upload',
     label: '파일 업로드',
     workspace: 'KMS',
-    description: 'PDF, 문서, 텍스트 파일을 LightRAG upload 경로로 전송합니다.',
+    description: 'PDF·워드·txt 파일을 올리면 자동으로 문서화합니다.',
     icon: UploadIcon
   },
   {
     type: 'multimodal',
     label: '멀티모달 문서',
     workspace: 'KMS',
-    description: '이미지, 표, 수식이 포함된 문서를 multimodal 처리합니다.',
+    description: '표·그림·수식이 많은 문서(PDF 등)를 그림까지 분석해 등록합니다. (도표 많은 매뉴얼)',
     icon: DatabaseIcon
   },
   {
     type: 'quick_image',
     label: '이미지',
     workspace: 'KMS',
-    description: '이미지 1장을 VLM 기반 quick image 지식으로 등록합니다.',
+    description: '사진 1장을 AI가 설명을 붙여 등록합니다. (제품·화면 캡처 한 장)',
     icon: ImageIcon
   },
   {
     type: 'url',
     label: 'URL',
     workspace: 'KMS',
-    description: '웹 페이지 하나를 수집하여 문서와 멀티모달 후보로 지식화합니다.',
+    description: '웹페이지 주소 1개를 읽어와 문서로 등록합니다.',
     icon: LinkIcon
   },
   {
     type: 'url_batch',
     label: 'URL 묶음',
     workspace: 'KMS',
-    description: '여러 URL을 각각 비동기 작업으로 등록합니다.',
+    description: "여러 URL을 한꺼번에 등록합니다. ('URL'의 여러 건 버전)",
     icon: GlobeIcon
   },
   {
     type: 'board',
     label: '게시판 API',
     workspace: 'KMS',
-    description: '외부 게시판/목록 API를 field mapping으로 수집합니다.',
+    description: '외부 게시판/목록 API를 주기적으로 수집합니다. (상담AP 게시글 웹훅 연동)',
     icon: DatabaseIcon
   },
   {
     type: 'scan',
     label: '입력 폴더 스캔',
     workspace: 'KMS',
-    description: 'LightRAG input directory scan 작업을 실행합니다.',
+    description: '서버 입력 폴더에 넣어둔 파일들을 일괄 처리합니다. (대량 벌크 등록)',
     icon: FolderSearchIcon
   }
 ]
 
-const knowledgeSourceGroups: Array<{ label: string; types: KnowledgeSourceType[] }> = [
-  { label: '문서·텍스트', types: ['upload', 'text', 'texts', 'scan'] },
-  { label: '웹·연동', types: ['url', 'url_batch', 'board'] },
-  { label: '멀티모달', types: ['multimodal', 'quick_image'] },
-  { label: 'FAQ', types: ['faq', 'faq_source_draft'] }
+// 자주 쓰는 방식만 기본 노출하고, 나머지는 '고급 방식'으로 접는다(기능은 그대로, 보이기만 정리).
+const knowledgeSourceGroups: Array<{ label: string; types: KnowledgeSourceType[]; advanced?: boolean }> = [
+  { label: '자주 쓰는 방식', types: ['faq', 'multimodal', 'upload', 'texts', 'url_batch', 'board'] },
+  { label: '고급 방식', types: ['faq_source_draft', 'text', 'url', 'quick_image', 'scan'], advanced: true }
 ]
 
 const knowledgeSourceApiLabels: Record<KnowledgeSourceType, string> = {
@@ -1419,6 +1418,41 @@ function KnowledgeCreateModal({
   const requiresTitle = sourceType !== 'scan'
   const activeSource = knowledgeSources.find((source) => source.type === sourceType) || knowledgeSources[0]
   const ActiveIcon = activeSource.icon
+  const advancedSourceTypes = knowledgeSourceGroups.filter((group) => group.advanced).flatMap((group) => group.types)
+  const [showAdvanced, setShowAdvanced] = useState(advancedSourceTypes.includes(sourceType))
+  useEffect(() => {
+    if (advancedSourceTypes.includes(sourceType)) setShowAdvanced(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceType])
+  const renderSourceButton = (type: KnowledgeSourceType) => {
+    const source = knowledgeSources.find((item) => item.type === type)
+    if (!source) return null
+    const Icon = source.icon
+    const active = source.type === sourceType
+    return (
+      <button
+        key={source.type}
+        type="button"
+        className="row"
+        style={{
+          gap: 10,
+          width: '100%',
+          padding: '9px 10px',
+          borderRadius: 'var(--radius-md)',
+          border: `1px solid ${active ? 'var(--accent)' : 'transparent'}`,
+          background: active ? 'var(--accent-soft)' : 'transparent',
+          color: active ? 'var(--accent)' : 'var(--fg-primary-soft)',
+          cursor: 'pointer',
+          textAlign: 'left'
+        }}
+        onClick={() => setSourceType(source.type)}
+      >
+        <Icon className="size-4" style={{ color: active ? 'var(--accent)' : 'var(--fg-secondary)', flexShrink: 0 }} />
+        <span style={{ fontSize: 13, fontWeight: active ? 700 : 500 }}>{source.label}</span>
+        {source.workspace === 'FAQ' && <span className="badge blue">FAQ</span>}
+      </button>
+    )
+  }
   const showPromptFields = ['url', 'url_batch', 'board', 'quick_image', 'multimodal'].includes(sourceType)
   const fileAccept = sourceType === 'quick_image'
     ? 'image/*'
@@ -1451,42 +1485,50 @@ function KnowledgeCreateModal({
       <form id="knowledge-create-form" className="knowledge-create-form col" style={{ gap: 16 }} onSubmit={onSubmit}>
         <div className="grid" style={{ gridTemplateColumns: '232px minmax(0, 1fr)', gap: 18, alignItems: 'start' }}>
           <div className="col" style={{ gap: 2 }}>
-            {knowledgeSourceGroups.map((group) => (
+            {knowledgeSourceGroups.filter((group) => !group.advanced).map((group) => (
               <div key={group.label} className="col" style={{ gap: 2 }}>
                 <div className="eyebrow" style={{ fontSize: 9.5, padding: '10px 6px 4px' }}>
                   {group.label}
                 </div>
-                {group.types.map((type) => {
-                  const source = knowledgeSources.find((item) => item.type === type)
-                  if (!source) return null
-                  const Icon = source.icon
-                  const active = source.type === sourceType
-                  return (
-                    <button
-                      key={source.type}
-                      type="button"
-                      className="row"
-                      style={{
-                        gap: 10,
-                        width: '100%',
-                        padding: '9px 10px',
-                        borderRadius: 'var(--radius-md)',
-                        border: `1px solid ${active ? 'var(--accent)' : 'transparent'}`,
-                        background: active ? 'var(--accent-soft)' : 'transparent',
-                        color: active ? 'var(--accent)' : 'var(--fg-primary-soft)',
-                        cursor: 'pointer',
-                        textAlign: 'left'
-                      }}
-                      onClick={() => setSourceType(source.type)}
-                    >
-                      <Icon className="size-4" style={{ color: active ? 'var(--accent)' : 'var(--fg-secondary)', flexShrink: 0 }} />
-                      <span style={{ fontSize: 13, fontWeight: active ? 700 : 500 }}>{source.label}</span>
-                      {source.workspace === 'FAQ' && <span className="badge blue">FAQ</span>}
-                    </button>
-                  )
-                })}
+                {group.types.map(renderSourceButton)}
               </div>
             ))}
+            {knowledgeSourceGroups.some((group) => group.advanced) && (
+              <>
+                <button
+                  type="button"
+                  className="row"
+                  style={{
+                    gap: 6,
+                    width: '100%',
+                    padding: '9px 10px',
+                    marginTop: 6,
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px dashed var(--border-subtle)',
+                    background: 'transparent',
+                    color: 'var(--fg-secondary)',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    fontSize: 12
+                  }}
+                  onClick={() => setShowAdvanced((prev) => !prev)}
+                >
+                  <ChevronDownIcon className="size-4" style={{ transform: showAdvanced ? 'rotate(180deg)' : 'none', transition: 'transform .15s', flexShrink: 0 }} />
+                  <span style={{ fontWeight: 500 }}>고급 방식 {showAdvanced ? '접기' : '펼치기'}</span>
+                </button>
+                {showAdvanced &&
+                  knowledgeSourceGroups
+                    .filter((group) => group.advanced)
+                    .map((group) => (
+                      <div key={group.label} className="col" style={{ gap: 2 }}>
+                        <div className="eyebrow" style={{ fontSize: 9.5, padding: '10px 6px 4px' }}>
+                          {group.label}
+                        </div>
+                        {group.types.map(renderSourceButton)}
+                      </div>
+                    ))}
+              </>
+            )}
           </div>
 
           <div className="col" style={{ gap: 16, minWidth: 0 }}>
@@ -1542,11 +1584,11 @@ function KnowledgeCreateModal({
 
         {requiresBody && (
           <label className="field">
-            <span>{sourceType === 'texts' ? '여러 텍스트' : sourceType.startsWith('faq') ? '답변 본문' : '본문'}</span>
+            <span>{sourceType === 'texts' ? '텍스트 묶음' : sourceType.startsWith('faq') ? '답변 본문' : '본문'}</span>
             <Textarea
               value={form.body}
               onChange={(event) => updateForm({ body: event.target.value })}
-              placeholder={sourceType === 'texts' ? '여러 텍스트를 줄 단위로 입력' : '내용'}
+              placeholder={sourceType === 'texts' ? '여러 본문을 줄 단위로 입력 (한 줄 = 1건)' : '내용'}
               style={{ minHeight: 150 }}
             />
           </label>
@@ -4415,12 +4457,17 @@ export function KnowledgeManagement() {
           <div className="card-h">
             <div>
               <div className="t">지식화 방식</div>
-              <div className="sub">LightRAG의 문서·URL·게시판·멀티모달·FAQ API를 선택해 등록합니다.</div>
+              <div className="sub">자주 쓰는 방식입니다. 더 많은 방식은 ‘지식 추가’에서 ‘고급 방식’을 펼쳐 보세요.</div>
             </div>
           </div>
           <div className="card-b">
             <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
-              {knowledgeSources.map((source) => {
+              {knowledgeSourceGroups
+                .filter((group) => !group.advanced)
+                .flatMap((group) => group.types)
+                .map((type) => {
+                const source = knowledgeSources.find((item) => item.type === type)
+                if (!source) return null
                 const Icon = source.icon
                 return (
                   <button
