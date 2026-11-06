@@ -24,6 +24,9 @@ RECO_LLM_URL = os.getenv("RECO_LLM_URL", "")            # 예: http://127.0.0.1:
 RECO_LLM_MODEL = os.getenv("RECO_LLM_MODEL", "")
 RECO_LLM_THINKING = os.getenv("RECO_LLM_THINKING", "off").lower() == "on"
 RECO_TOPK = int(os.getenv("RECO_TOPK", "5"))
+# ★검색 입력 전처리: 긴 STT 원문을 서버 내부에서 쟁점 키워드로 요약(상담AP 무변경). env opt-in, 기본 off.
+RECO_PRESUMMARIZE = os.getenv("RECO_PRESUMMARIZE", "off").lower() == "on"
+RECO_PRESUM_MINLEN = int(os.getenv("RECO_PRESUM_MINLEN", "120"))
 
 _POOL = ThreadPoolExecutor(max_workers=6)
 _NOISE = re.compile(
@@ -74,6 +77,24 @@ async def _search(scope: WorkspaceScope, query: str, category_ids: list[str], mo
     return out
 
 
+def _summarize_query(stt: str) -> str:
+    """긴 STT 원문을 검색용 1줄 요약으로 전처리. 짧으면 원문 그대로."""
+    if not (RECO_LLM_URL and RECO_LLM_MODEL):
+        return stt
+    cust = "\n".join(l for l in stt.split("\n") if l.startswith("고객:")) or stt
+    if len(cust) < RECO_PRESUM_MINLEN:
+        return stt
+    prompt = (
+        "다음 콜센터 상담에서 고객이 제기한 민원/문의 쟁점을 모두 키워드로 뽑으세요. "
+        "여러 건이면 전부 나열(쉼표 구분). 상담 유형을 특정하는 명사 위주, 인사말/되묻기/잡담 제외.\n---\n%s\n---\n쟁점:"
+    ) % stt[:1800]
+    try:
+        out = _llm(prompt, max_tokens=90).strip()
+        return out or stt
+    except Exception:
+        return stt
+
+
 class RecommendRequest(BaseModel):
     stt: str = Field(..., description="통화 STT 전문")
     category_ids: list[str] = Field(default_factory=list, description="검색 범위(팀×방향)")
@@ -95,10 +116,11 @@ async def recommend(payload: RecommendRequest, client: dict = Depends(get_extern
         return {"mode": "none", "reason": "noise_call", "slots": []}
 
     # 1) 검색 융합: 전문 hybrid + graph (fusion5)
-    base = await _search(scope, stt, cats, "hybrid")
+    search_q = _summarize_query(stt) if RECO_PRESUMMARIZE else stt
+    base = await _search(scope, search_q, cats, "hybrid")
     if payload.mode == "fusion5":
         try:
-            graph = await _search(scope, stt, cats, "graph_hybrid")
+            graph = await _search(scope, search_q, cats, "graph_hybrid")
         except Exception:
             graph = []
     else:
