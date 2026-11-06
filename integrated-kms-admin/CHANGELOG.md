@@ -33,7 +33,7 @@
 - **10-15** `[data]` LG 검색 힌트(guidance) 보강 — 구어체/동의어 추가. 173건 frozen 대규모 벤치로 회귀 0 확인(구어체 매칭 22→88%). 범용 구어체는 이웃 가로채기로 제외(규율 확립).
 - **10-13~14** `[data]` LG 카테고리 연결 근본 해결 — 39유형 category NULL → 3팀(뷰티/외부몰/직영몰)×방향 복제 117건, FAQ 본문 HTML 포맷, 운영84 재현 구축(재시작 0), 식별자 lghh→lghnh 통일. 재발방지 감사도구(kms_category_audit.py).
 - **10-13** `[classifier]` LG 분류 taxonomy 운영 이관(재시작 0) — 5계층 119노드 + 벡터, reload API.
-- **10-13** `[admin]` FAQ content_format/display_policy를 admin API에 추가(POST /faq 기본 html) — LightRAG 직접수정 대신 통합어드민 경유. `84053480` (본부장님)
+- **10-13** `[admin]` FAQ content_format/display_policy를 admin API에 추가(POST /faq 기본 html) — LightRAG 직접수정 대신 통합어드민 경유. `84053480` (author=rage 로컬=우리 작성; 본부장님 GitHub(lbucess-rage) 원저작 아님 — 원저작 최종은 8-25 02410ba6)
 - **10-13~20** `[doc]` LG 시연 대본 2종(배송 중 파손 교환 / 단순 변심 반품) 작성 — 실측 기반, VOC 반영.
 - **10-02** `[admin][data]` 추천(/api/external/recommend) 통합어드민 운영 배포 + LG 요약(젠데스크식)·브랜드 21·실스크립트 6개 반영, 명세서 external 통일.
 
